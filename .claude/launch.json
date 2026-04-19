@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "content-hub",
+      "runtimeExecutable": "/Users/leon/Library/Application Support/reflex/bun/bin/bun",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    }
+  ]
+}

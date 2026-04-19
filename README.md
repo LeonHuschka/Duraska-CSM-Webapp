@@ -1,36 +1,125 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Content Hub
 
-## Getting Started
+Self-hosted content management webapp for scheduling social media content across AI-generated personas.
 
-First, run the development server:
+## Tech Stack
+
+- **Framework:** Next.js 14 (App Router, TypeScript)
+- **Styling:** Tailwind CSS + shadcn/ui
+- **Backend:** Supabase (Postgres, Auth, Storage)
+- **Forms:** react-hook-form + zod
+
+## Local Setup
+
+### Prerequisites
+
+- [Bun](https://bun.sh) or Node.js 18+
+- [Supabase CLI](https://supabase.com/docs/guides/cli)
+
+### 1. Clone and install
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd content-hub
+bun install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Start Supabase locally
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+supabase start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This outputs your local Supabase URL and anon key.
 
-## Learn More
+### 3. Configure environment
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+cp .env.local.example .env.local
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Edit `.env.local` with your Supabase URL and anon key from step 2.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 4. Apply migrations and seed data
 
-## Deploy on Vercel
+```bash
+supabase db reset
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+This applies all migrations in `supabase/migrations/` and runs `supabase/seed.sql`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Demo credentials:** `owner@demo.local` / `password123`
+
+### 5. Start the dev server
+
+```bash
+bun run dev
+```
+
+Visit [http://localhost:3000](http://localhost:3000).
+
+### 6. Promote your first real user to owner
+
+After signing up via the UI, run in the Supabase SQL Editor:
+
+```sql
+UPDATE public.user_profiles SET global_role = 'owner' WHERE id = '<your-user-id>';
+```
+
+## Deploy to Vercel
+
+1. Push to a Git repo
+2. Import in Vercel
+3. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` as environment variables
+4. Deploy
+
+## Adding a New Persona
+
+1. Log in as a global owner
+2. Navigate to the Dashboard
+3. Click "Create Persona" (or go to Settings > Personas)
+4. Fill in name, slug, brand color
+5. The creator is automatically added as the persona owner
+
+## Permission Model
+
+### Global roles (in `user_profiles.global_role`)
+
+- **owner** — bypasses all RLS checks, can create personas, manage everything
+- **manager / model / va** — only access personas they're members of
+
+### Persona roles (in `persona_members.role`)
+
+- **owner** — full access to persona settings, can manage members
+- **manager** — can manage content, cannot change persona settings
+- **model** — can upload assets and view requests
+- **va** — can create/edit requests, cannot delete
+
+### How permissions work
+
+Row Level Security (RLS) on every table. Helper functions `is_owner()`, `is_persona_member()`, and `get_persona_role()` run as `security definer` to avoid recursive RLS. The persona switcher stores the active persona ID in a cookie, and all queries are scoped to that persona.
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── (auth)/          # Login, signup, email confirmation
+│   ├── (app)/           # Protected app (dashboard, settings)
+│   └── layout.tsx       # Root layout with font + toaster
+├── components/
+│   ├── ui/              # shadcn/ui components
+│   ├── auth/            # Login/signup forms
+│   ├── layout/          # Sidebar, top bar, persona switcher
+│   └── personas/        # Persona settings, members, dialogs
+├── hooks/               # React context (persona provider)
+├── lib/
+│   ├── supabase/        # Client factories (browser, server, middleware)
+│   ├── types/           # Database types
+│   ├── validations/     # Zod schemas
+│   ├── constants.ts     # Shared constants
+│   └── utils.ts         # Utility functions
+└── middleware.ts         # Auth middleware
+supabase/
+├── migrations/          # SQL migrations (applied in order)
+└── seed.sql             # Demo data
+```
