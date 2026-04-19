@@ -69,9 +69,9 @@ export function SignupForm() {
         <Image
           src="/Duraska_logo_white.svg"
           alt="Duraska"
-          width={120}
-          height={120}
-          className="mx-auto mb-4 h-[120px] w-[120px]"
+          width={240}
+          height={240}
+          className="mx-auto mb-4 h-[240px] w-[240px]"
         />
         <h1 className="text-2xl font-semibold tracking-tight">Create an account</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
