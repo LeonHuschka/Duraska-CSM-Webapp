@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@14 . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm)",
+      "Bash(npm --version)",
+      "Bash(export PATH=\"/usr/local/bin:/opt/homebrew/bin:$HOME/.nvm/versions/node/*/bin:$PATH\")",
+      "Bash(bun --version)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(brew list *)",
+      "Bash(bunx create-next-app@14 . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-bun)",
+      "Bash(export PATH=\"/Users/leon/Library/Application Support/reflex/bun/bin:$PATH\")",
+      "Bash(bunx --help)",
+      "Bash(bun x *)",
+      "Bash(export BUN_INSTALL=\"$HOME/.bun\")",
+      "Read(//Users/leon/Desktop/**)",
+      "Bash(rm -rf fansly_CSM)",
+      "Bash(mkdir fansly-csm *)",
+      "Bash(cp -a /Users/leon/Desktop/content-hub/. /Users/leon/Desktop/fansly_CSM/)",
+      "Bash(rm -rf /Users/leon/Desktop/content-hub)",
+      "Bash(bun add *)"
+    ]
+  }
+}
