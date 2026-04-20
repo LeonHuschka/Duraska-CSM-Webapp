@@ -111,6 +111,22 @@ export async function updateRequestPosition(
   const supabase = await createClient();
   await getPersonaId();
 
+  // If moving away from "scheduled", delete the associated schedule slot
+  if (newStatus && newStatus !== "scheduled") {
+    const { data: currentRequest } = await supabase
+      .from("content_requests")
+      .select("status")
+      .eq("id", requestId)
+      .single();
+
+    if (currentRequest?.status === "scheduled") {
+      await supabase
+        .from("schedule_slots")
+        .delete()
+        .eq("request_id", requestId);
+    }
+  }
+
   const { error } = await supabase
     .from("content_requests")
     .update({
@@ -122,6 +138,7 @@ export async function updateRequestPosition(
 
   if (error) throw new Error(error.message);
   revalidatePath("/requests");
+  revalidatePath("/schedule");
 }
 
 export async function deleteRequest(requestId: string) {
