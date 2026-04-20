@@ -9,6 +9,7 @@ import {
   useSensors,
   useDroppable,
   useDraggable,
+  closestCenter,
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
@@ -81,11 +82,17 @@ const TIMEZONE_OPTIONS = [
   { label: "Local", offset: -(new Date().getTimezoneOffset() / 60) },
 ];
 
-function utcTimeToLocal(utcTime: string, offsetHours: number): string {
+function utcTimeToLocal(utcTime: string, offsetHours: number, use12h = false): string {
   const [h, m] = utcTime.split(":").map(Number);
   let localH = h + offsetHours;
   if (localH < 0) localH += 24;
   if (localH >= 24) localH -= 24;
+
+  if (use12h) {
+    const period = localH >= 12 ? "PM" : "AM";
+    const h12 = localH === 0 ? 12 : localH > 12 ? localH - 12 : localH;
+    return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+  }
   return `${String(localH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
@@ -192,7 +199,6 @@ function DroppableTimeslot({
   linkedRequest,
   asset,
   platform,
-  isOver,
   onUnschedule,
 }: {
   id: string;
@@ -201,10 +207,9 @@ function DroppableTimeslot({
   linkedRequest: Pick<ContentRequest, "id" | "title" | "status"> | null;
   asset: ScheduleAsset | null;
   platform: string;
-  isOver: boolean;
   onUnschedule: (slotId: string) => void;
 }) {
-  const { setNodeRef } = useDroppable({ id });
+  const { setNodeRef, isOver } = useDroppable({ id });
   const isVideo = asset?.mime_type?.startsWith("video/");
   const isImage = asset?.mime_type?.startsWith("image/");
 
@@ -312,6 +317,7 @@ export function ScheduleView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [use12h, setUse12h] = useState(false);
 
   // Detect local timezone offset
   const localOffset = -(new Date().getTimezoneOffset() / 60);
@@ -326,12 +332,14 @@ export function ScheduleView({
   // Map timeslots to display times
   const dailyTimeslots = useMemo(() => {
     return timeslots
-      .map((ts) => ({
-        ...ts,
-        displayTime: utcTimeToLocal(ts.time_utc, tzOffset),
-      }))
-      .sort((a, b) => a.displayTime.localeCompare(b.displayTime));
-  }, [timeslots, tzOffset]);
+      .map((ts) => {
+        // Always sort by 24h key so order is stable
+        const sortKey = utcTimeToLocal(ts.time_utc, tzOffset, false);
+        const displayTime = utcTimeToLocal(ts.time_utc, tzOffset, use12h);
+        return { ...ts, displayTime, sortKey };
+      })
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  }, [timeslots, tzOffset, use12h]);
 
   // Find existing slots for the selected day
   const slotsByTimeslot = useMemo(() => {
@@ -499,6 +507,14 @@ export function ScheduleView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 px-2.5 text-xs font-mono"
+            onClick={() => setUse12h((v) => !v)}
+          >
+            {use12h ? "12h" : "24h"}
+          </Button>
           <Select
             value={String(tzOffset)}
             onValueChange={(v) => setTzOffset(Number(v))}
@@ -604,6 +620,7 @@ export function ScheduleView({
           ) : (
             <DndContext
               sensors={sensors}
+              collisionDetection={closestCenter}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
             >
@@ -628,13 +645,7 @@ export function ScheduleView({
                   ) : (
                     <div className="space-y-2">
                       {availableRequests.map((req) => (
-                        <div
-                          key={req.id}
-                          data-request-id={req.id}
-                          id={req.id}
-                        >
-                          <DraggableRequestWrapper request={req} />
-                        </div>
+                        <DraggableRequestWrapper key={req.id} request={req} />
                       ))}
                     </div>
                   )}
@@ -655,12 +666,11 @@ export function ScheduleView({
                       <DroppableTimeslot
                         key={ts.id}
                         id={ts.id}
-                        timeLabel={`${ts.displayTime} ${ts.label ? `· ${ts.label}` : ""}`}
+                        timeLabel={ts.displayTime}
                         slot={slot}
                         linkedRequest={linkedRequest}
                         asset={asset}
                         platform={ts.platform}
-                        isOver={false}
                         onUnschedule={handleUnschedule}
                       />
                     );

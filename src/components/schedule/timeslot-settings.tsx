@@ -77,7 +77,6 @@ export function TimeslotSettings({
 
   // New timeslot form state
   const [newTime, setNewTime] = useState("12:00");
-  const [newLabel, setNewLabel] = useState("");
   const [newPlatform, setNewPlatform] = useState("fansly");
 
   const sortedTimeslots = [...timeslots].sort((a, b) => {
@@ -92,10 +91,9 @@ export function TimeslotSettings({
 
     startTransition(async () => {
       try {
-        await addTimeslot(utcTime, newLabel || undefined, newPlatform);
+        await addTimeslot(utcTime, undefined, newPlatform);
         toast.success("Timeslot added");
         setNewTime("12:00");
-        setNewLabel("");
         setNewPlatform("fansly");
         router.refresh();
       } catch {
@@ -112,17 +110,6 @@ export function TimeslotSettings({
         router.refresh();
       } catch {
         toast.error("Failed to remove timeslot");
-      }
-    });
-  };
-
-  const handleUpdateLabel = (id: string, label: string) => {
-    startTransition(async () => {
-      try {
-        await updateTimeslot(id, { label: label || undefined });
-        router.refresh();
-      } catch {
-        toast.error("Failed to update timeslot");
       }
     });
   };
@@ -192,18 +179,6 @@ export function TimeslotSettings({
                     }}
                   />
 
-                  {/* Label input */}
-                  <Input
-                    defaultValue={ts.label ?? ""}
-                    placeholder="Label"
-                    className="flex-1 h-8 text-xs"
-                    onBlur={(e) => {
-                      if (e.target.value !== (ts.label ?? "")) {
-                        handleUpdateLabel(ts.id, e.target.value);
-                      }
-                    }}
-                  />
-
                   {/* Platform selector */}
                   <Select
                     defaultValue={ts.platform}
@@ -260,17 +235,6 @@ export function TimeslotSettings({
                 value={newTime}
                 onChange={(e) => setNewTime(e.target.value)}
                 className="w-[100px] h-8 text-xs"
-              />
-            </div>
-            <div className="flex-1 space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Label (optional)
-              </Label>
-              <Input
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="e.g. Morning Post"
-                className="h-8 text-xs"
               />
             </div>
             <div className="space-y-1">
