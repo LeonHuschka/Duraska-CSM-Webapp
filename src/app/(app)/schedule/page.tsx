@@ -18,22 +18,37 @@ export default async function SchedulePage() {
     );
   }
 
-  const [slotsResult, requestsResult] = await Promise.all([
-    supabase
-      .from("schedule_slots")
-      .select("*")
-      .eq("persona_id", personaId)
-      .order("scheduled_for", { ascending: true }),
-    supabase
-      .from("content_requests")
-      .select("id, title, status")
-      .eq("persona_id", personaId)
-      .order("title", { ascending: true }),
-  ]);
+  const [slotsResult, requestsResult, timeslotsResult, editedRequestsResult] =
+    await Promise.all([
+      supabase
+        .from("schedule_slots")
+        .select("*")
+        .eq("persona_id", personaId)
+        .order("scheduled_for", { ascending: true }),
+      supabase
+        .from("content_requests")
+        .select("id, title, status")
+        .eq("persona_id", personaId)
+        .order("title", { ascending: true }),
+      supabase
+        .from("posting_timeslots")
+        .select("*")
+        .eq("persona_id", personaId)
+        .order("position", { ascending: true }),
+      supabase
+        .from("content_requests")
+        .select("id, title, status, priority, content_type_id")
+        .eq("persona_id", personaId)
+        .eq("status", "edited")
+        .order("updated_at", { ascending: false }),
+    ]);
 
   const slots = slotsResult.data ?? [];
   const requests = requestsResult.data ?? [];
+  const timeslots = timeslotsResult.data ?? [];
+  const editedRequests = editedRequestsResult.data ?? [];
 
+  // Fetch assets for slots that have linked requests
   const requestIds = Array.from(
     new Set(slots.map((s) => s.request_id).filter(Boolean) as string[])
   );
@@ -80,6 +95,8 @@ export default async function SchedulePage() {
       slots={slots}
       requests={requests}
       assets={assetsWithUrls}
+      timeslots={timeslots}
+      editedRequests={editedRequests}
     />
   );
 }

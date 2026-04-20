@@ -325,6 +325,44 @@ export type Database = {
           },
         ];
       };
+      posting_timeslots: {
+        Row: {
+          id: string;
+          persona_id: string;
+          time_utc: string;
+          label: string | null;
+          platform: string;
+          position: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          time_utc: string;
+          label?: string | null;
+          platform?: string;
+          position?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          time_utc?: string;
+          label?: string | null;
+          platform?: string;
+          position?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "posting_timeslots_persona_id_fkey";
+            columns: ["persona_id"];
+            isOneToOne: false;
+            referencedRelation: "personas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       activity_log: {
         Row: {
           id: string;
@@ -399,4 +437,6 @@ export type ContentType = Database["public"]["Tables"]["content_types"]["Row"];
 export type SlotStatus = "planned" | "ready" | "posted" | "failed";
 export type Platform = "instagram" | "fansly" | "tiktok" | "other";
 
+export type PostingTimeslot =
+  Database["public"]["Tables"]["posting_timeslots"]["Row"];
 export type PersonaWithRole = Persona & { role: PersonaRole };
