@@ -197,22 +197,21 @@ export async function seedDefaultTimeslots() {
 
   if ((count ?? 0) > 0) return;
 
-  // Default times in UTC (converted from CET: +1 in winter, +2 in summer)
-  // CET times: 5:00, 7:00, 9:00, 17:00, 23:00
-  // UTC equivalents (CET = UTC+1 standard): 04:00, 06:00, 08:00, 16:00, 22:00
+  // Default times in UTC (converted from CEST = UTC+2)
+  // 5am, 7am, 8am, 5pm, 11pm CEST
   const defaults = [
-    { time_utc: "04:00:00", label: "Early Morning" },
-    { time_utc: "06:00:00", label: "Morning" },
-    { time_utc: "08:00:00", label: "Mid Morning" },
-    { time_utc: "16:00:00", label: "Afternoon" },
-    { time_utc: "22:00:00", label: "Night" },
+    { time_utc: "03:00:00" },
+    { time_utc: "05:00:00" },
+    { time_utc: "06:00:00" },
+    { time_utc: "15:00:00" },
+    { time_utc: "21:00:00" },
   ];
 
   const { error } = await supabase.from("posting_timeslots").insert(
     defaults.map((d, i) => ({
       persona_id: personaId,
       time_utc: d.time_utc,
-      label: d.label,
+      label: null,
       platform: "fansly",
       position: i,
     }))
