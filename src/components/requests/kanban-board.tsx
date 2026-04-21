@@ -38,9 +38,10 @@ const COLUMNS = [
 interface KanbanBoardProps {
   requests: ContentRequest[];
   contentTypes: ContentType[];
+  personaId: string;
 }
 
-function SortableCard({ request }: { request: ContentRequest }) {
+function SortableCard({ request, personaId }: { request: ContentRequest; personaId: string }) {
   const {
     attributes,
     listeners,
@@ -58,7 +59,7 @@ function SortableCard({ request }: { request: ContentRequest }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <RequestCard request={request} />
+      <RequestCard request={request} personaId={personaId} />
     </div>
   );
 }
@@ -68,11 +69,13 @@ function DroppableColumn({
   items,
   isOver,
   action,
+  personaId,
 }: {
   column: (typeof COLUMNS)[number];
   items: ContentRequest[];
   isOver: boolean;
   action?: React.ReactNode;
+  personaId: string;
 }) {
   const { setNodeRef } = useDroppable({ id: column.id });
   const itemIds = useMemo(() => items.map((i) => i.id), [items]);
@@ -106,7 +109,7 @@ function DroppableColumn({
             </div>
           ) : (
             items.map((request) => (
-              <SortableCard key={request.id} request={request} />
+              <SortableCard key={request.id} request={request} personaId={personaId} />
             ))
           )}
         </div>
@@ -115,7 +118,7 @@ function DroppableColumn({
   );
 }
 
-export function KanbanBoard({ requests, contentTypes }: KanbanBoardProps) {
+export function KanbanBoard({ requests, contentTypes, personaId }: KanbanBoardProps) {
   const [items, setItems] = useState<ContentRequest[]>(requests);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
@@ -293,6 +296,7 @@ export function KanbanBoard({ requests, contentTypes }: KanbanBoardProps) {
               column={column}
               items={column.items}
               isOver={overColumnId === column.id}
+              personaId={personaId}
               action={
                 column.id === "edited" ? (
                   <CreateEditedDialog contentTypes={contentTypes} />

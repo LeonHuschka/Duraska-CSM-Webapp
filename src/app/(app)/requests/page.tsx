@@ -45,5 +45,5 @@ export default async function RequestsPage() {
   const requests = (requestsResult.data ?? []) as ContentRequest[];
   const contentTypes = (typesResult.data ?? []) as ContentType[];
 
-  return <KanbanBoard requests={requests} contentTypes={contentTypes} />;
+  return <KanbanBoard requests={requests} contentTypes={contentTypes} personaId={personaId} />;
 }

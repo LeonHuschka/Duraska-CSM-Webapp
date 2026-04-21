@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -9,6 +9,7 @@ import {
   Pencil,
   Trash2,
   Calendar,
+  Upload,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,8 @@ import {
   updateRequestStatus,
   deleteRequest,
 } from "@/app/(app)/requests/actions";
+import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
+import { createClient } from "@/lib/supabase/client";
 import type { ContentRequest } from "@/lib/types/database";
 
 const STATUS_FLOW = ["requested", "shooted", "edited", "scheduled", "posted"];
@@ -47,13 +50,74 @@ function formatDate(dateStr: string): string {
 
 interface RequestCardProps {
   request: ContentRequest;
+  personaId?: string;
 }
 
-export function RequestCard({ request }: RequestCardProps) {
+export function RequestCard({ request, personaId }: RequestCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [fileDragOver, setFileDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const nextStatus = getNextStatus(request.status);
+
+  const handleFileDrop = useCallback(
+    async (files: FileList) => {
+      if (!personaId) return;
+      const fileArray = Array.from(files).filter(
+        (f) => f.type.startsWith("video/") || f.type.startsWith("image/") || f.name.toLowerCase().endsWith(".mov")
+      );
+      if (fileArray.length === 0) {
+        toast.error("Only image/video files supported");
+        return;
+      }
+
+      setUploading(true);
+      const supabase = createClient();
+      let completed = 0;
+
+      try {
+        for (const file of fileArray) {
+          const uuid = crypto.randomUUID();
+          const filePath = `personas/${personaId}/requests/${request.id}/edited/${uuid}_${file.name}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("content-assets")
+            .upload(filePath, file);
+
+          if (uploadError) {
+            toast.error(`Failed: ${file.name}`);
+            continue;
+          }
+
+          try {
+            await createAssetRecord({
+              request_id: request.id,
+              stage: "edited",
+              file_path: filePath,
+              file_name: file.name,
+              mime_type: file.type,
+              size_bytes: file.size,
+            });
+            completed++;
+          } catch {
+            await supabase.storage.from("content-assets").remove([filePath]);
+            toast.error(`Record failed: ${file.name}`);
+          }
+        }
+
+        if (completed > 0) {
+          toast.success(`${completed} file${completed > 1 ? "s" : ""} uploaded to ${request.title}`);
+          router.refresh();
+        }
+      } catch {
+        toast.error("Upload failed");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [personaId, request.id, request.title, router]
+  );
 
   const handleMoveNext = () => {
     if (!nextStatus) return;
@@ -84,9 +148,46 @@ export function RequestCard({ request }: RequestCardProps) {
 
   return (
     <div
-      className="group cursor-pointer rounded-xl border border-border/50 bg-card p-3.5 transition-all duration-200 hover:border-border hover:bg-accent/30"
-      onClick={() => router.push(`/requests/${request.id}`)}
+      className={`group cursor-pointer rounded-xl border p-3.5 transition-all duration-200 ${
+        fileDragOver
+          ? "border-primary bg-primary/10 border-dashed"
+          : uploading
+            ? "border-blue-500/50 bg-blue-500/5"
+            : "border-border/50 bg-card hover:border-border hover:bg-accent/30"
+      }`}
+      onClick={() => !uploading && router.push(`/requests/${request.id}`)}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          e.stopPropagation();
+          setFileDragOver(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        setFileDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          e.stopPropagation();
+          setFileDragOver(false);
+          handleFileDrop(e.dataTransfer.files);
+        }
+      }}
     >
+      {fileDragOver ? (
+        <div className="flex items-center justify-center gap-2 py-2">
+          <Upload className="h-4 w-4 text-primary" />
+          <span className="text-xs font-medium text-primary">Drop to upload</span>
+        </div>
+      ) : uploading ? (
+        <div className="flex items-center justify-center gap-2 py-2">
+          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+          <span className="text-xs font-medium text-blue-400">Uploading...</span>
+        </div>
+      ) : (
+      <>
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-medium leading-snug line-clamp-2">
           {request.title}
@@ -154,6 +255,8 @@ export function RequestCard({ request }: RequestCardProps) {
           </span>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
