@@ -685,8 +685,8 @@ export function ScheduleView({
                   )}
                 </div>
 
-                {/* Right panel: Timeslot columns left to right by time */}
-                <div className="flex flex-1 gap-3 overflow-x-auto pb-4">
+                {/* Right panel: Timeslot columns left to right, wrapping to new rows */}
+                <div className="flex flex-1 flex-wrap gap-3 pb-4">
                   {dailyTimeslots.map((ts) => {
                     const slot = slotsByTimeslot[ts.id] ?? null;
                     const linkedRequest = slot?.request_id
