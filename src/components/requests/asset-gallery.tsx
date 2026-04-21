@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2, Film, Image as ImageIcon } from "lucide-react";
+import { Trash2, Film, Image as ImageIcon, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AssetWithUrl } from "@/app/(app)/requests/[id]/page";
 
@@ -66,10 +66,9 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
                 controls
                 playsInline
                 preload="metadata"
+                src={`${asset.signedUrl}#t=0.001`}
                 className="h-full w-full rounded-t-xl object-contain bg-black"
-              >
-                <source src={asset.signedUrl} type={asset.mime_type === "video/quicktime" ? "video/mp4" : (asset.mime_type ?? "video/mp4")} />
-              </video>
+              />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -88,16 +87,34 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
               )}
             </div>
 
-            {/* Delete button */}
-            <Button
-              variant="destructive"
-              size="icon"
-              className="absolute right-2 top-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
-              onClick={() => handleDelete(asset.id)}
-              disabled={deletingId === asset.id}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {/* Action buttons */}
+            <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <a
+                href={asset.signedUrl}
+                download={asset.file_name}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="h-7 w-7"
+                  asChild
+                >
+                  <span>
+                    <Download className="h-3.5 w-3.5" />
+                  </span>
+                </Button>
+              </a>
+              <Button
+                variant="destructive"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => handleDelete(asset.id)}
+                disabled={deletingId === asset.id}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
 
           {/* Info */}
