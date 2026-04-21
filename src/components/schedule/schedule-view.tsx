@@ -143,13 +143,6 @@ function formatDateHeading(date: Date): string {
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const STATUS_STYLES: Record<string, string> = {
-  planned: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  ready: "bg-green-500/15 text-green-400 border-green-500/30",
-  posted: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  failed: "bg-red-500/15 text-red-400 border-red-500/30",
-};
-
 const PLATFORM_COLORS: Record<string, string> = {
   instagram: "bg-pink-500",
   fansly: "bg-blue-500",
@@ -191,7 +184,7 @@ function DraggableRequest({
   );
 }
 
-// Droppable timeslot
+// Droppable timeslot — vertical column card
 function DroppableTimeslot({
   id,
   timeLabel,
@@ -216,7 +209,7 @@ function DroppableTimeslot({
   return (
     <div
       ref={setNodeRef}
-      className={`relative rounded-xl border transition-all duration-200 ${
+      className={`flex w-52 min-w-[208px] shrink-0 flex-col rounded-xl border transition-all duration-200 ${
         slot
           ? "border-border/50 bg-card"
           : isOver
@@ -226,47 +219,38 @@ function DroppableTimeslot({
     >
       {/* Time header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-        <div className="flex items-center gap-2">
-          <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-sm font-medium">{timeLabel}</span>
+        <div className="flex items-center gap-1.5">
+          <Clock className="h-3 w-3 text-muted-foreground" />
+          <span className="text-sm font-semibold">{timeLabel}</span>
+        </div>
+        <div className="flex items-center gap-1">
           <span
             className={`h-2 w-2 rounded-full ${PLATFORM_COLORS[platform] ?? PLATFORM_COLORS.other}`}
           />
-          <span className="text-[10px] text-muted-foreground capitalize">
-            {platform}
-          </span>
-        </div>
-        {slot && (
-          <div className="flex items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className={`text-[10px] capitalize ${STATUS_STYLES[slot.status] ?? ""}`}
-            >
-              {slot.status}
-            </Badge>
+          {slot && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-destructive"
+              className="h-5 w-5 text-muted-foreground hover:text-destructive"
               onClick={() => onUnschedule(slot.id)}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3 w-3" />
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Content */}
       {slot && linkedRequest ? (
-        <div className="flex items-center gap-3 p-3">
+        <div className="flex flex-col p-2">
           {asset && (
-            <div className="relative h-20 w-[45px] shrink-0 overflow-hidden rounded-md bg-black">
+            <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg bg-black">
               {isVideo ? (
                 <video
+                  controls
                   playsInline
-                  muted
                   preload="metadata"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain"
                 >
                   <source
                     src={asset.signedUrl}
@@ -282,24 +266,32 @@ function DroppableTimeslot({
                 <img
                   src={asset.signedUrl}
                   alt={asset.file_name}
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain"
                 />
               ) : null}
             </div>
           )}
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium truncate">{linkedRequest.title}</p>
-            {slot.caption && (
-              <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1 whitespace-pre-wrap">
-                {slot.caption}
-              </p>
-            )}
-          </div>
+          <p className="mt-2 text-xs font-medium truncate px-0.5">{linkedRequest.title}</p>
+          {slot.caption && (
+            <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2 whitespace-pre-wrap px-0.5">
+              {slot.caption}
+            </p>
+          )}
+          {asset && (
+            <a
+              href={asset.signedUrl}
+              download={asset.file_name}
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Download
+            </a>
+          )}
         </div>
       ) : (
-        <div className="flex items-center justify-center py-6 px-3">
-          <p className="text-xs text-muted-foreground/50">
-            {isOver ? "Drop here to schedule" : "Drag a request here"}
+        <div className="flex flex-1 items-center justify-center py-12 px-3">
+          <p className="text-[11px] text-muted-foreground/50 text-center">
+            {isOver ? "Drop here" : "Drag request here"}
           </p>
         </div>
       )}
@@ -626,58 +618,56 @@ export function ScheduleView({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
             >
-              <div className="flex gap-4">
-                {/* Left panel: available edited requests */}
-                <div className="w-64 shrink-0 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Ready to schedule
-                    </h3>
-                    <Badge variant="secondary" className="text-[10px]">
-                      {availableRequests.length}
-                    </Badge>
+              {/* Timeslot columns: left to right by time */}
+              <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 md:-mx-6 md:px-6">
+                {dailyTimeslots.map((ts) => {
+                  const slot = slotsByTimeslot[ts.id] ?? null;
+                  const linkedRequest = slot?.request_id
+                    ? requests.find((r) => r.id === slot.request_id) ?? null
+                    : null;
+                  const asset = slot?.request_id
+                    ? assetsByRequest[slot.request_id] ?? null
+                    : null;
+
+                  return (
+                    <DroppableTimeslot
+                      key={ts.id}
+                      id={ts.id}
+                      timeLabel={ts.displayTime}
+                      slot={slot}
+                      linkedRequest={linkedRequest}
+                      asset={asset}
+                      platform={ts.platform}
+                      onUnschedule={handleUnschedule}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* Bottom panel: available edited requests */}
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Ready to schedule
+                  </h3>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {availableRequests.length}
+                  </Badge>
+                </div>
+
+                {availableRequests.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border/30 p-4 text-center">
+                    <p className="text-[11px] text-muted-foreground/60">
+                      No edited requests available
+                    </p>
                   </div>
-
-                  {availableRequests.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-border/30 p-4 text-center">
-                      <p className="text-[11px] text-muted-foreground/60">
-                        No edited requests available
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {availableRequests.map((req) => (
-                        <DraggableRequestWrapper key={req.id} request={req} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Right: timeslot grid */}
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {dailyTimeslots.map((ts) => {
-                    const slot = slotsByTimeslot[ts.id] ?? null;
-                    const linkedRequest = slot?.request_id
-                      ? requests.find((r) => r.id === slot.request_id) ?? null
-                      : null;
-                    const asset = slot?.request_id
-                      ? assetsByRequest[slot.request_id] ?? null
-                      : null;
-
-                    return (
-                      <DroppableTimeslot
-                        key={ts.id}
-                        id={ts.id}
-                        timeLabel={ts.displayTime}
-                        slot={slot}
-                        linkedRequest={linkedRequest}
-                        asset={asset}
-                        platform={ts.platform}
-                        onUnschedule={handleUnschedule}
-                      />
-                    );
-                  })}
-                </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableRequests.map((req) => (
+                      <DraggableRequestWrapper key={req.id} request={req} />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <DragOverlay>

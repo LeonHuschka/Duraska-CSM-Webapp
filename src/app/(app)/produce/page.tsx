@@ -19,15 +19,35 @@ export default async function ProducePage() {
     );
   }
 
+  // Get user role
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: membership } = await supabase
+    .from("persona_members")
+    .select("role")
+    .eq("persona_id", personaId)
+    .eq("user_id", user?.id ?? "")
+    .single();
+
+  const role = (membership?.role ?? "va") as string;
+  const isModel = role === "model";
+
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+  // Models only see "requested", others see requested + shooted + edited
+  const statusFilter = isModel
+    ? ["requested"]
+    : ["requested", "shooted", "edited"];
 
   const [requestsResult, typesResult, shotLastWeekResult] = await Promise.all([
     supabase
       .from("content_requests")
       .select("*")
       .eq("persona_id", personaId)
-      .eq("status", "requested")
+      .in("status", statusFilter)
       .order("created_at", { ascending: false }),
     supabase
       .from("content_types")
@@ -53,6 +73,7 @@ export default async function ProducePage() {
       contentTypes={contentTypes}
       openCount={openCount}
       shotLastWeek={shotLastWeek}
+      isModel={isModel}
     />
   );
 }

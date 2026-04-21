@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -73,7 +73,7 @@ export function TimeslotSettings({
   tzOffset,
 }: TimeslotSettingsProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [isPending] = useState(false);
 
   // New timeslot form state
   const [newTime, setNewTime] = useState("12:00");
@@ -85,56 +85,48 @@ export function TimeslotSettings({
     return aLocal.localeCompare(bLocal);
   });
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!newTime) return;
     const utcTime = localTimeToUtc(newTime, tzOffset);
 
-    startTransition(async () => {
-      try {
-        await addTimeslot(utcTime, undefined, newPlatform);
-        toast.success("Timeslot added");
-        setNewTime("12:00");
-        setNewPlatform("fansly");
-        router.refresh();
-      } catch {
-        toast.error("Failed to add timeslot");
-      }
-    });
+    try {
+      await addTimeslot(utcTime, undefined, newPlatform);
+      toast.success("Timeslot added");
+      setNewTime("12:00");
+      setNewPlatform("fansly");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add timeslot");
+    }
   };
 
-  const handleRemove = (id: string) => {
-    startTransition(async () => {
-      try {
-        await removeTimeslot(id);
-        toast.success("Timeslot removed");
-        router.refresh();
-      } catch {
-        toast.error("Failed to remove timeslot");
-      }
-    });
+  const handleRemove = async (id: string) => {
+    try {
+      await removeTimeslot(id);
+      toast.success("Timeslot removed");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove timeslot");
+    }
   };
 
-  const handleUpdatePlatform = (id: string, platform: string) => {
-    startTransition(async () => {
-      try {
-        await updateTimeslot(id, { platform });
-        router.refresh();
-      } catch {
-        toast.error("Failed to update timeslot");
-      }
-    });
+  const handleUpdatePlatform = async (id: string, platform: string) => {
+    try {
+      await updateTimeslot(id, { platform });
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update timeslot");
+    }
   };
 
-  const handleUpdateTime = (id: string, localTime: string) => {
+  const handleUpdateTime = async (id: string, localTime: string) => {
     const utcTime = localTimeToUtc(localTime, tzOffset);
-    startTransition(async () => {
-      try {
-        await updateTimeslot(id, { time_utc: utcTime });
-        router.refresh();
-      } catch {
-        toast.error("Failed to update timeslot");
-      }
-    });
+    try {
+      await updateTimeslot(id, { time_utc: utcTime });
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update timeslot");
+    }
   };
 
   return (

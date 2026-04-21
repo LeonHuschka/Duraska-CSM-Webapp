@@ -43,6 +43,7 @@ interface ProduceViewProps {
   contentTypes: ContentType[];
   openCount: number;
   shotLastWeek: number;
+  isModel?: boolean;
 }
 
 function formatDate(dateStr: string): string {
@@ -69,8 +70,10 @@ export function ProduceView({
   contentTypes,
   openCount,
   shotLastWeek,
+  isModel = false,
 }: ProduceViewProps) {
   const [sortBy, setSortBy] = useState<SortKey>("due_date");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
 
   const typeMap = useMemo(() => {
@@ -81,11 +84,14 @@ export function ProduceView({
 
   const filtered = useMemo(() => {
     let items = requests;
+    if (!isModel && filterStatus !== "all") {
+      items = items.filter((r) => r.status === filterStatus);
+    }
     if (filterType !== "all") {
       items = items.filter((r) => r.content_type_id === filterType);
     }
     return items;
-  }, [requests, filterType]);
+  }, [requests, filterStatus, filterType, isModel]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -186,6 +192,20 @@ export function ProduceView({
           </SelectContent>
         </Select>
 
+        {!isModel && (
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-[130px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="requested">Requested</SelectItem>
+              <SelectItem value="shooted">Shooted</SelectItem>
+              <SelectItem value="edited">Edited</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+
         {contentTypes.length > 0 && (
           <Select value={filterType} onValueChange={setFilterType}>
             <SelectTrigger className="w-[130px] h-8 text-xs">
@@ -215,8 +235,8 @@ export function ProduceView({
           </div>
           <h3 className="mt-4 text-sm font-medium">No requests to show</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {filterType !== "all"
-              ? "Try adjusting your filter."
+            {filterStatus !== "all" || filterType !== "all"
+              ? "Try adjusting your filters."
               : "All caught up!"}
           </p>
         </div>
