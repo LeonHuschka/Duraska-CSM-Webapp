@@ -363,15 +363,32 @@ export function ScheduleView({
     return map;
   }, [assets]);
 
-  // Filter out already-scheduled requests
+  // Build map: request_id -> which platform categories it's already scheduled to
+  const scheduledPlatformsMap = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const slot of slots) {
+      if (slot.request_id) {
+        if (!map[slot.request_id]) map[slot.request_id] = new Set();
+        map[slot.request_id].add(slot.platform);
+      }
+    }
+    return map;
+  }, [slots]);
+
+  // Filter pool: NSFW gone after any use, SFW gone after both fansly + non-fansly
   const availableRequests = useMemo(() => {
-    const scheduledIds = new Set(
-      Object.values(slotsByTimeslot)
-        .map((s) => s.request_id)
-        .filter(Boolean)
-    );
-    return editedRequests.filter((r) => !scheduledIds.has(r.id));
-  }, [editedRequests, slotsByTimeslot]);
+    return editedRequests.filter((r) => {
+      const platforms = scheduledPlatformsMap[r.id];
+      if (!platforms) return true; // not scheduled anywhere
+
+      if (r.is_nsfw) return false; // NSFW: one-time use
+
+      // SFW: keep in pool unless it covers both fansly AND a non-fansly platform
+      const hasFansly = platforms.has("fansly");
+      const hasOther = Array.from(platforms).some((p) => p !== "fansly");
+      return !(hasFansly && hasOther);
+    });
+  }, [editedRequests, scheduledPlatformsMap]);
 
   const activeRequest = useMemo(
     () => editedRequests.find((r) => r.id === activeRequestId) ?? null,
@@ -393,8 +410,26 @@ export function ScheduleView({
       const timeslot = timeslots.find((ts) => ts.id === timeslotId);
       if (!timeslot) return;
 
-      // Already has a slot?
+      // Timeslot already occupied?
       if (slotsByTimeslot[timeslotId]) return;
+
+      // Check platform category constraints for SFW content
+      const request = editedRequests.find((r) => r.id === requestId);
+      const existingPlatforms = scheduledPlatformsMap[requestId];
+      if (request && !request.is_nsfw && existingPlatforms) {
+        const targetIsFansly = timeslot.platform === "fansly";
+        const alreadyHasFansly = existingPlatforms.has("fansly");
+        const alreadyHasOther = Array.from(existingPlatforms).some((p) => p !== "fansly");
+
+        if (targetIsFansly && alreadyHasFansly) {
+          toast.error("SFW content already scheduled on Fansly");
+          return;
+        }
+        if (!targetIsFansly && alreadyHasOther) {
+          toast.error("SFW content already scheduled on a non-Fansly platform");
+          return;
+        }
+      }
 
       const scheduledFor = localTimeToUtcISO(selectedDay, timeslot.time_utc);
 
@@ -416,7 +451,7 @@ export function ScheduleView({
         }
       })();
     },
-    [timeslots, slotsByTimeslot, selectedDay, router]
+    [timeslots, slotsByTimeslot, selectedDay, router, editedRequests, scheduledPlatformsMap]
   );
 
   const handleUnschedule = useCallback(
