@@ -251,17 +251,9 @@ function DroppableTimeslot({
                   controls
                   playsInline
                   preload="metadata"
+                  src={`${asset.signedUrl}#t=0.001`}
                   className="h-full w-full object-contain"
-                >
-                  <source
-                    src={asset.signedUrl}
-                    type={
-                      asset.mime_type === "video/quicktime"
-                        ? "video/mp4"
-                        : (asset.mime_type ?? "video/mp4")
-                    }
-                  />
-                </video>
+                />
               ) : isImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
