@@ -18,6 +18,7 @@ export async function createRequest(data: {
   priority?: string;
   due_date?: string;
   inspo_link?: string;
+  is_nsfw?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -52,6 +53,7 @@ export async function createRequest(data: {
     priority: data.priority || "medium",
     due_date: data.due_date || null,
     inspo_link: data.inspo_link || null,
+    is_nsfw: data.is_nsfw ?? false,
     created_by: user.id,
     position: Date.now(),
   });
@@ -64,6 +66,7 @@ export async function createEditedRequests(data: {
   content_type_id: string;
   count: number;
   priority?: string;
+  is_nsfw?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -97,6 +100,7 @@ export async function createEditedRequests(data: {
     priority: data.priority || "medium",
     due_date: null,
     inspo_link: null,
+    is_nsfw: data.is_nsfw ?? false,
     status: "edited",
     created_by: user.id,
     position: Date.now() + i,
@@ -271,7 +275,7 @@ export async function seedDefaultContentTypes() {
 
   if ((count ?? 0) > 0) return;
 
-  const defaults = ["Ballerina", "Speaking", "Posing", "Roleplay"];
+  const defaults = ["Boyfriend", "Roleplay", "Posing", "Speaking", "Dancing", "Stretching"];
   const { error } = await supabase.from("content_types").insert(
     defaults.map((name, i) => ({
       persona_id: personaId,

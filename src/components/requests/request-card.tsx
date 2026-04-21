@@ -153,7 +153,9 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
           ? "border-primary bg-primary/10 border-dashed"
           : uploading
             ? "border-blue-500/50 bg-blue-500/5"
-            : "border-border/50 bg-card hover:border-border hover:bg-accent/30"
+            : request.is_nsfw
+              ? "border-blue-500/40 bg-blue-500/5 hover:border-blue-500/60 hover:bg-blue-500/10"
+              : "border-border/50 bg-card hover:border-border hover:bg-accent/30"
       }`}
       onClick={() => !uploading && router.push(`/requests/${request.id}`)}
       onDragOver={(e) => {
@@ -242,6 +244,15 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
       </div>
 
       <div className="mt-2.5 flex items-center gap-2">
+        {request.is_nsfw ? (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/15 text-blue-400 border-blue-500/30">
+            NSFW
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/15 text-green-400 border-green-500/30">
+            SFW
+          </Badge>
+        )}
         <Badge
           variant="outline"
           className={`text-[10px] px-1.5 py-0 ${EFFORT_STYLES[request.priority] ?? EFFORT_STYLES.medium}`}

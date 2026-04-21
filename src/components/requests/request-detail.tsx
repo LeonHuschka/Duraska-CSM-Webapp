@@ -95,6 +95,7 @@ export function RequestDetail({
   const [status, setStatus] = useState(request.status);
   const [dueDate, setDueDate] = useState(request.due_date ?? "");
   const [inspoLink, setInspoLink] = useState(request.inspo_link ?? "");
+  const [isNsfw, setIsNsfw] = useState(request.is_nsfw);
 
   const rawAssets = assets.filter((a) => a.stage === "raw");
   const editedAssets = assets.filter((a) => a.stage === "edited");
@@ -108,6 +109,7 @@ export function RequestDetail({
           status,
           due_date: dueDate || undefined,
           inspo_link: inspoLink || undefined,
+          is_nsfw: isNsfw,
         });
         toast.success("Request updated");
         setEditOpen(false);
@@ -166,6 +168,15 @@ export function RequestDetail({
             >
               {request.status}
             </Badge>
+            {request.is_nsfw ? (
+              <Badge variant="outline" className="text-xs bg-blue-500/15 text-blue-400 border-blue-500/30">
+                NSFW
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs bg-green-500/15 text-green-400 border-green-500/30">
+                SFW
+              </Badge>
+            )}
             <Badge
               variant="outline"
               className={`text-xs capitalize ${EFFORT_STYLES[request.priority] ?? EFFORT_STYLES.medium}`}
@@ -183,20 +194,24 @@ export function RequestDetail({
               Created {formatDateTime(request.created_at)}
             </span>
           </div>
+
+          {/* Description - prominent display */}
           {request.description && (
-            <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
-              {request.description}
-            </p>
+            <div className="mt-3 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <p className="text-sm whitespace-pre-wrap">{request.description}</p>
+            </div>
           )}
+
+          {/* Inspo Link - prominent display */}
           {request.inspo_link && (
             <a
               href={request.inspo_link}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-1 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+              className="mt-2 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm text-primary hover:bg-primary/10 transition-colors"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Inspo Link
+              <ExternalLink className="h-4 w-4 shrink-0" />
+              <span className="truncate">{request.inspo_link}</span>
             </a>
           )}
         </div>
@@ -318,6 +333,29 @@ export function RequestDetail({
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
               />
+            </div>
+
+            {/* NSFW toggle */}
+            <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+              <div>
+                <Label className="text-sm">NSFW Content</Label>
+                <p className="text-[11px] text-muted-foreground">NSFW = Fansly only. SFW = Fansly + Instagram</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isNsfw}
+                onClick={() => setIsNsfw((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  isNsfw ? "bg-blue-500" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                    isNsfw ? "translate-x-[18px]" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
             </div>
 
             <div className="space-y-1">

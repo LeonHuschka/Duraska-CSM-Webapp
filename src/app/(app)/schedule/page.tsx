@@ -37,7 +37,7 @@ export default async function SchedulePage() {
         .order("position", { ascending: true }),
       supabase
         .from("content_requests")
-        .select("id, title, status, priority, content_type_id")
+        .select("id, title, status, priority, content_type_id, is_nsfw")
         .eq("persona_id", personaId)
         .eq("status", "edited")
         .order("updated_at", { ascending: false }),

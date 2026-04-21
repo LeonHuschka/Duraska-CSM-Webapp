@@ -66,7 +66,7 @@ interface ScheduleViewProps {
   timeslots: PostingTimeslot[];
   editedRequests: Pick<
     ContentRequest,
-    "id" | "title" | "status" | "priority" | "content_type_id"
+    "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw"
   >[];
 }
 
@@ -143,13 +143,6 @@ function formatDateHeading(date: Date): string {
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const EFFORT_STYLES: Record<string, string> = {
-  easy: "bg-green-500/15 text-green-400 border-green-500/30",
-  medium: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  high: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  heavy: "bg-red-500/15 text-red-400 border-red-500/30",
-};
-
 const STATUS_STYLES: Record<string, string> = {
   planned: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
   ready: "bg-green-500/15 text-green-400 border-green-500/30",
@@ -169,24 +162,31 @@ function DraggableRequest({
   request,
   isDragging,
 }: {
-  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id">;
+  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw">;
   isDragging?: boolean;
 }) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg border border-border/50 bg-card p-2.5 text-xs transition-all ${
+      className={`flex items-center gap-2 rounded-lg border p-2.5 text-xs transition-all ${
+        request.is_nsfw
+          ? "border-blue-500/40 bg-blue-500/5"
+          : "border-border/50 bg-card"
+      } ${
         isDragging ? "opacity-50" : "cursor-grab hover:border-border hover:bg-accent/30"
       }`}
       data-request-id={request.id}
     >
       <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
       <span className="font-medium truncate flex-1">{request.title}</span>
-      <Badge
-        variant="outline"
-        className={`text-[9px] px-1 py-0 capitalize shrink-0 ${EFFORT_STYLES[request.priority] ?? EFFORT_STYLES.medium}`}
-      >
-        {request.priority}
-      </Badge>
+      {request.is_nsfw ? (
+        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 bg-blue-500/15 text-blue-400 border-blue-500/30">
+          NSFW
+        </Badge>
+      ) : (
+        <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 bg-green-500/15 text-green-400 border-green-500/30">
+          SFW
+        </Badge>
+      )}
     </div>
   );
 }
@@ -258,15 +258,15 @@ function DroppableTimeslot({
 
       {/* Content */}
       {slot && linkedRequest ? (
-        <div className="p-3">
+        <div className="flex items-center gap-3 p-3">
           {asset && (
-            <div className="relative mb-2 aspect-[9/16] max-h-[200px] w-full overflow-hidden rounded-lg bg-black">
+            <div className="relative h-20 w-[45px] shrink-0 overflow-hidden rounded-md bg-black">
               {isVideo ? (
                 <video
-                  controls
                   playsInline
+                  muted
                   preload="metadata"
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-cover"
                 >
                   <source
                     src={asset.signedUrl}
@@ -282,20 +282,22 @@ function DroppableTimeslot({
                 <img
                   src={asset.signedUrl}
                   alt={asset.file_name}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-cover"
                 />
               ) : null}
             </div>
           )}
-          <p className="text-sm font-medium">{linkedRequest.title}</p>
-          {slot.caption && (
-            <p className="mt-1 text-xs text-muted-foreground line-clamp-2 whitespace-pre-wrap">
-              {slot.caption}
-            </p>
-          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate">{linkedRequest.title}</p>
+            {slot.caption && (
+              <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1 whitespace-pre-wrap">
+                {slot.caption}
+              </p>
+            )}
+          </div>
         </div>
       ) : (
-        <div className="flex items-center justify-center py-8 px-3">
+        <div className="flex items-center justify-center py-6 px-3">
           <p className="text-xs text-muted-foreground/50">
             {isOver ? "Drop here to schedule" : "Drag a request here"}
           </p>
@@ -652,7 +654,7 @@ export function ScheduleView({
                 </div>
 
                 {/* Right: timeslot grid */}
-                <div className="flex-1 space-y-3">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {dailyTimeslots.map((ts) => {
                     const slot = slotsByTimeslot[ts.id] ?? null;
                     const linkedRequest = slot?.request_id
@@ -803,7 +805,7 @@ export function ScheduleView({
 function DraggableRequestWrapper({
   request,
 }: {
-  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id">;
+  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw">;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: request.id,

@@ -76,6 +76,7 @@ export async function updateRequestDetail(
     due_date?: string;
     status?: string;
     inspo_link?: string;
+    is_nsfw?: boolean;
   }
 ) {
   const supabase = await createClient();
@@ -93,6 +94,7 @@ export async function updateRequestDetail(
       status: data.status,
       due_date: data.due_date || null,
       inspo_link: data.inspo_link || null,
+      is_nsfw: data.is_nsfw ?? false,
       updated_at: new Date().toISOString(),
     })
     .eq("id", requestId);

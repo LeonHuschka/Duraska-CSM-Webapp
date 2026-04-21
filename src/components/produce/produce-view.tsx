@@ -29,12 +29,6 @@ const EFFORT_STYLES: Record<string, string> = {
   heavy: "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
-const STATUS_STYLES: Record<string, string> = {
-  requested: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-  shooted: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  edited: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-};
-
 type SortKey = "due_date" | "created_at" | "effort" | "art" | "status";
 
 const EFFORT_ORDER: Record<string, number> = {
@@ -77,7 +71,6 @@ export function ProduceView({
   shotLastWeek,
 }: ProduceViewProps) {
   const [sortBy, setSortBy] = useState<SortKey>("due_date");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
 
   const typeMap = useMemo(() => {
@@ -88,14 +81,11 @@ export function ProduceView({
 
   const filtered = useMemo(() => {
     let items = requests;
-    if (filterStatus !== "all") {
-      items = items.filter((r) => r.status === filterStatus);
-    }
     if (filterType !== "all") {
       items = items.filter((r) => r.content_type_id === filterType);
     }
     return items;
-  }, [requests, filterStatus, filterType]);
+  }, [requests, filterType]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -196,18 +186,6 @@ export function ProduceView({
           </SelectContent>
         </Select>
 
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[130px] h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="requested">Requested</SelectItem>
-            <SelectItem value="shooted">Shooted</SelectItem>
-            <SelectItem value="edited">Edited</SelectItem>
-          </SelectContent>
-        </Select>
-
         {contentTypes.length > 0 && (
           <Select value={filterType} onValueChange={setFilterType}>
             <SelectTrigger className="w-[130px] h-8 text-xs">
@@ -237,8 +215,8 @@ export function ProduceView({
           </div>
           <h3 className="mt-4 text-sm font-medium">No requests to show</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {filterStatus !== "all" || filterType !== "all"
-              ? "Try adjusting your filters."
+            {filterType !== "all"
+              ? "Try adjusting your filter."
               : "All caught up!"}
           </p>
         </div>
@@ -257,24 +235,40 @@ export function ProduceView({
               <Link
                 key={request.id}
                 href={`/requests/${request.id}`}
-                className="group rounded-xl border border-border/50 bg-card p-4 transition-all duration-200 hover:border-border hover:bg-accent/30"
+                className={`group rounded-xl border p-4 transition-all duration-200 ${
+                  request.is_nsfw
+                    ? "border-blue-500/40 bg-blue-500/5 hover:border-blue-500/60"
+                    : "border-border/50 bg-card hover:border-border hover:bg-accent/30"
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="text-sm font-semibold leading-snug line-clamp-2">
                     {request.title}
                   </h3>
-                  <Badge
-                    variant="outline"
-                    className={`shrink-0 text-[10px] capitalize ${STATUS_STYLES[request.status] ?? ""}`}
-                  >
-                    {request.status}
-                  </Badge>
+                  {request.is_nsfw ? (
+                    <Badge variant="outline" className="shrink-0 text-[10px] bg-blue-500/15 text-blue-400 border-blue-500/30">
+                      NSFW
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="shrink-0 text-[10px] bg-green-500/15 text-green-400 border-green-500/30">
+                      SFW
+                    </Badge>
+                  )}
                 </div>
 
                 {request.description && (
-                  <p className="mt-2 text-xs text-muted-foreground line-clamp-2">
+                  <p className="mt-2 text-sm text-muted-foreground line-clamp-3">
                     {request.description}
                   </p>
+                )}
+
+                {request.inspo_link && (
+                  <div className="mt-2 flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5">
+                    <ExternalLink className="h-3 w-3 text-primary shrink-0" />
+                    <span className="text-[11px] text-primary truncate">
+                      {request.inspo_link}
+                    </span>
+                  </div>
                 )}
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -312,11 +306,6 @@ export function ProduceView({
                       day: "numeric",
                     })}
                   </span>
-                  {request.inspo_link && (
-                    <span className="ml-auto">
-                      <ExternalLink className="h-3 w-3 text-primary/60 group-hover:text-primary" />
-                    </span>
-                  )}
                 </div>
               </Link>
             );

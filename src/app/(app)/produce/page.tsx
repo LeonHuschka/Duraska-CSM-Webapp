@@ -27,7 +27,7 @@ export default async function ProducePage() {
       .from("content_requests")
       .select("*")
       .eq("persona_id", personaId)
-      .in("status", ["requested", "shooted", "edited"])
+      .eq("status", "requested")
       .order("created_at", { ascending: false }),
     supabase
       .from("content_types")

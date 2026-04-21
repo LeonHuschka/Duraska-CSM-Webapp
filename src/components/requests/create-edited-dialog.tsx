@@ -41,6 +41,7 @@ export function CreateEditedDialog({
   const [selectedTypeId, setSelectedTypeId] = useState("");
   const [count, setCount] = useState(1);
   const [effort, setEffort] = useState("medium");
+  const [isNsfw, setIsNsfw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSeedDefaults = async () => {
@@ -72,6 +73,7 @@ export function CreateEditedDialog({
         content_type_id: selectedTypeId,
         count,
         priority: effort,
+        is_nsfw: isNsfw,
       });
       const typeName = types.find((t) => t.id === selectedTypeId)?.name ?? "";
       toast.success(
@@ -82,6 +84,7 @@ export function CreateEditedDialog({
       setSelectedTypeId("");
       setCount(1);
       setEffort("medium");
+      setIsNsfw(false);
       setOpen(false);
     } catch (err) {
       toast.error(
@@ -177,6 +180,29 @@ export function CreateEditedDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* NSFW toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+            <div>
+              <Label className="text-sm">NSFW Content</Label>
+              <p className="text-[11px] text-muted-foreground">NSFW = Fansly only</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isNsfw}
+              onClick={() => setIsNsfw((v) => !v)}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                isNsfw ? "bg-blue-500" : "bg-muted-foreground/30"
+              }`}
+            >
+              <span
+                className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                  isNsfw ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
           </div>
 
           {/* Preview */}

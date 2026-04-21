@@ -78,11 +78,20 @@ export async function scheduleRequestToSlot(data: {
     if (error) return { error: error.message };
   }
 
-  // Update request status to scheduled
-  await supabase
+  // Check if request is NSFW — only NSFW gets moved to "scheduled" status
+  // SFW content stays "edited" so it can be scheduled to multiple platforms
+  const { data: request } = await supabase
     .from("content_requests")
-    .update({ status: "scheduled", updated_at: new Date().toISOString() })
-    .eq("id", data.request_id);
+    .select("is_nsfw")
+    .eq("id", data.request_id)
+    .single();
+
+  if (request?.is_nsfw) {
+    await supabase
+      .from("content_requests")
+      .update({ status: "scheduled", updated_at: new Date().toISOString() })
+      .eq("id", data.request_id);
+  }
 
   revalidatePath("/schedule");
   return { error: null };

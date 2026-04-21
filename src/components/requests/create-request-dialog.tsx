@@ -46,6 +46,7 @@ interface FormValues {
   priority: string;
   due_date: string;
   inspo_link: string;
+  is_nsfw: boolean;
 }
 
 interface CreateRequestDialogProps {
@@ -76,6 +77,7 @@ export function CreateRequestDialog({
       priority: "medium",
       due_date: "",
       inspo_link: "",
+      is_nsfw: false,
     },
   });
 
@@ -150,6 +152,7 @@ export function CreateRequestDialog({
         priority: values.priority,
         due_date: values.due_date || undefined,
         inspo_link: values.inspo_link || undefined,
+        is_nsfw: values.is_nsfw,
       });
       toast.success("Request created");
       reset();
@@ -372,6 +375,29 @@ export function CreateRequestDialog({
               placeholder="https://..."
               {...register("inspo_link")}
             />
+          </div>
+
+          {/* NSFW toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+            <div>
+              <Label className="text-sm">NSFW Content</Label>
+              <p className="text-[11px] text-muted-foreground">NSFW = Fansly only. SFW = Fansly + Instagram</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={watch("is_nsfw")}
+              onClick={() => setValue("is_nsfw", !watch("is_nsfw"))}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                watch("is_nsfw") ? "bg-blue-500" : "bg-muted-foreground/30"
+              }`}
+            >
+              <span
+                className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                  watch("is_nsfw") ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
