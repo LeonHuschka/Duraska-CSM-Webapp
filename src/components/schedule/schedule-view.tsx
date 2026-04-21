@@ -247,6 +247,7 @@ function DroppableTimeslot({
             <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg bg-black">
               {isVideo ? (
                 <video
+                  key={asset.id}
                   controls
                   playsInline
                   preload="metadata"
