@@ -313,6 +313,7 @@ export function ScheduleView({
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [use12h, setUse12h] = useState(false);
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
 
   // Detect local timezone offset
   const localOffset = -(new Date().getTimezoneOffset() / 60);
@@ -324,9 +325,16 @@ export function ScheduleView({
 
   const selectedDay = useMemo(() => addDays(new Date(), dayOffset), [dayOffset]);
 
-  // Map timeslots to display times
+  // Unique platforms from defined timeslots
+  const availablePlatforms = useMemo(() => {
+    const set = new Set(timeslots.map((ts) => ts.platform));
+    return Array.from(set).sort();
+  }, [timeslots]);
+
+  // Map timeslots to display times, apply platform filter
   const dailyTimeslots = useMemo(() => {
     return timeslots
+      .filter((ts) => platformFilter === "all" || ts.platform === platformFilter)
       .map((ts) => {
         // Always sort by 24h key so order is stable
         const sortKey = utcTimeToLocal(ts.time_utc, tzOffset, false);
@@ -334,7 +342,7 @@ export function ScheduleView({
         return { ...ts, displayTime, sortKey };
       })
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  }, [timeslots, tzOffset, use12h]);
+  }, [timeslots, tzOffset, use12h, platformFilter]);
 
   // Find existing slots for the selected day
   const slotsByTimeslot = useMemo(() => {
@@ -593,6 +601,37 @@ export function ScheduleView({
             </Button>
           </div>
 
+          {/* Platform filter */}
+          {availablePlatforms.length > 1 && (
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Platform</span>
+              <div className="flex gap-1">
+                <Button
+                  variant={platformFilter === "all" ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                  onClick={() => setPlatformFilter("all")}
+                >
+                  All
+                </Button>
+                {availablePlatforms.map((p) => (
+                  <Button
+                    key={p}
+                    variant={platformFilter === p ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 px-2.5 text-xs gap-1.5"
+                    onClick={() => setPlatformFilter(p)}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full ${PLATFORM_COLORS[p] ?? PLATFORM_COLORS.other}`}
+                    />
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {timeslots.length === 0 ? (
             <div className="flex min-h-[30vh] flex-col items-center justify-center rounded-xl border border-dashed border-border/50 bg-card/50 p-8 text-center">
               <div className="rounded-xl bg-primary/10 p-3">
@@ -619,61 +658,63 @@ export function ScheduleView({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
             >
-              {/* Timeslot columns: left to right by time */}
-              <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 md:-mx-6 md:px-6">
-                {dailyTimeslots.map((ts) => {
-                  const slot = slotsByTimeslot[ts.id] ?? null;
-                  const linkedRequest = slot?.request_id
-                    ? requests.find((r) => r.id === slot.request_id) ?? null
-                    : null;
-                  const asset = slot?.request_id
-                    ? assetsByRequest[slot.request_id] ?? null
-                    : null;
+              <div className="flex gap-4">
+                {/* Left panel: available edited requests */}
+                <div className="w-56 shrink-0 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Ready to schedule
+                    </h3>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {availableRequests.length}
+                    </Badge>
+                  </div>
 
-                  return (
-                    <DroppableTimeslot
-                      key={ts.id}
-                      id={ts.id}
-                      timeLabel={ts.displayTime}
-                      slot={slot}
-                      linkedRequest={linkedRequest}
-                      asset={asset}
-                      platform={ts.platform}
-                      onUnschedule={handleUnschedule}
-                    />
-                  );
-                })}
-              </div>
-
-              {/* Bottom panel: available edited requests */}
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Ready to schedule
-                  </h3>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {availableRequests.length}
-                  </Badge>
+                  {availableRequests.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border/30 p-4 text-center">
+                      <p className="text-[11px] text-muted-foreground/60">
+                        No edited requests available
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+                      {availableRequests.map((req) => (
+                        <DraggableRequestWrapper key={req.id} request={req} />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {availableRequests.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-border/30 p-4 text-center">
-                    <p className="text-[11px] text-muted-foreground/60">
-                      No edited requests available
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {availableRequests.map((req) => (
-                      <DraggableRequestWrapper key={req.id} request={req} />
-                    ))}
-                  </div>
-                )}
+                {/* Right panel: Timeslot columns left to right by time */}
+                <div className="flex flex-1 gap-3 overflow-x-auto pb-4">
+                  {dailyTimeslots.map((ts) => {
+                    const slot = slotsByTimeslot[ts.id] ?? null;
+                    const linkedRequest = slot?.request_id
+                      ? requests.find((r) => r.id === slot.request_id) ?? null
+                      : null;
+                    const asset = slot?.request_id
+                      ? assetsByRequest[slot.request_id] ?? null
+                      : null;
+
+                    return (
+                      <DroppableTimeslot
+                        key={ts.id}
+                        id={ts.id}
+                        timeLabel={ts.displayTime}
+                        slot={slot}
+                        linkedRequest={linkedRequest}
+                        asset={asset}
+                        platform={ts.platform}
+                        onUnschedule={handleUnschedule}
+                      />
+                    );
+                  })}
+                </div>
               </div>
 
               <DragOverlay>
                 {activeRequest ? (
-                  <div className="w-60 rotate-2 scale-105">
+                  <div className="w-56 rotate-2 scale-105">
                     <DraggableRequest request={activeRequest} isDragging />
                   </div>
                 ) : null}

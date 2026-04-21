@@ -234,12 +234,23 @@ export async function addTimeslot(time_utc: string, label?: string, platform?: s
   const supabase = await createClient();
   const personaId = await getPersonaId();
 
+  // Get max position to avoid int overflow (Date.now() exceeds int4 range)
+  const { data: maxRow } = await supabase
+    .from("posting_timeslots")
+    .select("position")
+    .eq("persona_id", personaId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .single();
+
+  const nextPosition = (maxRow?.position ?? 0) + 1;
+
   const { error } = await supabase.from("posting_timeslots").insert({
     persona_id: personaId,
     time_utc,
     label: label || null,
     platform: platform || "fansly",
-    position: Date.now(),
+    position: nextPosition,
   });
 
   if (error) throw new Error(error.message);
