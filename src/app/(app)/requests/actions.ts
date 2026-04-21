@@ -60,6 +60,55 @@ export async function createRequest(data: {
   revalidatePath("/requests");
 }
 
+export async function createEditedRequests(data: {
+  content_type_id: string;
+  count: number;
+  priority?: string;
+}) {
+  const supabase = await createClient();
+  const personaId = await getPersonaId();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contentType } = await supabase
+    .from("content_types")
+    .select("name")
+    .eq("id", data.content_type_id)
+    .single();
+
+  if (!contentType) throw new Error("Content type not found");
+
+  // Get current count for numbering
+  const { count: existing } = await supabase
+    .from("content_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("persona_id", personaId)
+    .eq("content_type_id", data.content_type_id);
+
+  const startNumber = (existing ?? 0) + 1;
+  const rows = Array.from({ length: data.count }, (_, i) => ({
+    persona_id: personaId,
+    title: `${contentType.name} #${startNumber + i}`,
+    content_type_id: data.content_type_id,
+    description: null,
+    priority: data.priority || "medium",
+    due_date: null,
+    inspo_link: null,
+    status: "edited",
+    created_by: user.id,
+    position: Date.now() + i,
+  }));
+
+  const { error } = await supabase.from("content_requests").insert(rows);
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/requests");
+  revalidatePath("/schedule");
+}
+
 export async function updateRequestStatus(
   requestId: string,
   newStatus: string

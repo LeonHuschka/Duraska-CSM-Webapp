@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ContentRequest, ContentType } from "@/lib/types/database";
+import { CreateRequestDialog } from "@/components/requests/create-request-dialog";
 
 const EFFORT_STYLES: Record<string, string> = {
   easy: "bg-green-500/15 text-green-400 border-green-500/30",
@@ -137,11 +138,14 @@ export function ProduceView({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your content production overview
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your content production overview
+          </p>
+        </div>
+        <CreateRequestDialog contentTypes={contentTypes} />
       </div>
 
       {/* Stats */}

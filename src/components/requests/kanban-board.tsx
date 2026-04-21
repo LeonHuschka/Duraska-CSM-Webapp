@@ -23,7 +23,7 @@ import { useDroppable } from "@dnd-kit/core";
 import { toast } from "sonner";
 import type { ContentRequest, ContentType } from "@/lib/types/database";
 import { RequestCard } from "@/components/requests/request-card";
-import { CreateRequestDialog } from "@/components/requests/create-request-dialog";
+import { CreateEditedDialog } from "@/components/requests/create-edited-dialog";
 import { Badge } from "@/components/ui/badge";
 import { updateRequestPosition } from "@/app/(app)/requests/actions";
 
@@ -67,10 +67,12 @@ function DroppableColumn({
   column,
   items,
   isOver,
+  action,
 }: {
   column: (typeof COLUMNS)[number];
   items: ContentRequest[];
   isOver: boolean;
+  action?: React.ReactNode;
 }) {
   const { setNodeRef } = useDroppable({ id: column.id });
   const itemIds = useMemo(() => items.map((i) => i.id), [items]);
@@ -80,6 +82,7 @@ function DroppableColumn({
       <div className="mb-3 flex items-center gap-2.5 px-1">
         <div className={`h-2.5 w-2.5 rounded-full ${column.color}`} />
         <h3 className="text-sm font-medium">{column.label}</h3>
+        {action}
         <Badge
           variant="secondary"
           className="ml-auto h-5 min-w-[20px] justify-center px-1.5 text-[10px]"
@@ -266,16 +269,13 @@ export function KanbanBoard({ requests, contentTypes }: KanbanBoardProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Requests Overview
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Track content through your production pipeline
-          </p>
-        </div>
-        <CreateRequestDialog contentTypes={contentTypes} />
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Requests Overview
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Track content through your production pipeline
+        </p>
       </div>
 
       <DndContext
@@ -293,6 +293,11 @@ export function KanbanBoard({ requests, contentTypes }: KanbanBoardProps) {
               column={column}
               items={column.items}
               isOver={overColumnId === column.id}
+              action={
+                column.id === "edited" ? (
+                  <CreateEditedDialog contentTypes={contentTypes} />
+                ) : undefined
+              }
             />
           ))}
         </div>
