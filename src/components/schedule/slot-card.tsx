@@ -36,10 +36,9 @@ import {
   Trash2,
   Clock,
   ExternalLink,
-  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { updateSlot, deleteSlot, markSlotPosted } from "@/app/(app)/schedule/actions";
+import { updateSlot, deleteSlot, markSlotPosted, markSlotScheduled } from "@/app/(app)/schedule/actions";
 
 const PLATFORM_COLORS: Record<string, string> = {
   instagram: "bg-pink-500",
@@ -56,9 +55,10 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  planned: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  ready: "bg-green-500/15 text-green-400 border-green-500/30",
-  posted: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  planned: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  ready: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  scheduled: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  posted: "bg-green-500/15 text-green-400 border-green-500/30",
   failed: "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
@@ -90,6 +90,9 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
     hour12: true,
   });
 
+  const isScheduled = slot.status === "scheduled";
+  const isPosted = slot.status === "posted";
+
   function handleDelete() {
     startTransition(async () => {
       const result = await deleteSlot(slot.id);
@@ -97,6 +100,17 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
         toast.error("Failed to delete slot", { description: result.error });
       } else {
         toast.success("Slot deleted");
+      }
+    });
+  }
+
+  function handleMarkScheduled() {
+    startTransition(async () => {
+      const result = await markSlotScheduled(slot.id);
+      if (result.error) {
+        toast.error("Failed to mark as scheduled", { description: result.error });
+      } else {
+        toast.success("Marked as scheduled");
       }
     });
   }
@@ -146,16 +160,28 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
   if (compact) {
     return (
       <>
-        <div className="group flex items-center gap-2 rounded-lg border border-border/50 bg-card p-2 text-xs transition-colors hover:border-border">
-          <span
-            className={`h-2 w-2 shrink-0 rounded-full ${PLATFORM_COLORS[slot.platform] ?? PLATFORM_COLORS.other}`}
-          />
+        <div className={`group flex items-center gap-2 rounded-lg border p-2 text-xs transition-colors hover:border-border ${
+          isPosted
+            ? "border-green-500/40 bg-green-500/5"
+            : isScheduled
+              ? "border-amber-500/40 bg-amber-500/5"
+              : "border-border/50 bg-card"
+        }`}>
+          {isPosted ? (
+            <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
+          ) : isScheduled ? (
+            <Clock className="h-3 w-3 shrink-0 text-amber-400" />
+          ) : (
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${PLATFORM_COLORS[slot.platform] ?? PLATFORM_COLORS.other}`}
+            />
+          )}
           <span className="truncate font-medium">
             {timeStr}
           </span>
-          {slot.caption && (
+          {linkedRequest && (
             <span className="truncate text-muted-foreground">
-              {slot.caption}
+              {linkedRequest.title}
             </span>
           )}
           <DropdownMenu>
@@ -169,10 +195,16 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              {slot.status !== "posted" && (
+              {!isScheduled && !isPosted && (
+                <DropdownMenuItem onClick={handleMarkScheduled}>
+                  <Clock className="mr-2 h-4 w-4" />
+                  Mark Scheduled
+                </DropdownMenuItem>
+              )}
+              {isScheduled && (
                 <DropdownMenuItem onClick={() => setPostUrlOpen(true)}>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Mark as Posted
+                  Mark Posted
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => setEditOpen(true)}>
@@ -200,12 +232,24 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
 
   return (
     <>
-      <div className="group flex items-center gap-4 rounded-xl border border-border/50 bg-card p-4 transition-colors hover:border-border">
-        {/* Platform dot */}
-        <span
-          className={`h-3 w-3 shrink-0 rounded-full ${PLATFORM_COLORS[slot.platform] ?? PLATFORM_COLORS.other}`}
-          title={PLATFORM_LABELS[slot.platform] ?? slot.platform}
-        />
+      <div className={`group flex items-center gap-4 rounded-xl border p-4 transition-colors hover:border-border ${
+        isPosted
+          ? "border-green-500/40 bg-green-500/5"
+          : isScheduled
+            ? "border-amber-500/40 bg-amber-500/5"
+            : "border-border/50 bg-card"
+      }`}>
+        {/* Status icon + Platform dot */}
+        {isPosted ? (
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-400" />
+        ) : isScheduled ? (
+          <Clock className="h-4 w-4 shrink-0 text-amber-400" />
+        ) : (
+          <span
+            className={`h-3 w-3 shrink-0 rounded-full ${PLATFORM_COLORS[slot.platform] ?? PLATFORM_COLORS.other}`}
+            title={PLATFORM_LABELS[slot.platform] ?? slot.platform}
+          />
+        )}
 
         {/* Time */}
         <div className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
@@ -215,17 +259,18 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
 
         {/* Caption + request */}
         <div className="min-w-0 flex-1">
-          {slot.caption ? (
+          {linkedRequest ? (
+            <p className="truncate text-sm font-medium">{linkedRequest.title}</p>
+          ) : slot.caption ? (
             <p className="truncate text-sm font-medium">{slot.caption}</p>
           ) : (
             <p className="truncate text-sm italic text-muted-foreground">
               No caption
             </p>
           )}
-          {linkedRequest && (
-            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
-              <Link2 className="h-3 w-3" />
-              {linkedRequest.title}
+          {slot.caption && linkedRequest && (
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {slot.caption}
             </p>
           )}
         </div>
@@ -267,10 +312,16 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            {slot.status !== "posted" && (
+            {!isScheduled && !isPosted && (
+              <DropdownMenuItem onClick={handleMarkScheduled}>
+                <Clock className="mr-2 h-4 w-4" />
+                Mark Scheduled
+              </DropdownMenuItem>
+            )}
+            {isScheduled && (
               <DropdownMenuItem onClick={() => setPostUrlOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
-                Mark as Posted
+                Mark Posted
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => setEditOpen(true)}>
@@ -375,6 +426,7 @@ export function SlotCard({ slot, requests, compact = false }: SlotCardProps) {
                 <SelectContent>
                   <SelectItem value="planned">Planned</SelectItem>
                   <SelectItem value="ready">Ready</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
                   <SelectItem value="posted">Posted</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>

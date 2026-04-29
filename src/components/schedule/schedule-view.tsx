@@ -42,12 +42,16 @@ import {
   GripVertical,
   Settings2,
   X,
+  CheckCircle2,
+  Loader,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   scheduleRequestToSlot,
   unscheduleSlot,
   seedDefaultTimeslots,
+  markSlotScheduled,
+  markSlotPosted,
 } from "@/app/(app)/schedule/actions";
 
 interface ScheduleAsset {
@@ -193,6 +197,8 @@ function DroppableTimeslot({
   asset,
   platform,
   onUnschedule,
+  onMarkScheduled,
+  onMarkPosted,
 }: {
   id: string;
   timeLabel: string;
@@ -201,33 +207,54 @@ function DroppableTimeslot({
   asset: ScheduleAsset | null;
   platform: string;
   onUnschedule: (slotId: string) => void;
+  onMarkScheduled: (slotId: string) => void;
+  onMarkPosted: (slotId: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const isVideo = asset?.mime_type?.startsWith("video/");
   const isImage = asset?.mime_type?.startsWith("image/");
+  const isScheduled = slot?.status === "scheduled";
+  const isPosted = slot?.status === "posted";
+
+  // Border color based on status
+  const borderClass = slot
+    ? isPosted
+      ? "border-green-500/50 bg-card"
+      : isScheduled
+        ? "border-amber-500/50 bg-card"
+        : "border-border/50 bg-card"
+    : isOver
+      ? "border-primary/50 bg-primary/5 border-dashed"
+      : "border-border/30 bg-muted/20 border-dashed";
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex w-52 min-w-[208px] shrink-0 flex-col rounded-xl border transition-all duration-200 ${
-        slot
-          ? "border-border/50 bg-card"
-          : isOver
-            ? "border-primary/50 bg-primary/5 border-dashed"
-            : "border-border/30 bg-muted/20 border-dashed"
-      }`}
+      className={`flex w-52 min-w-[208px] shrink-0 flex-col rounded-xl border transition-all duration-200 ${borderClass}`}
     >
       {/* Time header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
         <div className="flex items-center gap-1.5">
-          <Clock className="h-3 w-3 text-muted-foreground" />
+          {isPosted ? (
+            <CheckCircle2 className="h-3 w-3 text-green-400" />
+          ) : isScheduled ? (
+            <Loader className="h-3 w-3 text-amber-400" />
+          ) : (
+            <Clock className="h-3 w-3 text-muted-foreground" />
+          )}
           <span className="text-sm font-semibold">{timeLabel}</span>
+          {isPosted && (
+            <span className="text-[9px] font-medium text-green-400 uppercase">Posted</span>
+          )}
+          {isScheduled && (
+            <span className="text-[9px] font-medium text-amber-400 uppercase">Pending</span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <span
             className={`h-2 w-2 rounded-full ${PLATFORM_COLORS[platform] ?? PLATFORM_COLORS.other}`}
           />
-          {slot && (
+          {slot && !isPosted && (
             <Button
               variant="ghost"
               size="icon"
@@ -244,7 +271,13 @@ function DroppableTimeslot({
       {slot && linkedRequest ? (
         <div className="flex flex-col p-2">
           {asset && (
-            <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg bg-black">
+            <div className={`relative aspect-[9/16] w-full overflow-hidden rounded-lg bg-black ring-2 ${
+              isPosted
+                ? "ring-green-500/40"
+                : isScheduled
+                  ? "ring-amber-500/40"
+                  : "ring-transparent"
+            }`}>
               {isVideo ? (
                 <video
                   key={asset.id}
@@ -270,16 +303,37 @@ function DroppableTimeslot({
               {slot.caption}
             </p>
           )}
-          {asset && (
-            <a
-              href={asset.signedUrl}
-              download={asset.file_name}
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Download
-            </a>
-          )}
+          {/* Action buttons */}
+          <div className="mt-2 flex flex-col gap-1.5">
+            {asset && (
+              <a
+                href={asset.signedUrl}
+                download={asset.file_name}
+                className="flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-2 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Download
+              </a>
+            )}
+            {!isScheduled && !isPosted && (
+              <button
+                onClick={() => onMarkScheduled(slot.id)}
+                className="flex items-center justify-center gap-1.5 rounded-md bg-amber-500/15 px-2 py-1.5 text-[10px] font-medium text-amber-400 hover:bg-amber-500/25 transition-colors"
+              >
+                <Loader className="h-3 w-3" />
+                Mark Scheduled
+              </button>
+            )}
+            {isScheduled && (
+              <button
+                onClick={() => onMarkPosted(slot.id)}
+                className="flex items-center justify-center gap-1.5 rounded-md bg-green-500/15 px-2 py-1.5 text-[10px] font-medium text-green-400 hover:bg-green-500/25 transition-colors"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Mark Posted
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center py-12 px-3">
@@ -467,6 +521,44 @@ export function ScheduleView({
           }
         } catch {
           toast.error("Failed to unschedule");
+        }
+      })();
+    },
+    [router]
+  );
+
+  const handleMarkScheduled = useCallback(
+    (slotId: string) => {
+      (async () => {
+        try {
+          const result = await markSlotScheduled(slotId);
+          if (result.error) {
+            toast.error(result.error);
+          } else {
+            toast.success("Marked as scheduled");
+            router.refresh();
+          }
+        } catch {
+          toast.error("Failed to mark as scheduled");
+        }
+      })();
+    },
+    [router]
+  );
+
+  const handleMarkPosted = useCallback(
+    (slotId: string) => {
+      (async () => {
+        try {
+          const result = await markSlotPosted(slotId);
+          if (result.error) {
+            toast.error(result.error);
+          } else {
+            toast.success("Marked as posted");
+            router.refresh();
+          }
+        } catch {
+          toast.error("Failed to mark as posted");
         }
       })();
     },
@@ -733,6 +825,8 @@ export function ScheduleView({
                         asset={asset}
                         platform={ts.platform}
                         onUnschedule={handleUnschedule}
+                        onMarkScheduled={handleMarkScheduled}
+                        onMarkPosted={handleMarkPosted}
                       />
                     );
                   })}

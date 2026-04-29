@@ -162,6 +162,19 @@ export async function deleteSlot(slotId: string) {
   return { error: null };
 }
 
+export async function markSlotScheduled(slotId: string) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("schedule_slots")
+    .update({ status: "scheduled" })
+    .eq("id", slotId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/schedule");
+  return { error: null };
+}
+
 export async function markSlotPosted(slotId: string, postedUrl?: string) {
   const supabase = await createClient();
 
@@ -175,7 +188,23 @@ export async function markSlotPosted(slotId: string, postedUrl?: string) {
     .eq("id", slotId);
 
   if (error) return { error: error.message };
+
+  // Also update the linked content request to "posted"
+  const { data: slot } = await supabase
+    .from("schedule_slots")
+    .select("request_id")
+    .eq("id", slotId)
+    .single();
+
+  if (slot?.request_id) {
+    await supabase
+      .from("content_requests")
+      .update({ status: "posted", updated_at: new Date().toISOString() })
+      .eq("id", slot.request_id);
+  }
+
   revalidatePath("/schedule");
+  revalidatePath("/requests");
   return { error: null };
 }
 
