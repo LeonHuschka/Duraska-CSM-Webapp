@@ -120,9 +120,14 @@ export async function updateRequestStatus(
   const supabase = await createClient();
   await getPersonaId();
 
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from("content_requests")
-    .update({ status: newStatus, updated_at: new Date().toISOString() })
+    .update({
+      status: newStatus,
+      updated_at: now,
+      ...(newStatus === "shooted" ? { shooted_at: now } : {}),
+    })
     .eq("id", requestId);
 
   if (error) throw new Error(error.message);
@@ -180,12 +185,14 @@ export async function updateRequestPosition(
     }
   }
 
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from("content_requests")
     .update({
       position: newPosition,
       ...(newStatus ? { status: newStatus } : {}),
-      updated_at: new Date().toISOString(),
+      updated_at: now,
+      ...(newStatus === "shooted" ? { shooted_at: now } : {}),
     })
     .eq("id", requestId);
 

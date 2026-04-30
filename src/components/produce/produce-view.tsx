@@ -70,7 +70,7 @@ function formatRelativeDate(dateStr: string): string {
   return formatDate(dateStr);
 }
 
-const TARGET_DAYS = 14; // desired advance buffer in days
+const TARGET_DAYS = 10; // desired advance buffer in days
 
 export function ProduceView({
   requests,

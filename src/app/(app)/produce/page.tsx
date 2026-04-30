@@ -54,12 +54,13 @@ export default async function ProducePage() {
       .select("*")
       .eq("persona_id", personaId)
       .order("position", { ascending: true }),
+    // Count all requests that were shot this week (shooted_at set within 7 days)
+    // regardless of current status — catches those already moved to edited/scheduled/posted
     supabase
       .from("content_requests")
       .select("id", { count: "exact", head: true })
       .eq("persona_id", personaId)
-      .eq("status", "shooted")
-      .gte("updated_at", oneWeekAgo.toISOString()),
+      .gte("shooted_at", oneWeekAgo.toISOString()),
     // Model stat: shooted + edited + scheduled = full advance pool
     supabase
       .from("content_requests")

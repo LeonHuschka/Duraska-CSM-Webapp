@@ -86,6 +86,7 @@ export async function updateRequestDetail(
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from("content_requests")
     .update({
@@ -95,7 +96,8 @@ export async function updateRequestDetail(
       due_date: data.due_date || null,
       inspo_link: data.inspo_link || null,
       is_nsfw: data.is_nsfw ?? false,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
+      ...(data.status === "shooted" ? { shooted_at: now } : {}),
     })
     .eq("id", requestId);
 
