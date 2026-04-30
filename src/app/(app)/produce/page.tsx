@@ -87,6 +87,7 @@ export default async function ProducePage() {
   const readyCount = readyResult.count ?? 0;
   const timeslotsPerDay = Math.max(timeslotsResult.count ?? 1, 1);
   const daysOfContent = Math.floor(readyCount / timeslotsPerDay);
+  const weeklyTarget = timeslotsPerDay * 7;
 
   return (
     <ProduceView
@@ -97,6 +98,7 @@ export default async function ProducePage() {
       isModel={isModel}
       advanceCount={advanceCount}
       daysOfContent={daysOfContent}
+      weeklyTarget={weeklyTarget}
     />
   );
 }

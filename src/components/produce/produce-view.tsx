@@ -48,6 +48,7 @@ interface ProduceViewProps {
   isModel?: boolean;
   advanceCount?: number;
   daysOfContent?: number;
+  weeklyTarget?: number;
 }
 
 function formatDate(dateStr: string): string {
@@ -69,6 +70,8 @@ function formatRelativeDate(dateStr: string): string {
   return formatDate(dateStr);
 }
 
+const TARGET_DAYS = 14; // desired advance buffer in days
+
 export function ProduceView({
   requests,
   contentTypes,
@@ -77,6 +80,7 @@ export function ProduceView({
   isModel = false,
   advanceCount = 0,
   daysOfContent = 0,
+  weeklyTarget = 0,
 }: ProduceViewProps) {
   const [sortBy, setSortBy] = useState<SortKey>("due_date");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -150,69 +154,103 @@ export function ProduceView({
         <CreateRequestDialog contentTypes={contentTypes} />
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Stats — 3 cards in one row */}
+      <div className="grid grid-cols-3 gap-4">
+
+        {/* Card 1: Open Requests */}
         <div className="rounded-xl border border-border/50 bg-card p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-purple-500/15 p-2.5">
+            <div className="rounded-lg bg-purple-500/15 p-2.5 shrink-0">
               <Camera className="h-5 w-5 text-purple-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-2xl font-bold">{openCount}</p>
               <p className="text-xs text-muted-foreground">Open Requests</p>
             </div>
           </div>
         </div>
+
+        {/* Card 2: Shot this week + progress toward weekly target */}
         <div className="rounded-xl border border-border/50 bg-card p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-green-500/15 p-2.5">
+            <div className="rounded-lg bg-green-500/15 p-2.5 shrink-0">
               <CheckCircle2 className="h-5 w-5 text-green-400" />
             </div>
-            <div>
-              <p className="text-2xl font-bold">{shotLastWeek}</p>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-1.5">
+                <p className="text-2xl font-bold">{shotLastWeek}</p>
+                {weeklyTarget > 0 && (
+                  <span className="text-sm text-muted-foreground">/ {weeklyTarget}</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">Shot this week</p>
+              {weeklyTarget > 0 && (
+                <p className={`mt-0.5 text-[11px] font-medium ${
+                  shotLastWeek >= weeklyTarget ? "text-green-400" : "text-amber-400"
+                }`}>
+                  {shotLastWeek >= weeklyTarget
+                    ? "Weekly target reached ✓"
+                    : `${weeklyTarget - shotLastWeek} to go`}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Model: advance pool count */}
-        {isModel && (
-          <div className="col-span-2 rounded-xl border border-border/50 bg-card p-4">
+        {/* Card 3: Role-specific — Model sees advance count, VA sees days of content */}
+        {isModel ? (
+          <div className="rounded-xl border border-border/50 bg-card p-4">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-amber-500/15 p-2.5">
+              <div className="rounded-lg bg-amber-500/15 p-2.5 shrink-0">
                 <TrendingUp className="h-5 w-5 text-amber-400" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-2xl font-bold">{advanceCount}</p>
-                <p className="text-xs text-muted-foreground">In advance (shot + edited + scheduled)</p>
+                <p className="text-xs text-muted-foreground">In advance</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground/60">shot + edited + scheduled</p>
               </div>
             </div>
           </div>
-        )}
-
-        {/* VA/Editor: days of content remaining */}
-        {!isModel && (
-          <div className="col-span-2 rounded-xl border border-border/50 bg-card p-4">
+        ) : (
+          <div className={`rounded-xl border bg-card p-4 ${
+            daysOfContent >= TARGET_DAYS
+              ? "border-green-500/40"
+              : daysOfContent >= 7
+                ? "border-amber-500/40"
+                : "border-red-500/40"
+          }`}>
             <div className="flex items-center gap-3">
-              <div className={`rounded-lg p-2.5 ${
-                daysOfContent >= 7
+              <div className={`rounded-lg p-2.5 shrink-0 ${
+                daysOfContent >= TARGET_DAYS
                   ? "bg-green-500/15"
-                  : daysOfContent >= 3
+                  : daysOfContent >= 7
                     ? "bg-amber-500/15"
                     : "bg-red-500/15"
               }`}>
                 <CalendarDays className={`h-5 w-5 ${
-                  daysOfContent >= 7
+                  daysOfContent >= TARGET_DAYS
                     ? "text-green-400"
-                    : daysOfContent >= 3
+                    : daysOfContent >= 7
                       ? "text-amber-400"
                       : "text-red-400"
                 }`} />
               </div>
-              <div>
-                <p className="text-2xl font-bold">{daysOfContent}d</p>
-                <p className="text-xs text-muted-foreground">
-                  Advance content — {daysOfContent === 0 ? "no buffer!" : daysOfContent < 3 ? "running low" : daysOfContent < 7 ? "okay" : "well stocked"}
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-1.5">
+                  <p className="text-2xl font-bold">{daysOfContent}d</p>
+                  <span className="text-sm text-muted-foreground">/ {TARGET_DAYS}d</span>
+                </div>
+                <p className="text-xs text-muted-foreground">Advance content</p>
+                <p className={`mt-0.5 text-[11px] font-medium ${
+                  daysOfContent >= TARGET_DAYS
+                    ? "text-green-400"
+                    : daysOfContent >= 7
+                      ? "text-amber-400"
+                      : "text-red-400"
+                }`}>
+                  {daysOfContent >= TARGET_DAYS
+                    ? "Buffer full ✓"
+                    : `${TARGET_DAYS - daysOfContent}d still needed`}
                 </p>
               </div>
             </div>
