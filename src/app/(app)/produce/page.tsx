@@ -42,7 +42,7 @@ export default async function ProducePage() {
     ? ["requested"]
     : ["requested", "shooted", "edited"];
 
-  const [requestsResult, typesResult, shotLastWeekResult] = await Promise.all([
+  const [requestsResult, typesResult, shotLastWeekResult, advanceResult, readyResult, timeslotsResult] = await Promise.all([
     supabase
       .from("content_requests")
       .select("*")
@@ -60,12 +60,33 @@ export default async function ProducePage() {
       .eq("persona_id", personaId)
       .eq("status", "shooted")
       .gte("updated_at", oneWeekAgo.toISOString()),
+    // Model stat: shooted + edited + scheduled = full advance pool
+    supabase
+      .from("content_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("persona_id", personaId)
+      .in("status", ["shooted", "edited", "scheduled"]),
+    // VA stat: edited + scheduled = finished content ready to post
+    supabase
+      .from("content_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("persona_id", personaId)
+      .in("status", ["edited", "scheduled"]),
+    // Timeslots per day to calculate days of advance content
+    supabase
+      .from("posting_timeslots")
+      .select("id", { count: "exact", head: true })
+      .eq("persona_id", personaId),
   ]);
 
   const requests = (requestsResult.data ?? []) as ContentRequest[];
   const contentTypes = (typesResult.data ?? []) as ContentType[];
   const shotLastWeek = shotLastWeekResult.count ?? 0;
   const openCount = requests.filter((r) => r.status === "requested").length;
+  const advanceCount = advanceResult.count ?? 0;
+  const readyCount = readyResult.count ?? 0;
+  const timeslotsPerDay = Math.max(timeslotsResult.count ?? 1, 1);
+  const daysOfContent = Math.floor(readyCount / timeslotsPerDay);
 
   return (
     <ProduceView
@@ -74,6 +95,8 @@ export default async function ProducePage() {
       openCount={openCount}
       shotLastWeek={shotLastWeek}
       isModel={isModel}
+      advanceCount={advanceCount}
+      daysOfContent={daysOfContent}
     />
   );
 }

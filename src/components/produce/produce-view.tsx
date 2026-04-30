@@ -10,6 +10,8 @@ import {
   Tag,
   Clock,
   ExternalLink,
+  TrendingUp,
+  CalendarDays,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -44,6 +46,8 @@ interface ProduceViewProps {
   openCount: number;
   shotLastWeek: number;
   isModel?: boolean;
+  advanceCount?: number;
+  daysOfContent?: number;
 }
 
 function formatDate(dateStr: string): string {
@@ -71,6 +75,8 @@ export function ProduceView({
   openCount,
   shotLastWeek,
   isModel = false,
+  advanceCount = 0,
+  daysOfContent = 0,
 }: ProduceViewProps) {
   const [sortBy, setSortBy] = useState<SortKey>("due_date");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -168,6 +174,50 @@ export function ProduceView({
             </div>
           </div>
         </div>
+
+        {/* Model: advance pool count */}
+        {isModel && (
+          <div className="col-span-2 rounded-xl border border-border/50 bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-amber-500/15 p-2.5">
+                <TrendingUp className="h-5 w-5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{advanceCount}</p>
+                <p className="text-xs text-muted-foreground">In advance (shot + edited + scheduled)</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VA/Editor: days of content remaining */}
+        {!isModel && (
+          <div className="col-span-2 rounded-xl border border-border/50 bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className={`rounded-lg p-2.5 ${
+                daysOfContent >= 7
+                  ? "bg-green-500/15"
+                  : daysOfContent >= 3
+                    ? "bg-amber-500/15"
+                    : "bg-red-500/15"
+              }`}>
+                <CalendarDays className={`h-5 w-5 ${
+                  daysOfContent >= 7
+                    ? "text-green-400"
+                    : daysOfContent >= 3
+                      ? "text-amber-400"
+                      : "text-red-400"
+                }`} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{daysOfContent}d</p>
+                <p className="text-xs text-muted-foreground">
+                  Advance content — {daysOfContent === 0 ? "no buffer!" : daysOfContent < 3 ? "running low" : daysOfContent < 7 ? "okay" : "well stocked"}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
