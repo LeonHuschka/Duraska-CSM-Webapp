@@ -53,25 +53,21 @@ export default async function SchedulePage() {
   const pastScheduledSlots = slots.filter(
     (s) => s.status === "scheduled" && new Date(s.scheduled_for) < now
   );
-  if (pastScheduledSlots.length > 0) {
-    await Promise.all(
-      pastScheduledSlots.map(async (slot) => {
+  for (const slot of pastScheduledSlots) {
+    const { error } = await supabase
+      .from("schedule_slots")
+      .update({ status: "posted", posted_at: now.toISOString() })
+      .eq("id", slot.id);
+    if (!error) {
+      slot.status = "posted";
+      slot.posted_at = now.toISOString();
+      if (slot.request_id) {
         await supabase
-          .from("schedule_slots")
-          .update({ status: "posted", posted_at: now.toISOString() })
-          .eq("id", slot.id);
-        // Also mark linked content request as posted
-        if (slot.request_id) {
-          await supabase
-            .from("content_requests")
-            .update({ status: "posted", updated_at: now.toISOString() })
-            .eq("id", slot.request_id);
-        }
-        // Update local data so UI reflects it immediately
-        slot.status = "posted";
-        slot.posted_at = now.toISOString();
-      })
-    );
+          .from("content_requests")
+          .update({ status: "posted", updated_at: now.toISOString() })
+          .eq("id", slot.request_id);
+      }
+    }
   }
 
   // Fetch assets for slots that have linked requests

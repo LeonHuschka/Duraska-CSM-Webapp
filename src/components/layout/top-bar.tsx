@@ -38,7 +38,14 @@ export function TopBar({ userEmail, userName }: TopBarProps) {
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border/50 px-4 md:justify-end md:px-6">
-      <MobileSidebar />
+      {/* Mobile: logo text instead of hamburger (bottom nav handles navigation) */}
+      <span className="text-sm font-semibold tracking-tight text-foreground md:hidden">
+        Duraska
+      </span>
+      {/* Tablet-only: keep hamburger as fallback for the slide-in sidebar */}
+      <div className="hidden sm:block md:hidden">
+        <MobileSidebar />
+      </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="gap-2.5 rounded-full px-2 pr-3">

@@ -6,6 +6,7 @@ import type { PersonaWithRole } from "@/lib/types/database";
 import { PersonaProvider } from "@/hooks/use-persona";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { TopBar } from "@/components/layout/top-bar";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 
 export default async function AppLayout({
   children,
@@ -58,7 +59,8 @@ export default async function AppLayout({
               userEmail={user.email ?? ""}
               userName={profile?.full_name ?? null}
             />
-            <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
+            <main className="flex-1 overflow-auto p-4 pb-20 md:p-6 md:pb-6">{children}</main>
+            <MobileBottomNav />
           </div>
         </PersonaProvider>
       ) : (

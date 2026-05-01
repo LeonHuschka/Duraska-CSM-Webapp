@@ -14,6 +14,8 @@ import {
   CalendarDays,
   Search,
   X,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +91,7 @@ export function ProduceView({
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"cards" | "compact">("cards");
 
   const typeMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -167,8 +170,8 @@ export function ProduceView({
         <CreateRequestDialog contentTypes={contentTypes} />
       </div>
 
-      {/* Stats — 3 cards in one row */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* Stats — 1 col on mobile, 3 on sm+ */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
 
         {/* Card 1: Open Requests */}
         <div className="rounded-xl border border-border/50 bg-card p-4">
@@ -345,6 +348,32 @@ export function ProduceView({
         <span className="ml-auto text-xs text-muted-foreground">
           {sorted.length} request{sorted.length !== 1 ? "s" : ""}
         </span>
+
+        {/* View mode toggle */}
+        <div className="flex items-center gap-0.5 rounded-lg border border-border/50 bg-card p-0.5">
+          <button
+            onClick={() => setViewMode("cards")}
+            className={`rounded-md p-1.5 transition-colors ${
+              viewMode === "cards"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Card view"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => setViewMode("compact")}
+            className={`rounded-md p-1.5 transition-colors ${
+              viewMode === "compact"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Compact view"
+          >
+            <List className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Tile Grid */}
@@ -360,7 +389,37 @@ export function ProduceView({
               : "All caught up!"}
           </p>
         </div>
+      ) : viewMode === "compact" ? (
+        /* Compact view — dense title-only tiles */
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          {sorted.map((request) => (
+            <Link
+              key={request.id}
+              href={`/requests/${request.id}`}
+              className={`group rounded-lg border px-3 py-2.5 transition-all duration-150 ${
+                request.is_nsfw
+                  ? "border-blue-500/30 bg-blue-500/5 hover:border-blue-500/50"
+                  : "border-border/50 bg-card hover:border-border hover:bg-accent/30"
+              }`}
+            >
+              <p className="text-xs font-medium leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+                {request.title}
+              </p>
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full shrink-0 ${
+                  request.is_nsfw ? "bg-blue-400" : "bg-green-400"
+                }`} />
+                {request.content_type_id && typeMap[request.content_type_id] && (
+                  <span className="text-[10px] text-muted-foreground truncate">
+                    {typeMap[request.content_type_id]}
+                  </span>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
       ) : (
+        /* Card view */
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {sorted.map((request) => {
             const typeName = request.content_type_id
