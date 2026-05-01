@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Link as LinkIcon } from "lucide-react";
+import { Plus, Pencil, Trash2, Link as LinkIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,7 +44,6 @@ interface FormValues {
   content_type_id: string;
   description: string;
   priority: string;
-  due_date: string;
   inspo_link: string;
   is_nsfw: boolean;
 }
@@ -62,6 +61,21 @@ export function CreateRequestDialog({
   const [newTypeName, setNewTypeName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [selectedDueDays, setSelectedDueDays] = useState<number | null>(null);
+
+  const DUE_DATE_OPTIONS = [1, 3, 5, 7, 10, 14];
+
+  function addDays(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split("T")[0]; // YYYY-MM-DD
+  }
+
+  function formatDueDate(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
 
   const {
     register,
@@ -75,7 +89,6 @@ export function CreateRequestDialog({
       content_type_id: "",
       description: "",
       priority: "medium",
-      due_date: "",
       inspo_link: "",
       is_nsfw: false,
     },
@@ -145,17 +158,22 @@ export function CreateRequestDialog({
   };
 
   const onSubmit = async (values: FormValues) => {
+    if (selectedDueDays === null) {
+      toast.error("Please select a due date");
+      return;
+    }
     try {
       await createRequest({
         content_type_id: values.content_type_id,
         description: values.description || undefined,
         priority: values.priority,
-        due_date: values.due_date || undefined,
+        due_date: addDays(selectedDueDays),
         inspo_link: values.inspo_link || undefined,
         is_nsfw: values.is_nsfw,
       });
       toast.success("Request created");
       reset();
+      setSelectedDueDays(null);
       setOpen(false);
     } catch (err) {
       toast.error(
@@ -163,12 +181,6 @@ export function CreateRequestDialog({
       );
     }
   };
-
-  const today = new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -422,24 +434,40 @@ export function CreateRequestDialog({
 
             {/* Due Date */}
             <div className="space-y-2">
-              <Label htmlFor="due_date">Due Date</Label>
-              <Input
-                id="due_date"
-                type="date"
-                {...register("due_date", { required: "Due date is required" })}
-              />
-              {errors.due_date && (
-                <p className="text-xs text-destructive">
-                  {errors.due_date.message}
-                </p>
+              <Label>Due Date</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {DUE_DATE_OPTIONS.map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => setSelectedDueDays(days)}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                      selectedDueDays === days
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "border border-border/50 bg-card text-muted-foreground hover:border-border hover:text-foreground"
+                    }`}
+                  >
+                    +{days}d
+                  </button>
+                ))}
+              </div>
+              {selectedDueDays !== null ? (
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatDueDate(selectedDueDays)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDueDays(null)}
+                    className="text-muted-foreground/50 hover:text-muted-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-muted-foreground/50">Select days from today</p>
               )}
             </div>
-          </div>
-
-          {/* Created at (auto) */}
-          <div className="space-y-1">
-            <Label className="text-muted-foreground text-xs">Created</Label>
-            <p className="text-sm">{today}</p>
           </div>
 
           <DialogFooter>
