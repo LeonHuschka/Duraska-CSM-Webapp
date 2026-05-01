@@ -54,13 +54,17 @@ export default async function ProducePage() {
       .select("*")
       .eq("persona_id", personaId)
       .order("position", { ascending: true }),
-    // Count all requests that were shot this week (shooted_at set within 7 days)
-    // regardless of current status — catches those already moved to edited/scheduled/posted
+    // Count requests shot this week.
+    // Primary signal: shooted_at >= 7 days ago (set when status moves to "shooted").
+    // Fallback: shooted_at IS NULL but created_at is within this week and status is
+    //   beyond "requested" — catches any historical records still missing shooted_at.
     supabase
       .from("content_requests")
       .select("id", { count: "exact", head: true })
       .eq("persona_id", personaId)
-      .gte("shooted_at", oneWeekAgo.toISOString()),
+      .or(
+        `shooted_at.gte.${oneWeekAgo.toISOString()},and(shooted_at.is.null,created_at.gte.${oneWeekAgo.toISOString()},status.neq.requested)`
+      ),
     // Model stat: shooted + edited + scheduled = full advance pool
     supabase
       .from("content_requests")
