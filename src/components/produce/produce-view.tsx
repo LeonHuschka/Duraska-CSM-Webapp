@@ -294,85 +294,91 @@ export function ProduceView({
       </div>
 
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <ArrowUpDown className="h-3.5 w-3.5" />
-          Sort
+      <div className="space-y-2">
+        {/* Filter/sort row — single horizontal line, scrollable on mobile */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0">
+            <ArrowUpDown className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Sort</span>
+          </div>
+          <Select
+            value={sortBy}
+            onValueChange={(v) => setSortBy(v as SortKey)}
+          >
+            <SelectTrigger className="w-[120px] h-8 text-xs shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="due_date">Due Date</SelectItem>
+              <SelectItem value="created_at">Newest</SelectItem>
+              <SelectItem value="effort">Effort</SelectItem>
+              <SelectItem value="art">Art</SelectItem>
+              <SelectItem value="status">Status</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {!isModel && (
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[120px] h-8 text-xs shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="requested">Requested</SelectItem>
+                <SelectItem value="shooted">Shooted</SelectItem>
+                <SelectItem value="edited">Edited</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+
+          {contentTypes.length > 0 && (
+            <Select value={filterType} onValueChange={setFilterType}>
+              <SelectTrigger className="w-[120px] h-8 text-xs shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {contentTypes.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
-        <Select
-          value={sortBy}
-          onValueChange={(v) => setSortBy(v as SortKey)}
-        >
-          <SelectTrigger className="w-[140px] h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="due_date">Due Date</SelectItem>
-            <SelectItem value="created_at">Newest</SelectItem>
-            <SelectItem value="effort">Effort</SelectItem>
-            <SelectItem value="art">Art</SelectItem>
-            <SelectItem value="status">Status</SelectItem>
-          </SelectContent>
-        </Select>
 
-        {!isModel && (
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[130px] h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="requested">Requested</SelectItem>
-              <SelectItem value="shooted">Shooted</SelectItem>
-              <SelectItem value="edited">Edited</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
+        {/* Count + view toggle row */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {sorted.length} request{sorted.length !== 1 ? "s" : ""}
+          </span>
 
-        {contentTypes.length > 0 && (
-          <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-[130px] h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              {contentTypes.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        <span className="ml-auto text-xs text-muted-foreground">
-          {sorted.length} request{sorted.length !== 1 ? "s" : ""}
-        </span>
-
-        {/* View mode toggle */}
-        <div className="flex items-center gap-0.5 rounded-lg border border-border/50 bg-card p-0.5">
-          <button
-            onClick={() => setViewMode("cards")}
-            className={`rounded-md p-1.5 transition-colors ${
-              viewMode === "cards"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Card view"
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => setViewMode("compact")}
-            className={`rounded-md p-1.5 transition-colors ${
-              viewMode === "compact"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Compact view"
-          >
-            <List className="h-3.5 w-3.5" />
-          </button>
+          {/* View mode toggle */}
+          <div className="flex items-center gap-0.5 rounded-lg border border-border/50 bg-card p-0.5">
+            <button
+              onClick={() => setViewMode("cards")}
+              className={`rounded-md p-1.5 transition-colors ${
+                viewMode === "cards"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Card view"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode("compact")}
+              className={`rounded-md p-1.5 transition-colors ${
+                viewMode === "compact"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Compact view"
+            >
+              <List className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

@@ -199,6 +199,7 @@ function DroppableTimeslot({
   onUnschedule,
   onMarkScheduled,
   onMarkPosted,
+  compact = false,
 }: {
   id: string;
   timeLabel: string;
@@ -209,6 +210,7 @@ function DroppableTimeslot({
   onUnschedule: (slotId: string) => void;
   onMarkScheduled: (slotId: string) => void;
   onMarkPosted: (slotId: string) => void;
+  compact?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const isVideo = asset?.mime_type?.startsWith("video/");
@@ -227,6 +229,76 @@ function DroppableTimeslot({
       ? "border-primary/50 bg-primary/5 border-dashed"
       : "border-border/30 bg-muted/20 border-dashed";
 
+  /* ── Compact (mobile) variant ── */
+  if (compact) {
+    return (
+      <div
+        ref={setNodeRef}
+        className={`flex flex-col rounded-xl border transition-all duration-200 ${borderClass}`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/30">
+          <div className="flex items-center gap-1 min-w-0">
+            {isPosted ? (
+              <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
+            ) : isScheduled ? (
+              <Loader className="h-3 w-3 text-amber-400 shrink-0" />
+            ) : (
+              <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+            )}
+            <span className="text-[11px] font-semibold truncate">{timeLabel}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${PLATFORM_COLORS[platform] ?? PLATFORM_COLORS.other}`}
+            />
+            {slot && !isPosted && (
+              <button
+                className="text-muted-foreground hover:text-destructive p-0.5"
+                onClick={() => onUnschedule(slot.id)}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        {slot && linkedRequest ? (
+          <div className="flex flex-col gap-1.5 p-1.5">
+            <p className="text-[11px] font-medium leading-tight line-clamp-2">{linkedRequest.title}</p>
+            {isPosted && (
+              <span className="text-[9px] font-medium text-green-400 uppercase">Posted</span>
+            )}
+            {isScheduled && !isPosted && (
+              <button
+                onClick={() => onMarkPosted(slot.id)}
+                className="flex items-center justify-center gap-1 rounded-md bg-green-500/15 px-1.5 py-1 text-[10px] font-medium text-green-400 hover:bg-green-500/25 transition-colors"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Posted
+              </button>
+            )}
+            {!isScheduled && !isPosted && (
+              <button
+                onClick={() => onMarkScheduled(slot.id)}
+                className="flex items-center justify-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-1 text-[10px] font-medium text-amber-400 hover:bg-amber-500/25 transition-colors"
+              >
+                <Loader className="h-3 w-3" />
+                Scheduled
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center py-4 px-1">
+            <p className="text-[10px] text-muted-foreground/40 text-center">Empty</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── Full (desktop) variant ── */
   return (
     <div
       ref={setNodeRef}
@@ -777,7 +849,38 @@ export function ScheduleView({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
             >
-              <div className="flex gap-4">
+              {/* ── Mobile: compact 3-col grid, no pool ── */}
+              <div className="md:hidden">
+                <div className="grid grid-cols-3 gap-2">
+                  {dailyTimeslots.map((ts) => {
+                    const slot = slotsByTimeslot[ts.id] ?? null;
+                    const linkedRequest = slot?.request_id
+                      ? requests.find((r) => r.id === slot.request_id) ?? null
+                      : null;
+                    const asset = slot?.request_id
+                      ? assetsByRequest[slot.request_id] ?? null
+                      : null;
+                    return (
+                      <DroppableTimeslot
+                        key={ts.id}
+                        id={ts.id}
+                        timeLabel={ts.displayTime}
+                        slot={slot}
+                        linkedRequest={linkedRequest}
+                        asset={asset}
+                        platform={ts.platform}
+                        onUnschedule={handleUnschedule}
+                        onMarkScheduled={handleMarkScheduled}
+                        onMarkPosted={handleMarkPosted}
+                        compact
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Desktop: pool + wrapped timeslot columns ── */}
+              <div className="hidden md:flex gap-4">
                 {/* Left panel: available edited requests */}
                 <div className="w-56 shrink-0 space-y-3">
                   <div className="flex items-center justify-between">

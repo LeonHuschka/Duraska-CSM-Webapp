@@ -25,6 +25,13 @@ import type { ContentRequest, ContentType } from "@/lib/types/database";
 import { RequestCard } from "@/components/requests/request-card";
 import { CreateEditedDialog } from "@/components/requests/create-edited-dialog";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { updateRequestPosition } from "@/app/(app)/requests/actions";
 
 const COLUMNS = [
@@ -122,6 +129,7 @@ export function KanbanBoard({ requests, contentTypes, personaId }: KanbanBoardPr
   const [items, setItems] = useState<ContentRequest[]>(requests);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
+  const [mobileCol, setMobileCol] = useState<string>("requested");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -270,6 +278,8 @@ export function KanbanBoard({ requests, contentTypes, personaId }: KanbanBoardPr
     setItems(requests);
   }, [requests]);
 
+  const mobileColData = grouped.find((g) => g.id === mobileCol);
+
   return (
     <div className="space-y-6">
       <div>
@@ -281,39 +291,74 @@ export function KanbanBoard({ requests, contentTypes, personaId }: KanbanBoardPr
         </p>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
-      >
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4 md:-mx-6 md:px-6">
-          {grouped.map((column) => (
-            <DroppableColumn
-              key={column.id}
-              column={column}
-              items={column.items}
-              isOver={overColumnId === column.id}
-              personaId={personaId}
-              action={
-                column.id === "edited" ? (
-                  <CreateEditedDialog contentTypes={contentTypes} />
-                ) : undefined
-              }
-            />
-          ))}
-        </div>
+      {/* ── Mobile view: single-column with dropdown picker ── */}
+      <div className="md:hidden space-y-3">
+        <Select value={mobileCol} onValueChange={setMobileCol}>
+          <SelectTrigger className="w-full h-10 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {grouped.map((col) => (
+              <SelectItem key={col.id} value={col.id}>
+                <span className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${col.color}`} />
+                  {col.label}
+                  <span className="ml-1 text-muted-foreground text-xs">({col.items.length})</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <DragOverlay>
-          {activeRequest ? (
-            <div className="rotate-2 scale-105">
-              <RequestCard request={activeRequest} />
+        <div className="space-y-2">
+          {mobileColData && mobileColData.items.length === 0 ? (
+            <div className="flex min-h-[120px] items-center justify-center rounded-xl border border-dashed border-border/50 bg-muted/20 p-6">
+              <p className="text-xs text-muted-foreground/60">No requests in this stage</p>
             </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+          ) : (
+            mobileColData?.items.map((request) => (
+              <RequestCard key={request.id} request={request} personaId={personaId} />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Desktop view: DnD horizontal kanban ── */}
+      <div className="hidden md:block">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <div className="flex gap-4 overflow-x-auto pb-4 -mx-6 px-6">
+            {grouped.map((column) => (
+              <DroppableColumn
+                key={column.id}
+                column={column}
+                items={column.items}
+                isOver={overColumnId === column.id}
+                personaId={personaId}
+                action={
+                  column.id === "edited" ? (
+                    <CreateEditedDialog contentTypes={contentTypes} />
+                  ) : undefined
+                }
+              />
+            ))}
+          </div>
+
+          <DragOverlay>
+            {activeRequest ? (
+              <div className="rotate-2 scale-105">
+                <RequestCard request={activeRequest} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
     </div>
   );
 }
