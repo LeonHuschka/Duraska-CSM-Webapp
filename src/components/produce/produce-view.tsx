@@ -12,7 +12,10 @@ import {
   ExternalLink,
   TrendingUp,
   CalendarDays,
+  Search,
+  X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -85,6 +88,7 @@ export function ProduceView({
   const [sortBy, setSortBy] = useState<SortKey>("due_date");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
+  const [search, setSearch] = useState("");
 
   const typeMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -100,8 +104,17 @@ export function ProduceView({
     if (filterType !== "all") {
       items = items.filter((r) => r.content_type_id === filterType);
     }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.description?.toLowerCase().includes(q) ||
+          r.inspo_link?.toLowerCase().includes(q)
+      );
+    }
     return items;
-  }, [requests, filterStatus, filterType, isModel]);
+  }, [requests, filterStatus, filterType, search, isModel]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -255,6 +268,25 @@ export function ProduceView({
               </div>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Input
+          placeholder="Search by title, description, link…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9 pr-9 h-9 text-sm"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
 
