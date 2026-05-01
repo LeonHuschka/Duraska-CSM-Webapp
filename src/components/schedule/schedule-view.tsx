@@ -234,66 +234,97 @@ function DroppableTimeslot({
     return (
       <div
         ref={setNodeRef}
-        className={`flex flex-col rounded-xl border transition-all duration-200 ${borderClass}`}
+        className={`flex flex-col rounded-xl border overflow-hidden transition-all duration-200 ${borderClass}`}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/30">
-          <div className="flex items-center gap-1 min-w-0">
-            {isPosted ? (
-              <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
-            ) : isScheduled ? (
-              <Loader className="h-3 w-3 text-amber-400 shrink-0" />
-            ) : (
-              <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-            )}
-            <span className="text-[11px] font-semibold truncate">{timeLabel}</span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${PLATFORM_COLORS[platform] ?? PLATFORM_COLORS.other}`}
+        {/* Media area — square crop, time+platform overlaid */}
+        <div className="relative aspect-square w-full overflow-hidden bg-muted/30">
+          {asset && isVideo ? (
+            <video
+              key={asset.id}
+              playsInline
+              preload="metadata"
+              src={`${asset.signedUrl}#t=0.001`}
+              className="h-full w-full object-cover"
             />
-            {slot && !isPosted && (
-              <button
-                className="text-muted-foreground hover:text-destructive p-0.5"
-                onClick={() => onUnschedule(slot.id)}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+          ) : asset && isImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={asset.signedUrl}
+              alt={asset.file_name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              {isOver ? (
+                <p className="text-[10px] text-primary/60">Drop</p>
+              ) : (
+                <p className="text-[10px] text-muted-foreground/30">Empty</p>
+              )}
+            </div>
+          )}
+
+          {/* Overlay: time + platform dot + remove */}
+          <div className="absolute inset-x-0 top-0 flex items-center justify-between px-1.5 py-1 bg-gradient-to-b from-black/60 to-transparent">
+            <div className="flex items-center gap-0.5">
+              {isPosted ? (
+                <CheckCircle2 className="h-2.5 w-2.5 text-green-400 shrink-0" />
+              ) : isScheduled ? (
+                <Loader className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+              ) : (
+                <Clock className="h-2.5 w-2.5 text-white/70 shrink-0" />
+              )}
+              <span className="text-[10px] font-semibold text-white leading-none">{timeLabel}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_COLORS[platform] ?? PLATFORM_COLORS.other}`} />
+              {slot && !isPosted && (
+                <button
+                  className="text-white/70 hover:text-red-400 p-0.5"
+                  onClick={() => onUnschedule(slot.id)}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Posted badge overlay at bottom */}
+          {isPosted && (
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center py-1 bg-green-500/30 backdrop-blur-sm">
+              <span className="text-[9px] font-semibold text-green-300 uppercase tracking-wide">Posted</span>
+            </div>
+          )}
         </div>
 
-        {/* Body */}
-        {slot && linkedRequest ? (
-          <div className="flex flex-col gap-1.5 p-1.5">
-            <p className="text-[11px] font-medium leading-tight line-clamp-2">{linkedRequest.title}</p>
-            {isPosted && (
-              <span className="text-[9px] font-medium text-green-400 uppercase">Posted</span>
-            )}
-            {isScheduled && !isPosted && (
-              <button
-                onClick={() => onMarkPosted(slot.id)}
-                className="flex items-center justify-center gap-1 rounded-md bg-green-500/15 px-1.5 py-1 text-[10px] font-medium text-green-400 hover:bg-green-500/25 transition-colors"
-              >
-                <CheckCircle2 className="h-3 w-3" />
-                Posted
-              </button>
-            )}
-            {!isScheduled && !isPosted && (
-              <button
-                onClick={() => onMarkScheduled(slot.id)}
-                className="flex items-center justify-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-1 text-[10px] font-medium text-amber-400 hover:bg-amber-500/25 transition-colors"
-              >
-                <Loader className="h-3 w-3" />
-                Scheduled
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-center py-4 px-1">
-            <p className="text-[10px] text-muted-foreground/40 text-center">Empty</p>
-          </div>
-        )}
+        {/* Title + action below media */}
+        <div className="px-1.5 py-1.5 space-y-1">
+          {slot && linkedRequest ? (
+            <p className="text-[10px] font-medium leading-tight line-clamp-1 text-foreground">
+              {linkedRequest.title}
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/40">—</p>
+          )}
+
+          {slot && !isPosted && isScheduled && (
+            <button
+              onClick={() => onMarkPosted(slot.id)}
+              className="w-full flex items-center justify-center gap-0.5 rounded-md bg-green-500/15 py-1 text-[9px] font-medium text-green-400 hover:bg-green-500/25 transition-colors"
+            >
+              <CheckCircle2 className="h-2.5 w-2.5" />
+              Posted
+            </button>
+          )}
+          {slot && !isPosted && !isScheduled && (
+            <button
+              onClick={() => onMarkScheduled(slot.id)}
+              className="w-full flex items-center justify-center gap-0.5 rounded-md bg-amber-500/15 py-1 text-[9px] font-medium text-amber-400 hover:bg-amber-500/25 transition-colors"
+            >
+              <Loader className="h-2.5 w-2.5" />
+              Scheduled
+            </button>
+          )}
+        </div>
       </div>
     );
   }
