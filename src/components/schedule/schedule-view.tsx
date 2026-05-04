@@ -154,6 +154,19 @@ const PLATFORM_COLORS: Record<string, string> = {
   other: "bg-gray-500",
 };
 
+// Extensible platform display config.
+// To add a new platform: add timeslots for it in Settings → it auto-appears here.
+const PLATFORM_CONFIG: Record<string, {
+  label: string;
+  dotColor: string;
+  activeClass: string;   // border + bg + text when selected
+}> = {
+  fansly:    { label: "Fansly FYP", dotColor: "bg-blue-500",  activeClass: "border-blue-500/50 bg-blue-500/10 text-blue-400" },
+  instagram: { label: "Instagram",  dotColor: "bg-pink-500",  activeClass: "border-pink-500/50 bg-pink-500/10 text-pink-400" },
+  tiktok:    { label: "TikTok",     dotColor: "bg-slate-400", activeClass: "border-slate-400/50 bg-slate-500/10 text-slate-300" },
+  other:     { label: "Other",      dotColor: "bg-gray-500",  activeClass: "border-gray-500/50 bg-gray-500/10 text-gray-400" },
+};
+
 // Draggable request card
 function DraggableRequest({
   request,
@@ -462,7 +475,11 @@ export function ScheduleView({
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [use12h, setUse12h] = useState(false);
-  const [platformFilter, setPlatformFilter] = useState<string>("all");
+  // Default to the first configured platform (alphabetical). Falls back to "fansly".
+  const [platformFilter, setPlatformFilter] = useState<string>(() => {
+    const platforms = Array.from(new Set(timeslots.map((ts) => ts.platform))).sort();
+    return platforms[0] ?? "fansly";
+  });
 
   // Detect local timezone offset
   const localOffset = -(new Date().getTimezoneOffset() / 60);
@@ -532,20 +549,20 @@ export function ScheduleView({
     return map;
   }, [slots]);
 
-  // Filter pool: NSFW gone after any use, SFW gone after both fansly + non-fansly
+  // Pool: show content eligible for the currently selected platform.
+  // Rules:
+  //   • NSFW → only in Fansly pool
+  //   • SFW  → in every platform's pool until scheduled on that specific platform
   const availableRequests = useMemo(() => {
     return editedRequests.filter((r) => {
-      const platforms = scheduledPlatformsMap[r.id];
-      if (!platforms) return true; // not scheduled anywhere
-
-      if (r.is_nsfw) return false; // NSFW: one-time use
-
-      // SFW: keep in pool unless it covers both fansly AND a non-fansly platform
-      const hasFansly = platforms.has("fansly");
-      const hasOther = Array.from(platforms).some((p) => p !== "fansly");
-      return !(hasFansly && hasOther);
+      // NSFW is exclusive to Fansly
+      if (r.is_nsfw && platformFilter !== "fansly") return false;
+      // Already scheduled on this exact platform → remove from pool
+      const scheduled = scheduledPlatformsMap[r.id];
+      if (scheduled?.has(platformFilter)) return false;
+      return true;
     });
-  }, [editedRequests, scheduledPlatformsMap]);
+  }, [editedRequests, scheduledPlatformsMap, platformFilter]);
 
   const activeRequest = useMemo(
     () => editedRequests.find((r) => r.id === activeRequestId) ?? null,
@@ -570,22 +587,20 @@ export function ScheduleView({
       // Timeslot already occupied?
       if (slotsByTimeslot[timeslotId]) return;
 
-      // Check platform category constraints for SFW content
+      // Validate scheduling constraints
       const request = editedRequests.find((r) => r.id === requestId);
       const existingPlatforms = scheduledPlatformsMap[requestId];
-      if (request && !request.is_nsfw && existingPlatforms) {
-        const targetIsFansly = timeslot.platform === "fansly";
-        const alreadyHasFansly = existingPlatforms.has("fansly");
-        const alreadyHasOther = Array.from(existingPlatforms).some((p) => p !== "fansly");
 
-        if (targetIsFansly && alreadyHasFansly) {
-          toast.error("SFW content already scheduled on Fansly");
-          return;
-        }
-        if (!targetIsFansly && alreadyHasOther) {
-          toast.error("SFW content already scheduled on a non-Fansly platform");
-          return;
-        }
+      // NSFW content can only go on Fansly
+      if (request?.is_nsfw && timeslot.platform !== "fansly") {
+        toast.error("NSFW content can only be posted on Fansly");
+        return;
+      }
+      // Already scheduled on this specific platform?
+      if (existingPlatforms?.has(timeslot.platform)) {
+        const label = PLATFORM_CONFIG[timeslot.platform]?.label ?? timeslot.platform;
+        toast.error(`Already scheduled on ${label}`);
+        return;
       }
 
       const scheduledFor = localTimeToUtcISO(selectedDay, timeslot.time_utc);
@@ -823,34 +838,42 @@ export function ScheduleView({
             </Button>
           </div>
 
-          {/* Platform filter */}
-          {availablePlatforms.length > 1 && (
-            <div className="mb-4 flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Platform</span>
-              <div className="flex gap-1">
-                <Button
-                  variant={platformFilter === "all" ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 px-2.5 text-xs"
-                  onClick={() => setPlatformFilter("all")}
-                >
-                  All
-                </Button>
-                {availablePlatforms.map((p) => (
-                  <Button
+          {/* ── Platform switcher ── */}
+          {availablePlatforms.length > 0 && (
+            <div className="mb-5 flex items-center gap-2 overflow-x-auto pb-1">
+              {availablePlatforms.map((p) => {
+                const cfg = PLATFORM_CONFIG[p] ?? {
+                  label: p.charAt(0).toUpperCase() + p.slice(1),
+                  dotColor: PLATFORM_COLORS[p] ?? "bg-gray-500",
+                  activeClass: "border-primary/50 bg-primary/10 text-primary",
+                };
+                const isActive = platformFilter === p;
+                // Count how many of today's slots are filled for this platform
+                const todayFilled = Object.values(slotsByTimeslot).filter(
+                  (s) => s.platform === p && s.request_id
+                ).length;
+                const todayTotal = timeslots.filter((ts) => ts.platform === p).length;
+
+                return (
+                  <button
                     key={p}
-                    variant={platformFilter === p ? "default" : "outline"}
-                    size="sm"
-                    className="h-7 px-2.5 text-xs gap-1.5"
                     onClick={() => setPlatformFilter(p)}
+                    className={`flex items-center gap-2.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all shrink-0 ${
+                      isActive
+                        ? cfg.activeClass
+                        : "border-border/30 text-muted-foreground hover:border-border hover:text-foreground"
+                    }`}
                   >
-                    <span
-                      className={`h-2 w-2 rounded-full ${PLATFORM_COLORS[p] ?? PLATFORM_COLORS.other}`}
-                    />
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </Button>
-                ))}
-              </div>
+                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${cfg.dotColor}`} />
+                    <span>{cfg.label}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                      isActive ? "bg-white/15" : "bg-muted text-muted-foreground"
+                    }`}>
+                      {todayFilled}/{todayTotal}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
