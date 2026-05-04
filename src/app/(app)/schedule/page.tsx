@@ -35,11 +35,15 @@ export default async function SchedulePage() {
         .select("*")
         .eq("persona_id", personaId)
         .order("position", { ascending: true }),
+      // Pool candidates: include edited + scheduled + posted so SFW content
+      // that's already on Fansly (status="scheduled"/"posted") still appears
+      // in the IG / TikTok pool. The client-side pool logic uses
+      // scheduledPlatformsMap to remove it per-platform once scheduled there.
       supabase
         .from("content_requests")
         .select("id, title, status, priority, content_type_id, is_nsfw")
         .eq("persona_id", personaId)
-        .eq("status", "edited")
+        .in("status", ["edited", "scheduled", "posted"])
         .order("updated_at", { ascending: false }),
     ]);
 
