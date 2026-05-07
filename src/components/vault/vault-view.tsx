@@ -189,7 +189,12 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
 }
 
 // ─── Vault view ─────────────────────────────────────────────────────────────
-const STAGE_OPTIONS = ["all", "raw", "edited", "final"] as const;
+const STAGE_OPTIONS = [
+  { value: "all",    label: "All" },
+  { value: "raw",    label: "Raw" },
+  { value: "edited", label: "Edited ✓" },
+  { value: "final",  label: "Final" },
+] as const;
 const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
 const PLATFORM_FILTER_OPTIONS = [
@@ -202,7 +207,7 @@ const PLATFORM_FILTER_OPTIONS = [
 
 export function VaultView({ assets }: { assets: VaultAsset[] }) {
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<string>("all");
+  const [stageFilter, setStageFilter] = useState<string>("edited");
   const [nsfwFilter, setNsfwFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
 
@@ -274,15 +279,15 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
         <div className="flex items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
           {STAGE_OPTIONS.map((s) => (
             <button
-              key={s}
-              onClick={() => setStageFilter(s)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors capitalize ${
-                stageFilter === s
+              key={s.value}
+              onClick={() => setStageFilter(s.value)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                stageFilter === s.value
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {s === "all" ? "All stages" : s}
+              {s.label}
             </button>
           ))}
         </div>
