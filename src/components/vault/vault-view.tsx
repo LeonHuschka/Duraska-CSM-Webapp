@@ -92,7 +92,8 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
             key={asset.id}
             src={`${asset.signedUrl}#t=0.001`}
             playsInline
-            preload="none"           // don't preload data — we only want the poster frame
+            preload="metadata"       // loads first frame as visible thumbnail (~few KB)
+            controls={playing}       // show controls only while playing
             onEnded={() => setPlaying(false)}
             className="h-full w-full object-cover"
           />
