@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { Download, Search, X, Archive } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { VaultAsset } from "@/app/(app)/vault/page";
@@ -39,11 +39,27 @@ function formatBytes(bytes: number | null): string {
 }
 
 // ─── Single vault card ──────────────────────────────────────────────────────
+// Uses IntersectionObserver so videos/images only load when they enter the viewport.
 function VaultCard({ asset }: { asset: VaultAsset }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const isImage = asset.mime_type?.startsWith("image/");
+
+  const cardRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [visible, setVisible] = useState(false);
   const [playing, setPlaying] = useState(false);
+
+  // Lazy-load: observe when card enters viewport
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
+      { rootMargin: "200px" } // start loading 200px before entering view
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const platformEntries = Object.entries(asset.platformStatus);
   const isUnposted = platformEntries.length === 0;
@@ -60,68 +76,69 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
   }
 
   return (
-    <div className="group flex flex-col overflow-hidden rounded-xl border border-border/30 bg-card transition-all duration-200 hover:border-border/60 hover:shadow-md">
+    <div
+      ref={cardRef}
+      className="group flex flex-col overflow-hidden rounded-xl border border-border/30 bg-card transition-all duration-200 hover:border-border/60 hover:shadow-md"
+    >
       {/* ── Thumbnail ── */}
       <div
-        className="relative aspect-[9/16] w-full overflow-hidden bg-black cursor-pointer"
+        className="relative aspect-[9/16] w-full overflow-hidden bg-muted/30 cursor-pointer"
         onClick={handleMediaClick}
       >
-        {isVideo ? (
+        {/* Media — only rendered once visible */}
+        {visible && isVideo && (
           <video
             ref={videoRef}
             key={asset.id}
             src={`${asset.signedUrl}#t=0.001`}
             playsInline
-            preload="metadata"
+            preload="none"           // don't preload data — we only want the poster frame
             onEnded={() => setPlaying(false)}
             className="h-full w-full object-cover"
           />
-        ) : isImage ? (
+        )}
+        {visible && isImage && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={asset.signedUrl}
             alt={asset.file_name}
+            loading="lazy"
+            decoding="async"
             className="h-full w-full object-cover"
           />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <Archive className="h-8 w-8 text-muted-foreground/30" />
-          </div>
+        )}
+        {!visible && (
+          // Placeholder until card enters viewport
+          <div className="h-full w-full animate-pulse bg-muted/40" />
         )}
 
         {/* Top gradient */}
         <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
 
-        {/* Top-left: NSFW/SFW badge */}
-        <div className="absolute left-2 top-2">
+        {/* Top-left: NSFW/SFW badge + stage */}
+        <div className="absolute left-2 top-2 flex flex-col gap-1">
           <span
             className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${
-              asset.is_nsfw
-                ? "bg-blue-600/90 text-white"
-                : "bg-green-600/90 text-white"
+              asset.is_nsfw ? "bg-blue-600/90 text-white" : "bg-green-600/90 text-white"
             }`}
           >
             {asset.is_nsfw ? "NSFW" : "SFW"}
           </span>
+          <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
+            {asset.stage}
+          </span>
         </div>
 
-        {/* Top-right: Download button */}
+        {/* Top-right: Download button — always visible on mobile, hover on desktop */}
         <a
           href={asset.signedUrl}
           download={asset.file_name}
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/70"
+          className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white transition-opacity md:opacity-0 md:group-hover:opacity-100 hover:bg-black/70"
           title="Download"
         >
           <Download className="h-3.5 w-3.5" />
         </a>
-
-        {/* Stage tag (raw / edited / final) */}
-        <div className="absolute left-2 top-8 mt-0.5">
-          <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize">
-            {asset.stage}
-          </span>
-        </div>
 
         {/* Bottom gradient + platform tags */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
@@ -136,9 +153,7 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
                   key={platform}
                   className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${STATUS_COLOR[status] ?? "bg-gray-500/80 text-white"}`}
                 >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[platform] ?? "bg-gray-400"}`}
-                  />
+                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[platform] ?? "bg-gray-400"}`} />
                   {PLATFORM_LABELS[platform] ?? platform}
                   <span>{STATUS_ICON[status] ?? ""}</span>
                 </span>
@@ -147,11 +162,11 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
           )}
         </div>
 
-        {/* Play indicator */}
-        {isVideo && !playing && (
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-            <div className="rounded-full bg-black/40 p-3">
-              <svg className="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+        {/* Play icon — hover on desktop, always on mobile */}
+        {isVideo && visible && !playing && (
+          <div className="absolute inset-0 flex items-center justify-center transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-events-none">
+            <div className="rounded-full bg-black/40 p-3 backdrop-blur-sm">
+              <svg className="h-5 w-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
             </div>
@@ -165,8 +180,7 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
           {asset.request_title}
         </p>
         <p className="mt-0.5 text-[10px] text-muted-foreground/60 truncate">
-          {asset.file_name}
-          {asset.size_bytes ? ` · ${formatBytes(asset.size_bytes)}` : ""}
+          {asset.size_bytes ? formatBytes(asset.size_bytes) : asset.file_name}
         </p>
       </div>
     </div>

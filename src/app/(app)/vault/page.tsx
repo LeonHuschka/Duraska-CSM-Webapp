@@ -81,13 +81,20 @@ export default async function VaultPage() {
     }
   }
 
-  // 4. Generate signed URLs in parallel
-  const assetsWithUrls = await Promise.all(
-    assets.map(async (asset) => {
-      const { data } = await supabase.storage
-        .from("content-assets")
-        .createSignedUrl(asset.file_path, 3600);
+  // 4. Batch-generate all signed URLs in ONE request (much faster than N individual calls)
+  const paths = assets.map((a) => a.file_path);
+  const { data: signedUrlData } = await supabase.storage
+    .from("content-assets")
+    .createSignedUrls(paths, 3600);
 
+  const urlByPath = Object.fromEntries(
+    (signedUrlData ?? []).map((r) => [r.path, r.signedUrl ?? ""])
+  );
+
+  const assetsWithUrls: VaultAsset[] = assets
+    .map((asset) => {
+      const signedUrl = urlByPath[asset.file_path] ?? "";
+      if (!signedUrl) return null;
       const req = requestMap[asset.request_id];
       return {
         id: asset.id,
@@ -97,13 +104,13 @@ export default async function VaultPage() {
         size_bytes: asset.size_bytes,
         stage: asset.stage,
         uploaded_at: asset.uploaded_at,
-        signedUrl: data?.signedUrl ?? "",
+        signedUrl,
         request_title: req?.title ?? "Untitled",
         is_nsfw: req?.is_nsfw ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},
       } satisfies VaultAsset;
     })
-  );
+    .filter(Boolean) as VaultAsset[];
 
-  return <VaultView assets={assetsWithUrls.filter((a) => a.signedUrl)} />;
+  return <VaultView assets={assetsWithUrls} />;
 }
