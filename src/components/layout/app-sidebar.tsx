@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Settings,
   Camera,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PersonaSwitcher } from "./persona-switcher";
@@ -19,6 +20,7 @@ const allNavItems = [
   { href: "/produce", label: "Requests", icon: Camera, roles: ["owner", "manager", "va", "model"] },
   { href: "/requests", label: "Overview", icon: Kanban, roles: ["owner", "manager", "va"] },
   { href: "/schedule", label: "Schedule", icon: CalendarDays, roles: ["owner", "manager", "va"] },
+  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va", "model"] },
   { href: "/settings/personas", label: "Settings", icon: Settings, roles: ["owner", "manager"] },
 ];
 
