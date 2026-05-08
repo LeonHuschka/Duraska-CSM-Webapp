@@ -71,6 +71,31 @@ export async function markAssetPostedFromVault(data: {
 }
 
 /**
+ * Toggle NSFW classification on the underlying content request.
+ * Used from the Vault when the model spots a miscategorised asset.
+ */
+export async function setRequestNsfw(data: {
+  request_id: string;
+  is_nsfw: boolean;
+}) {
+  const supabase = await createClient();
+  await getPersonaId(); // ensure session
+  const now = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("content_requests")
+    .update({ is_nsfw: data.is_nsfw, updated_at: now })
+    .eq("id", data.request_id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/vault");
+  revalidatePath("/requests");
+  revalidatePath("/schedule");
+  return { error: null };
+}
+
+/**
  * Undo: remove the "posted" mark for (request_id, platform).
  * Deletes the slot if it was created from the vault, or reverts to "scheduled"
  * if the slot was a real scheduled posting.

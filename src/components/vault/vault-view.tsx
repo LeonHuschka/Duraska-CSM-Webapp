@@ -12,6 +12,7 @@ import {
 import {
   markAssetPostedFromVault,
   unmarkAssetPostedFromVault,
+  setRequestNsfw,
 } from "@/app/(app)/vault/actions";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
@@ -88,9 +89,11 @@ const MARK_POSTED_PLATFORMS = [
 function VaultCard({
   asset,
   onUpdate,
+  onUpdateNsfw,
 }: {
   asset: VaultAsset;
   onUpdate: (id: string, platformStatus: Record<string, string>) => void;
+  onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const isImage = asset.mime_type?.startsWith("image/");
@@ -214,6 +217,25 @@ function VaultCard({
     }
   }
 
+  function toggleNsfw(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !asset.is_nsfw;
+    startTransition(async () => {
+      // Optimistic
+      onUpdateNsfw(asset.request_id, next);
+      const result = await setRequestNsfw({
+        request_id: asset.request_id,
+        is_nsfw: next,
+      });
+      if (result.error) {
+        toast.error(result.error);
+        onUpdateNsfw(asset.request_id, !next); // revert
+      } else {
+        toast.success(next ? "Marked as NSFW" : "Marked as SFW");
+      }
+    });
+  }
+
   function togglePosted(platform: string) {
     const isPosted = asset.platformStatus[platform] === "posted";
     startTransition(async () => {
@@ -291,15 +313,18 @@ function VaultCard({
         {/* Top gradient */}
         <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
 
-        {/* Top-left: NSFW/SFW badge + stage */}
+        {/* Top-left: NSFW/SFW badge (click to toggle) + stage */}
         <div className="absolute left-2 top-2 flex flex-col gap-1">
-          <span
-            className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${
+          <button
+            onClick={toggleNsfw}
+            disabled={pending}
+            title="Click to toggle NSFW / SFW"
+            className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide transition-all hover:ring-2 hover:ring-white/40 disabled:opacity-60 w-fit ${
               asset.is_nsfw ? "bg-blue-600/90 text-white" : "bg-green-600/90 text-white"
             }`}
           >
-            {asset.is_nsfw ? "NSFW" : "SFW"}
-          </span>
+            {pending ? "…" : asset.is_nsfw ? "NSFW" : "SFW"}
+          </button>
           <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
             {asset.stage}
           </span>
@@ -458,6 +483,14 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     );
   }
 
+  function handleNsfwUpdate(requestId: string, isNsfw: boolean) {
+    // is_nsfw lives on the content_request, so update every asset that
+    // belongs to the same request.
+    setLocalAssets((prev) =>
+      prev.map((a) => (a.request_id === requestId ? { ...a, is_nsfw: isNsfw } : a))
+    );
+  }
+
   const filtered = useMemo(() => {
     // Reset to page 1 whenever filters change (side-effectless via key on grid)
     let items = localAssets;
@@ -606,7 +639,12 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
             className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
           >
             {visibleAssets.map((asset) => (
-              <VaultCard key={asset.id} asset={asset} onUpdate={handleAssetUpdate} />
+              <VaultCard
+                key={asset.id}
+                asset={asset}
+                onUpdate={handleAssetUpdate}
+                onUpdateNsfw={handleNsfwUpdate}
+              />
             ))}
           </div>
 
