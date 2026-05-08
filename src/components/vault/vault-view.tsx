@@ -159,7 +159,18 @@ function VaultCard({
       // iOS keys "Save Video" / "Save Image" off the extension, not the type.
       const filename = ensureExtension(asset.file_name, mimeType);
 
-      const file = new File([blob], filename, { type: mimeType });
+      const file = new File([blob], filename, {
+        type: mimeType,
+        lastModified: Date.now(),
+      });
+
+      // Debug breadcrumb — surfaces in the iOS Safari Web Inspector when
+      // connected to a Mac, helps diagnose missing "Save Video" option.
+      console.log("[vault download]", {
+        filename,
+        mimeType,
+        sizeMB: (blob.size / (1024 * 1024)).toFixed(1),
+      });
 
       // Touch device → try Web Share API. On iOS this shows "Save Video" /
       // "Save Image" in the share sheet's actions row.
