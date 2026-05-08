@@ -103,6 +103,10 @@ function VaultCard({
   const [visible, setVisible] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [fileReady, setFileReady] = useState(false);
+  const cachedFileRef = useRef<File | null>(null);
+  const inflightRef = useRef<Promise<File> | null>(null);
   const [postOpen, setPostOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -132,86 +136,140 @@ function VaultCard({
     }
   }
 
-  // Download (or share on mobile). Bypasses the inline-playback issue
-  // that browsers do for video/* MIME types when using <a download>.
+  // Two-phase download for iOS Safari user-activation problem:
   //
-  // On iOS, the share sheet only shows "Save Video" / "Save Image" when:
-  //   - The File MIME type is image/* or video/*, AND
-  //   - The filename ends in a matching extension (.mp4, .mov, .jpg, .png, …)
-  // On Android, "Photos"/"Gallery" only appears if a media-receiver app is
-  // installed and registered as a share target — this is OS-controlled and
-  // the web app cannot force its presence.
+  // The Web Share API's "Save Video" option only appears when navigator.share
+  // is called within a fresh user activation (~5 s window). Large videos
+  // take longer to fetch than that, so by the time share() runs, iOS has
+  // forgotten the click and falls back to a stripped-down save dialog
+  // (Files / Drive only).
+  //
+  // To work around it:
+  //   1. Pre-fetch on pointerdown (gives a head start before click fires)
+  //   2. Cache the resulting File in a ref so subsequent clicks are instant
+  //   3. If the file is ready by click time → share immediately
+  //   4. If not → download with progress, then prompt the user to tap again;
+  //      that second click runs share() instantly within fresh activation.
+  async function fetchAsFile(): Promise<File> {
+    setProgress(0);
+    const res = await fetch(asset.signedUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const total = parseInt(res.headers.get("content-length") || "0", 10);
+
+    // Stream so we can show progress
+    let blob: Blob;
+    if (res.body && total > 0) {
+      const reader = res.body.getReader();
+      const chunks: BlobPart[] = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value as BlobPart);
+        received += value.byteLength;
+        setProgress(Math.round((received / total) * 100));
+      }
+      blob = new Blob(chunks);
+    } else {
+      blob = await res.blob();
+    }
+    setProgress(null);
+
+    const mimeType =
+      asset.mime_type ||
+      (blob.type && blob.type !== "application/octet-stream" ? blob.type : null) ||
+      "application/octet-stream";
+    const filename = ensureExtension(asset.file_name, mimeType);
+    return new File([blob], filename, {
+      type: mimeType,
+      lastModified: Date.now(),
+    });
+  }
+
+  function ensureFile(): Promise<File> {
+    if (cachedFileRef.current) return Promise.resolve(cachedFileRef.current);
+    if (inflightRef.current) return inflightRef.current;
+    const p = fetchAsFile().then((f) => {
+      cachedFileRef.current = f;
+      setFileReady(true);
+      return f;
+    });
+    inflightRef.current = p;
+    p.finally(() => {
+      inflightRef.current = null;
+    });
+    return p;
+  }
+
+  // Pointer-down on the download button → start fetching early so the file
+  // is more likely to be ready by the time the click event fires.
+  function handleDownloadPointerDown() {
+    if (cachedFileRef.current || inflightRef.current) return;
+    void ensureFile().catch(() => {});
+  }
+
+  async function shareOrDownloadFile(file: File) {
+    const isTouch =
+      typeof navigator !== "undefined" &&
+      /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isTouch && typeof navigator?.share === "function") {
+      const canShareFile =
+        typeof navigator.canShare === "function"
+          ? navigator.canShare({ files: [file] })
+          : true;
+      if (canShareFile) {
+        try {
+          await navigator.share({ files: [file] });
+          return;
+        } catch (err) {
+          if ((err as Error)?.name === "AbortError") return;
+          console.warn("Web Share failed, falling back to download", err);
+        }
+      }
+    }
+
+    // Desktop / fallback: blob-URL download
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function handleDownload(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (downloading) return;
+
+    // File already cached → share immediately within user activation.
+    if (cachedFileRef.current) {
+      setDownloading(true);
+      try {
+        await shareOrDownloadFile(cachedFileRef.current);
+        setFileReady(false);
+      } finally {
+        setDownloading(false);
+      }
+      return;
+    }
+
+    // Otherwise: prepare the file, then ask the user to tap again. The
+    // second tap will fall into the cached branch above and pop the
+    // share sheet instantly with full options ("Save Video" etc.).
     setDownloading(true);
     try {
-      const res = await fetch(asset.signedUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-
-      // Prefer the DB mime_type (authoritative) over blob.type — Supabase
-      // sometimes returns a generic content-type that hides the media kind.
-      const mimeType =
-        asset.mime_type ||
-        (blob.type && blob.type !== "application/octet-stream" ? blob.type : null) ||
-        "application/octet-stream";
-
-      // Make sure the filename has an extension matching the MIME type.
-      // iOS keys "Save Video" / "Save Image" off the extension, not the type.
-      const filename = ensureExtension(asset.file_name, mimeType);
-
-      const file = new File([blob], filename, {
-        type: mimeType,
-        lastModified: Date.now(),
+      await ensureFile();
+      toast.success("Bereit – nochmal antippen zum Speichern", {
+        duration: 6000,
       });
-
-      // Debug breadcrumb — surfaces in the iOS Safari Web Inspector when
-      // connected to a Mac, helps diagnose missing "Save Video" option.
-      console.log("[vault download]", {
-        filename,
-        mimeType,
-        sizeMB: (blob.size / (1024 * 1024)).toFixed(1),
-      });
-
-      // Touch device → try Web Share API. On iOS this shows "Save Video" /
-      // "Save Image" in the share sheet's actions row.
-      const isTouch =
-        typeof navigator !== "undefined" &&
-        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-      if (isTouch && typeof navigator?.share === "function") {
-        const canShareFile =
-          typeof navigator.canShare === "function"
-            ? navigator.canShare({ files: [file] })
-            : true; // older iOS doesn't have canShare but supports share
-        if (canShareFile) {
-          try {
-            await navigator.share({ files: [file] });
-            return;
-          } catch (err) {
-            // User cancelled the sheet → done.
-            if ((err as Error)?.name === "AbortError") return;
-            // Real failure → fall through to anchor download below.
-            console.warn("Web Share failed, falling back to download", err);
-          }
-        }
-      }
-
-      // Desktop / fallback: trigger download via blob URL
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Revoke after a tick so the browser has time to start the download
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error("Download failed", err);
-      toast.error("Download failed");
+      toast.error("Download fehlgeschlagen");
     } finally {
       setDownloading(false);
     }
@@ -382,15 +440,32 @@ function VaultCard({
             </PopoverContent>
           </Popover>
 
-          {/* Download */}
+          {/* Download — two-phase on iOS:
+              1. First tap fetches the file (loader + %)
+              2. Button turns green and pulses when ready
+              3. Second tap fires share-sheet with full options */}
           <button
             onClick={handleDownload}
+            onPointerDown={handleDownloadPointerDown}
             disabled={downloading}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 disabled:opacity-60"
-            title="Download"
+            className={`relative flex items-center justify-center rounded-full text-white transition-all disabled:opacity-80 ${
+              fileReady
+                ? "h-7 w-fit gap-1 bg-green-600/90 px-2 hover:bg-green-600 animate-pulse"
+                : "h-7 w-7 bg-black/50 hover:bg-black/70"
+            }`}
+            title={fileReady ? "Bereit – tippen zum Speichern" : "Download"}
           >
-            {downloading ? (
+            {downloading && progress !== null ? (
+              <span className="text-[10px] font-semibold tabular-nums">
+                {progress}%
+              </span>
+            ) : downloading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : fileReady ? (
+              <>
+                <Download className="h-3.5 w-3.5" />
+                <span className="text-[10px] font-semibold">Save</span>
+              </>
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}
