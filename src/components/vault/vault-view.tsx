@@ -48,6 +48,35 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Map common MIME types to file extensions. iOS Photos / Android Gallery
+// only recognise a file as media when the extension matches.
+const MIME_TO_EXT: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-msvideo": "avi",
+  "video/x-matroska": "mkv",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/gif": "gif",
+};
+
+function ensureExtension(fileName: string, mimeType: string): string {
+  const expected = MIME_TO_EXT[mimeType.toLowerCase()];
+  // No mapping → leave the name as-is.
+  if (!expected) return fileName;
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(`.${expected}`)) return fileName;
+  // For jpeg, accept .jpeg as well
+  if (expected === "jpg" && lower.endsWith(".jpeg")) return fileName;
+  // Strip any existing extension and append the right one
+  const base = fileName.replace(/\.[a-z0-9]{2,5}$/i, "");
+  return `${base}.${expected}`;
+}
+
 const MARK_POSTED_PLATFORMS = [
   { value: "fansly", label: "Fansly" },
   { value: "instagram", label: "Instagram" },
@@ -102,6 +131,13 @@ function VaultCard({
 
   // Download (or share on mobile). Bypasses the inline-playback issue
   // that browsers do for video/* MIME types when using <a download>.
+  //
+  // On iOS, the share sheet only shows "Save Video" / "Save Image" when:
+  //   - The File MIME type is image/* or video/*, AND
+  //   - The filename ends in a matching extension (.mp4, .mov, .jpg, .png, …)
+  // On Android, "Photos"/"Gallery" only appears if a media-receiver app is
+  // installed and registered as a share target — this is OS-controlled and
+  // the web app cannot force its presence.
   async function handleDownload(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -111,31 +147,40 @@ function VaultCard({
       const res = await fetch(asset.signedUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
-      const file = new File([blob], asset.file_name, {
-        type: blob.type || asset.mime_type || "application/octet-stream",
-      });
 
-      // On mobile, use the Web Share API so the user can pick "Save to Photos",
-      // "Save to Files", or share directly. canShare with files is the right
-      // signal — it returns false on platforms that can't share files.
+      // Prefer the DB mime_type (authoritative) over blob.type — Supabase
+      // sometimes returns a generic content-type that hides the media kind.
+      const mimeType =
+        asset.mime_type ||
+        (blob.type && blob.type !== "application/octet-stream" ? blob.type : null) ||
+        "application/octet-stream";
+
+      // Make sure the filename has an extension matching the MIME type.
+      // iOS keys "Save Video" / "Save Image" off the extension, not the type.
+      const filename = ensureExtension(asset.file_name, mimeType);
+
+      const file = new File([blob], filename, { type: mimeType });
+
+      // Touch device → try Web Share API. On iOS this shows "Save Video" /
+      // "Save Image" in the share sheet's actions row.
       const isTouch =
         typeof navigator !== "undefined" &&
         /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (
-        isTouch &&
-        typeof navigator !== "undefined" &&
-        typeof navigator.canShare === "function" &&
-        navigator.canShare({ files: [file] })
-      ) {
-        try {
-          await navigator.share({ files: [file], title: asset.file_name });
-          return;
-        } catch (err) {
-          // User cancelled — silently fall through to download.
-          if ((err as Error)?.name !== "AbortError") {
-            // Non-cancel error → fall through to anchor download below.
-          } else {
+
+      if (isTouch && typeof navigator?.share === "function") {
+        const canShareFile =
+          typeof navigator.canShare === "function"
+            ? navigator.canShare({ files: [file] })
+            : true; // older iOS doesn't have canShare but supports share
+        if (canShareFile) {
+          try {
+            await navigator.share({ files: [file] });
             return;
+          } catch (err) {
+            // User cancelled the sheet → done.
+            if ((err as Error)?.name === "AbortError") return;
+            // Real failure → fall through to anchor download below.
+            console.warn("Web Share failed, falling back to download", err);
           }
         }
       }
@@ -144,7 +189,7 @@ function VaultCard({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = asset.file_name;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
