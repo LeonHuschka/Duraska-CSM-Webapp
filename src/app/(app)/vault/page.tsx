@@ -47,13 +47,15 @@ export default async function VaultPage() {
     (requests ?? []).map((r) => [r.id, { title: r.title, is_nsfw: r.is_nsfw }])
   );
 
-  // 2. All non-deleted assets for those requests
+  // 2. Most-recent 200 non-deleted assets.
+  // 200 is enough for any realistic vault; the client paginates further.
   const { data: assets } = await supabase
     .from("content_assets")
     .select("id, request_id, file_name, file_path, mime_type, size_bytes, stage, uploaded_at")
     .in("request_id", requestIds)
     .is("deleted_at", null)
-    .order("uploaded_at", { ascending: false });
+    .order("uploaded_at", { ascending: false })
+    .limit(200);
 
   if (!assets || assets.length === 0) {
     return <VaultView assets={[]} />;

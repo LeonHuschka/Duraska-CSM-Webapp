@@ -74,9 +74,15 @@ export default async function SchedulePage() {
     }
   }
 
-  // Fetch assets for slots that have linked requests
+  // Only fetch assets for non-posted slots.
+  // Posted content doesn't need to be streamable in the schedule view — it lives in the Vault.
   const requestIds = Array.from(
-    new Set(slots.map((s) => s.request_id).filter(Boolean) as string[])
+    new Set(
+      slots
+        .filter((s) => s.status !== "posted")
+        .map((s) => s.request_id)
+        .filter(Boolean) as string[]
+    )
   );
 
   let assetsWithUrls: Array<{

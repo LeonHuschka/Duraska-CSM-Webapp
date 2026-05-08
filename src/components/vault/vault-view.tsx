@@ -188,6 +188,8 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
   );
 }
 
+const PAGE_SIZE = 40;
+
 // ─── Vault view ─────────────────────────────────────────────────────────────
 const STAGE_OPTIONS = [
   { value: "all",    label: "All" },
@@ -210,8 +212,10 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
   const [stageFilter, setStageFilter] = useState<string>("edited");
   const [nsfwFilter, setNsfwFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
+    // Reset to page 1 whenever filters change (side-effectless via key on grid)
     let items = assets;
 
     if (stageFilter !== "all") {
@@ -238,6 +242,12 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
 
     return items;
   }, [assets, stageFilter, nsfwFilter, platformFilter, search]);
+
+  // Reset pagination whenever filters/search change
+  const filterKey = `${stageFilter}-${nsfwFilter}-${platformFilter}-${search}`;
+  const visibleAssets = filtered.slice(0, page * PAGE_SIZE);
+  const hasMore = filtered.length > page * PAGE_SIZE;
+  const remaining = filtered.length - page * PAGE_SIZE;
 
   return (
     <div className="space-y-5">
@@ -346,11 +356,30 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {filtered.map((asset) => (
-            <VaultCard key={asset.id} asset={asset} />
-          ))}
-        </div>
+        <>
+          <div
+            key={filterKey}
+            className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          >
+            {visibleAssets.map((asset) => (
+              <VaultCard key={asset.id} asset={asset} />
+            ))}
+          </div>
+
+          {hasMore && (
+            <div className="flex flex-col items-center gap-1 pt-2">
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-xl border border-border/50 bg-card px-6 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+              >
+                Load {Math.min(PAGE_SIZE, remaining)} more
+                <span className="ml-2 text-xs text-muted-foreground/50">
+                  ({remaining} left)
+                </span>
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
