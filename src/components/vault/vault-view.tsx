@@ -1,8 +1,18 @@
 "use client";
 
-import { useMemo, useState, useRef, useEffect } from "react";
-import { Download, Search, X, Archive } from "lucide-react";
+import { useMemo, useState, useRef, useEffect, useTransition } from "react";
+import { Download, Search, X, Archive, Check, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  markAssetPostedFromVault,
+  unmarkAssetPostedFromVault,
+} from "@/app/(app)/vault/actions";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
 // ─── Platform display config ───────────────────────────────────────────────
@@ -38,9 +48,21 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const MARK_POSTED_PLATFORMS = [
+  { value: "fansly", label: "Fansly" },
+  { value: "instagram", label: "Instagram" },
+  { value: "tiktok", label: "TikTok" },
+] as const;
+
 // ─── Single vault card ──────────────────────────────────────────────────────
 // Uses IntersectionObserver so videos/images only load when they enter the viewport.
-function VaultCard({ asset }: { asset: VaultAsset }) {
+function VaultCard({
+  asset,
+  onUpdate,
+}: {
+  asset: VaultAsset;
+  onUpdate: (id: string, platformStatus: Record<string, string>) => void;
+}) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const isImage = asset.mime_type?.startsWith("image/");
 
@@ -48,6 +70,9 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [visible, setVisible] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [postOpen, setPostOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
 
   // Lazy-load: observe when card enters viewport
   useEffect(() => {
@@ -73,6 +98,100 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
       videoRef.current.play();
       setPlaying(true);
     }
+  }
+
+  // Download (or share on mobile). Bypasses the inline-playback issue
+  // that browsers do for video/* MIME types when using <a download>.
+  async function handleDownload(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(asset.signedUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const file = new File([blob], asset.file_name, {
+        type: blob.type || asset.mime_type || "application/octet-stream",
+      });
+
+      // On mobile, use the Web Share API so the user can pick "Save to Photos",
+      // "Save to Files", or share directly. canShare with files is the right
+      // signal — it returns false on platforms that can't share files.
+      const isTouch =
+        typeof navigator !== "undefined" &&
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (
+        isTouch &&
+        typeof navigator !== "undefined" &&
+        typeof navigator.canShare === "function" &&
+        navigator.canShare({ files: [file] })
+      ) {
+        try {
+          await navigator.share({ files: [file], title: asset.file_name });
+          return;
+        } catch (err) {
+          // User cancelled — silently fall through to download.
+          if ((err as Error)?.name !== "AbortError") {
+            // Non-cancel error → fall through to anchor download below.
+          } else {
+            return;
+          }
+        }
+      }
+
+      // Desktop / fallback: trigger download via blob URL
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = asset.file_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after a tick so the browser has time to start the download
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("Download failed", err);
+      toast.error("Download failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function togglePosted(platform: string) {
+    const isPosted = asset.platformStatus[platform] === "posted";
+    startTransition(async () => {
+      // Optimistic update
+      const next = { ...asset.platformStatus };
+      if (isPosted) {
+        delete next[platform];
+      } else {
+        next[platform] = "posted";
+      }
+      onUpdate(asset.id, next);
+
+      const result = isPosted
+        ? await unmarkAssetPostedFromVault({
+            request_id: asset.request_id,
+            platform,
+          })
+        : await markAssetPostedFromVault({
+            request_id: asset.request_id,
+            platform,
+          });
+
+      if (result.error) {
+        toast.error(result.error);
+        // Revert
+        onUpdate(asset.id, asset.platformStatus);
+      } else {
+        toast.success(
+          isPosted
+            ? `Unmarked as posted on ${platform}`
+            : `Marked as posted on ${platform}`
+        );
+      }
+    });
   }
 
   return (
@@ -130,16 +249,72 @@ function VaultCard({ asset }: { asset: VaultAsset }) {
           </span>
         </div>
 
-        {/* Top-right: Download button — always visible on mobile, hover on desktop */}
-        <a
-          href={asset.signedUrl}
-          download={asset.file_name}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white transition-opacity md:opacity-0 md:group-hover:opacity-100 hover:bg-black/70"
-          title="Download"
-        >
-          <Download className="h-3.5 w-3.5" />
-        </a>
+        {/* Top-right: Action buttons — always visible on mobile, hover on desktop */}
+        <div className="absolute right-2 top-2 flex items-center gap-1.5 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          {/* Mark as posted */}
+          <Popover open={postOpen} onOpenChange={setPostOpen}>
+            <PopoverTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                title="Mark as posted"
+                disabled={pending}
+              >
+                {pending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              className="w-44 p-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Mark posted on
+              </div>
+              {MARK_POSTED_PLATFORMS.map((p) => {
+                const isPosted = asset.platformStatus[p.value] === "posted";
+                return (
+                  <button
+                    key={p.value}
+                    onClick={() => {
+                      togglePosted(p.value);
+                      setPostOpen(false);
+                    }}
+                    disabled={pending}
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={`h-2 w-2 rounded-full ${PLATFORM_DOT[p.value]}`}
+                      />
+                      {p.label}
+                    </span>
+                    {isPosted && <Check className="h-3.5 w-3.5 text-green-500" />}
+                  </button>
+                );
+              })}
+            </PopoverContent>
+          </Popover>
+
+          {/* Download */}
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 disabled:opacity-60"
+            title="Download"
+          >
+            {downloading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </div>
 
         {/* Bottom gradient + platform tags */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
@@ -214,9 +389,22 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
 
+  // Local copy so the "mark posted" UI can update optimistically without
+  // waiting for a server round-trip / revalidation.
+  const [localAssets, setLocalAssets] = useState(assets);
+  useEffect(() => {
+    setLocalAssets(assets);
+  }, [assets]);
+
+  function handleAssetUpdate(id: string, platformStatus: Record<string, string>) {
+    setLocalAssets((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, platformStatus } : a))
+    );
+  }
+
   const filtered = useMemo(() => {
     // Reset to page 1 whenever filters change (side-effectless via key on grid)
-    let items = assets;
+    let items = localAssets;
 
     if (stageFilter !== "all") {
       items = items.filter((a) => a.stage === stageFilter);
@@ -241,7 +429,7 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     }
 
     return items;
-  }, [assets, stageFilter, nsfwFilter, platformFilter, search]);
+  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search]);
 
   // Reset pagination whenever filters/search change
   const filterKey = `${stageFilter}-${nsfwFilter}-${platformFilter}-${search}`;
@@ -260,7 +448,7 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
           </p>
         </div>
         <span className="text-sm text-muted-foreground">
-          {filtered.length} / {assets.length}
+          {filtered.length} / {localAssets.length}
         </span>
       </div>
 
@@ -350,7 +538,7 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
           </div>
           <h3 className="mt-4 text-sm font-medium">No media found</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {assets.length === 0
+            {localAssets.length === 0
               ? "Upload assets to a content request to see them here."
               : "Try adjusting your filters."}
           </p>
@@ -362,7 +550,7 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
             className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
           >
             {visibleAssets.map((asset) => (
-              <VaultCard key={asset.id} asset={asset} />
+              <VaultCard key={asset.id} asset={asset} onUpdate={handleAssetUpdate} />
             ))}
           </div>
 
