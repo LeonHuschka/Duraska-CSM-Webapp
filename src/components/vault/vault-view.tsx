@@ -15,7 +15,11 @@ import {
   setRequestNsfw,
   saveAssetThumbnail,
 } from "@/app/(app)/vault/actions";
-import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import {
+  generateThumbnail,
+  generateThumbnailFromUrl,
+  thumbnailPathFor,
+} from "@/lib/thumbnails";
 import { createClient } from "@/lib/supabase/client";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
@@ -628,20 +632,42 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     const supabase = createClient();
     let success = 0;
     let failed = 0;
+    let done = 0;
 
-    // Process sequentially to keep memory + bandwidth manageable
-    for (let i = 0; i < todo.length; i++) {
-      const asset = todo[i];
+    // Strategy:
+    //   1. Try URL-based generation first — browser only fetches ~1-5 MB
+    //      of each video instead of the full 50-200 MB. ~30-100× faster
+    //      AND much less egress.
+    //   2. If that fails (CORS issue, weird codec, etc.) fall back to
+    //      fetching the blob and generating from there.
+    //   3. Run 3 workers in parallel — bandwidth-bound, more workers
+    //      doesn't help much past this and risks browser memory limits.
+    async function processAsset(asset: VaultAsset): Promise<void> {
       try {
-        // Fetch original (one-time cost per asset, then thumbnail used forever)
-        const res = await fetch(asset.signedUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
+        // Path 1: URL-based (fast, low egress)
+        let thumb = await generateThumbnailFromUrl(
+          asset.signedUrl,
+          asset.mime_type
+        );
+
+        // Path 2: blob fallback (only if URL path failed)
+        if (!thumb) {
+          try {
+            const res = await fetch(asset.signedUrl);
+            if (res.ok) {
+              const blob = await res.blob();
+              thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
+            }
+          } catch {
+            // ignore — counted as failure below
+          }
+        }
+
         if (!thumb) {
           failed++;
-          continue;
+          return;
         }
+
         const tPath = thumbnailPathFor(asset.file_path);
         const { error: upErr } = await supabase.storage
           .from("content-assets")
@@ -673,9 +699,24 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
         console.warn("[backfill] asset failed", asset.id, err);
         failed++;
       } finally {
-        setBackfillProgress({ done: i + 1, total: todo.length });
+        done++;
+        setBackfillProgress({ done, total: todo.length });
       }
     }
+
+    // Worker pool: 3 concurrent
+    const CONCURRENCY = 3;
+    let cursor = 0;
+    async function worker() {
+      while (true) {
+        const i = cursor++;
+        if (i >= todo.length) return;
+        await processAsset(todo[i]);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, () => worker())
+    );
 
     setBackfilling(false);
     toast.success(

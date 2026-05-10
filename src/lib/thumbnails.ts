@@ -28,6 +28,113 @@ export async function generateThumbnail(file: File | Blob, mimeType?: string): P
   return null;
 }
 
+/**
+ * Generate a thumbnail from a URL (cross-origin) WITHOUT downloading the
+ * full file first.
+ *
+ * For videos: assigns the URL to a <video crossOrigin="anonymous"> element
+ * with preload="metadata". The browser does smart partial fetching — it
+ * only requests the bytes needed to read the moov atom + first GOP
+ * (typically 1–5 MB), instead of the full 50–200 MB. After seeking to
+ * 0.5 s the frame is drawn to canvas and encoded.
+ *
+ * For images: assigns to <img crossOrigin="anonymous">. The browser
+ * downloads the image once, we resize via canvas.
+ *
+ * Both paths require Supabase Storage to send CORS headers (it does by
+ * default for signed URLs). If the canvas would be tainted (CORS error),
+ * the call rejects and the caller can fall back to the blob path.
+ */
+export async function generateThumbnailFromUrl(
+  url: string,
+  mimeType: string | null
+): Promise<Blob | null> {
+  const type = mimeType || "";
+  try {
+    if (type.startsWith("image/")) {
+      return await thumbnailFromImageUrl(url);
+    }
+    if (type.startsWith("video/")) {
+      return await thumbnailFromVideoUrl(url);
+    }
+  } catch (err) {
+    console.warn("[thumbnails] url-based generation failed", err);
+  }
+  return null;
+}
+
+async function thumbnailFromVideoUrl(url: string): Promise<Blob | null> {
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.src = url;
+
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      video.onloadedmetadata = null;
+      video.onerror = null;
+    };
+    const t = setTimeout(() => {
+      cleanup();
+      reject(new Error("metadata timeout"));
+    }, 30000);
+    video.onloadedmetadata = () => {
+      clearTimeout(t);
+      cleanup();
+      resolve();
+    };
+    video.onerror = () => {
+      clearTimeout(t);
+      cleanup();
+      reject(new Error("metadata load failed"));
+    };
+  });
+
+  const seekTime = Math.min(0.5, (video.duration || 1) * 0.1);
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      video.onseeked = null;
+      video.onerror = null;
+    };
+    const t = setTimeout(() => {
+      cleanup();
+      reject(new Error("seek timeout"));
+    }, 30000);
+    video.onseeked = () => {
+      clearTimeout(t);
+      cleanup();
+      resolve();
+    };
+    video.onerror = () => {
+      clearTimeout(t);
+      cleanup();
+      reject(new Error("seek failed"));
+    };
+    video.currentTime = seekTime;
+  });
+
+  return drawToBlob(video, video.videoWidth, video.videoHeight);
+}
+
+async function thumbnailFromImageUrl(url: string): Promise<Blob | null> {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  return new Promise((resolve, reject) => {
+    img.onload = async () => {
+      try {
+        const blob = await drawToBlob(img, img.naturalWidth, img.naturalHeight);
+        resolve(blob);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = url;
+  });
+}
+
 async function thumbnailFromImage(blob: Blob): Promise<Blob | null> {
   const url = URL.createObjectURL(blob);
   try {
