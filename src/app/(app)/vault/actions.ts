@@ -13,6 +13,28 @@ async function getPersonaId() {
 }
 
 /**
+ * Persist a thumbnail_path produced by the client-side backfill flow.
+ * The actual JPEG upload happens on the client (it has the file in memory)
+ * — this just writes the resulting path back to the DB and revalidates.
+ */
+export async function saveAssetThumbnail(data: {
+  asset_id: string;
+  thumbnail_path: string;
+}) {
+  const supabase = await createClient();
+  await getPersonaId();
+
+  const { error } = await supabase
+    .from("content_assets")
+    .update({ thumbnail_path: data.thumbnail_path })
+    .eq("id", data.asset_id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/vault");
+  return { error: null };
+}
+
+/**
  * Mark a content request as posted on a given platform — without going through
  * the schedule. Used from the Vault when the model posts content manually.
  *

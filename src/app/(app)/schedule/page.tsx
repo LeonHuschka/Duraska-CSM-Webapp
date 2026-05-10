@@ -92,33 +92,50 @@ export default async function SchedulePage() {
     file_name: string;
     mime_type: string | null;
     signedUrl: string;
+    thumbnailUrl: string | null;
   }> = [];
 
   if (requestIds.length > 0) {
     const { data: assets } = await supabase
       .from("content_assets")
-      .select("id, request_id, stage, file_path, file_name, mime_type")
+      .select("id, request_id, stage, file_path, thumbnail_path, file_name, mime_type")
       .in("request_id", requestIds)
       .in("stage", ["edited", "final"])
       .is("deleted_at", null);
 
     if (assets && assets.length > 0) {
-      const urlResults = await Promise.all(
-        assets.map(async (asset) => {
-          const { data } = await supabase.storage
-            .from("content-assets")
-            .createSignedUrl(asset.file_path, 3600);
+      // Sign originals + thumbnails in one batch each
+      const allPaths = new Set<string>();
+      for (const a of assets) {
+        if (a.file_path) allPaths.add(a.file_path);
+        if (a.thumbnail_path) allPaths.add(a.thumbnail_path);
+      }
+      const { data: signed } = await supabase.storage
+        .from("content-assets")
+        .createSignedUrls(Array.from(allPaths), 3600);
+
+      const urlByPath: Record<string, string> = {};
+      for (const r of signed ?? []) {
+        if (r.path) urlByPath[r.path] = r.signedUrl ?? "";
+      }
+
+      assetsWithUrls = assets
+        .map((asset) => {
+          const signedUrl = urlByPath[asset.file_path] ?? "";
+          if (!signedUrl) return null;
           return {
             id: asset.id,
             request_id: asset.request_id,
             stage: asset.stage,
             file_name: asset.file_name,
             mime_type: asset.mime_type,
-            signedUrl: data?.signedUrl ?? "",
+            signedUrl,
+            thumbnailUrl: asset.thumbnail_path
+              ? urlByPath[asset.thumbnail_path] ?? null
+              : null,
           };
         })
-      );
-      assetsWithUrls = urlResults.filter((a) => a.signedUrl);
+        .filter(Boolean) as typeof assetsWithUrls;
     }
   }
 

@@ -26,6 +26,7 @@ import {
 } from "@/app/(app)/requests/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import { createClient } from "@/lib/supabase/client";
+import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
 import type { ContentRequest } from "@/lib/types/database";
 
 const STATUS_FLOW = ["requested", "shooted", "edited", "scheduled", "posted"];
@@ -90,6 +91,24 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
             continue;
           }
 
+          // Generate + upload thumbnail (non-fatal on failure)
+          let thumbnailPath: string | null = null;
+          try {
+            const thumbBlob = await generateThumbnail(file);
+            if (thumbBlob) {
+              const tPath = thumbnailPathFor(filePath);
+              const { error: thumbErr } = await supabase.storage
+                .from("content-assets")
+                .upload(tPath, thumbBlob, {
+                  contentType: "image/jpeg",
+                  upsert: true,
+                });
+              if (!thumbErr) thumbnailPath = tPath;
+            }
+          } catch (err) {
+            console.warn("[upload] thumbnail step failed", err);
+          }
+
           try {
             await createAssetRecord({
               request_id: request.id,
@@ -98,10 +117,14 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
               file_name: file.name,
               mime_type: file.type,
               size_bytes: file.size,
+              thumbnail_path: thumbnailPath,
             });
             completed++;
           } catch {
             await supabase.storage.from("content-assets").remove([filePath]);
+            if (thumbnailPath) {
+              await supabase.storage.from("content-assets").remove([thumbnailPath]);
+            }
             toast.error(`Record failed: ${file.name}`);
           }
         }

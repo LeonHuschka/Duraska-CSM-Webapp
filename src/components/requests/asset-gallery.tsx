@@ -63,17 +63,20 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
           <div className={`relative bg-muted/30 ${isVideo(asset.mime_type) ? "aspect-[9/16]" : "aspect-video"}`}>
             {isVideo(asset.mime_type) ? (
               // preload="none" → no bytes fetched until user hits play
+              // poster shows the lightweight thumbnail (~30 KB) so the
+              // gallery isn't a wall of black boxes.
               <video
                 controls
                 playsInline
                 preload="none"
+                poster={asset.thumbnailUrl ?? undefined}
                 src={asset.signedUrl}
                 className="h-full w-full rounded-t-xl object-contain bg-black"
               />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={asset.signedUrl}
+                src={asset.thumbnailUrl ?? asset.signedUrl}
                 alt={asset.file_name}
                 loading="lazy"
                 decoding="async"

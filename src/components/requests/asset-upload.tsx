@@ -5,6 +5,7 @@ import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
+import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
 
 interface AssetUploadProps {
   requestId: string;
@@ -49,6 +50,26 @@ export function AssetUpload({
             continue;
           }
 
+          // Generate + upload a JPEG thumbnail next to the original.
+          // Failure is non-fatal — the asset still works, vault just falls
+          // back to a placeholder until backfill runs.
+          let thumbnailPath: string | null = null;
+          try {
+            const thumbBlob = await generateThumbnail(file);
+            if (thumbBlob) {
+              const tPath = thumbnailPathFor(filePath);
+              const { error: thumbErr } = await supabase.storage
+                .from("content-assets")
+                .upload(tPath, thumbBlob, {
+                  contentType: "image/jpeg",
+                  upsert: true,
+                });
+              if (!thumbErr) thumbnailPath = tPath;
+            }
+          } catch (err) {
+            console.warn("[upload] thumbnail step failed", err);
+          }
+
           try {
             await createAssetRecord({
               request_id: requestId,
@@ -57,13 +78,17 @@ export function AssetUpload({
               file_name: file.name,
               mime_type: file.type,
               size_bytes: file.size,
+              thumbnail_path: thumbnailPath,
             });
           } catch (err) {
             toast.error(
               `Failed to save record for ${file.name}: ${err instanceof Error ? err.message : "Unknown error"}`
             );
-            // Clean up the uploaded file if record creation fails
+            // Clean up the uploaded files if record creation fails
             await supabase.storage.from("content-assets").remove([filePath]);
+            if (thumbnailPath) {
+              await supabase.storage.from("content-assets").remove([thumbnailPath]);
+            }
             continue;
           }
 

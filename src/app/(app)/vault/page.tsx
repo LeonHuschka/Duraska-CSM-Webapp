@@ -7,11 +7,14 @@ export interface VaultAsset {
   id: string;
   request_id: string;
   file_name: string;
+  file_path: string;
   mime_type: string | null;
   size_bytes: number | null;
   stage: string;
   uploaded_at: string;
   signedUrl: string;
+  thumbnailUrl: string | null;
+  thumbnailPath: string | null;
   // from request
   request_title: string;
   is_nsfw: boolean;
@@ -56,7 +59,9 @@ export default async function VaultPage() {
   // lazy-loads media via IntersectionObserver.
   const { data: assets } = await supabase
     .from("content_assets")
-    .select("id, request_id, file_name, file_path, mime_type, size_bytes, stage, uploaded_at")
+    .select(
+      "id, request_id, file_name, file_path, thumbnail_path, mime_type, size_bytes, stage, uploaded_at"
+    )
     .in("request_id", requestIds)
     .is("deleted_at", null)
     .order("uploaded_at", { ascending: false })
@@ -88,11 +93,17 @@ export default async function VaultPage() {
     }
   }
 
-  // 4. Batch-generate all signed URLs. Chunked into pages of 500 because
-  //    Supabase's storage endpoint has a body-size limit on the request
-  //    array — passing thousands of paths in one call can fail silently.
-  //    Chunks run in parallel so it's still fast.
-  const paths = assets.map((a) => a.file_path);
+  // 4. Batch-sign URLs for both originals and thumbnails. Chunked into
+  //    pages of 500 because Supabase's storage endpoint has a body-size
+  //    limit. Chunks run in parallel so it's still fast.
+  //    Note: signing is metadata-only — it does NOT cost egress; only
+  //    the actual byte fetch by the browser does.
+  const allPaths = new Set<string>();
+  for (const a of assets) {
+    if (a.file_path) allPaths.add(a.file_path);
+    if (a.thumbnail_path) allPaths.add(a.thumbnail_path);
+  }
+  const paths = Array.from(allPaths);
   const SIGN_CHUNK = 500;
   const chunks: string[][] = [];
   for (let i = 0; i < paths.length; i += SIGN_CHUNK) {
@@ -114,16 +125,22 @@ export default async function VaultPage() {
     .map((asset) => {
       const signedUrl = urlByPath[asset.file_path] ?? "";
       if (!signedUrl) return null;
+      const thumbnailUrl = asset.thumbnail_path
+        ? urlByPath[asset.thumbnail_path] ?? null
+        : null;
       const req = requestMap[asset.request_id];
       return {
         id: asset.id,
         request_id: asset.request_id,
         file_name: asset.file_name,
+        file_path: asset.file_path,
         mime_type: asset.mime_type,
         size_bytes: asset.size_bytes,
         stage: asset.stage,
         uploaded_at: asset.uploaded_at,
         signedUrl,
+        thumbnailUrl,
+        thumbnailPath: asset.thumbnail_path ?? null,
         request_title: req?.title ?? "Untitled",
         is_nsfw: req?.is_nsfw ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},

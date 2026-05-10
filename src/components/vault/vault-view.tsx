@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useRef, useEffect, useTransition } from "react";
-import { Download, Search, X, Archive, Check, Loader2 } from "lucide-react";
+import { Download, Search, X, Archive, Check, Loader2, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +13,10 @@ import {
   markAssetPostedFromVault,
   unmarkAssetPostedFromVault,
   setRequestNsfw,
+  saveAssetThumbnail,
 } from "@/app/(app)/vault/actions";
+import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import { createClient } from "@/lib/supabase/client";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
 // ─── Platform display config ───────────────────────────────────────────────
@@ -340,10 +343,11 @@ function VaultCard({
         className="relative aspect-[9/16] w-full overflow-hidden bg-muted/30 cursor-pointer"
         onClick={handleMediaClick}
       >
-        {/* Media — only rendered once visible. Videos render as static
-            placeholders by default (no preload) and only load on tap.
-            preload="metadata" used to pull 100 KB–2 MB per card just for
-            the thumbnail; that was the main egress source. */}
+        {/* Media — only rendered once visible.
+            Display priority:
+              1. If playing → render <video preload="auto" autoplay>
+              2. Else if thumbnailUrl exists → tiny <img> (~30 KB)
+              3. Else → dark placeholder w/ play icon (no egress) */}
         {visible && isVideo && playing && (
           <video
             ref={videoRef}
@@ -357,7 +361,31 @@ function VaultCard({
             className="h-full w-full object-cover"
           />
         )}
-        {visible && isVideo && !playing && (
+        {visible && isVideo && !playing && asset.thumbnailUrl && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={asset.thumbnailUrl}
+              alt={asset.file_name}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+            {/* Play icon overlay — semi-transparent so thumbnail still visible */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="rounded-full bg-black/50 p-3 backdrop-blur-sm">
+                <svg
+                  className="h-6 w-6 text-white/90"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            </div>
+          </>
+        )}
+        {visible && isVideo && !playing && !asset.thumbnailUrl && (
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 via-slate-900 to-black">
             <div className="rounded-full bg-white/10 p-3 backdrop-blur-sm">
               <svg
@@ -376,7 +404,7 @@ function VaultCard({
         {visible && isImage && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={asset.signedUrl}
+            src={asset.thumbnailUrl ?? asset.signedUrl}
             alt={asset.file_name}
             loading="lazy"
             decoding="async"
@@ -576,6 +604,85 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     );
   }
 
+  // ── Backfill: generate thumbnails for old assets that don't have them.
+  //    One-time cost: fetches each missing-thumbnail asset once, generates
+  //    a ~30 KB JPEG client-side, uploads it. After that every future
+  //    vault visit skips the original entirely → massive ongoing savings.
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState({ done: 0, total: 0 });
+
+  const missingThumbs = useMemo(
+    () => localAssets.filter((a) => !a.thumbnailUrl),
+    [localAssets]
+  );
+
+  async function runBackfill() {
+    if (backfilling) return;
+    const todo = [...missingThumbs];
+    if (todo.length === 0) {
+      toast.info("All assets already have thumbnails");
+      return;
+    }
+    setBackfilling(true);
+    setBackfillProgress({ done: 0, total: todo.length });
+    const supabase = createClient();
+    let success = 0;
+    let failed = 0;
+
+    // Process sequentially to keep memory + bandwidth manageable
+    for (let i = 0; i < todo.length; i++) {
+      const asset = todo[i];
+      try {
+        // Fetch original (one-time cost per asset, then thumbnail used forever)
+        const res = await fetch(asset.signedUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
+        if (!thumb) {
+          failed++;
+          continue;
+        }
+        const tPath = thumbnailPathFor(asset.file_path);
+        const { error: upErr } = await supabase.storage
+          .from("content-assets")
+          .upload(tPath, thumb, { contentType: "image/jpeg", upsert: true });
+        if (upErr) throw upErr;
+        const { error: saveErr } = await saveAssetThumbnail({
+          asset_id: asset.id,
+          thumbnail_path: tPath,
+        });
+        if (saveErr) throw new Error(saveErr);
+
+        // Sign the new thumbnail so the card updates immediately
+        const { data: signed } = await supabase.storage
+          .from("content-assets")
+          .createSignedUrl(tPath, 3600);
+        setLocalAssets((prev) =>
+          prev.map((a) =>
+            a.id === asset.id
+              ? {
+                  ...a,
+                  thumbnailUrl: signed?.signedUrl ?? null,
+                  thumbnailPath: tPath,
+                }
+              : a
+          )
+        );
+        success++;
+      } catch (err) {
+        console.warn("[backfill] asset failed", asset.id, err);
+        failed++;
+      } finally {
+        setBackfillProgress({ done: i + 1, total: todo.length });
+      }
+    }
+
+    setBackfilling(false);
+    toast.success(
+      `Thumbnails: ${success} created${failed > 0 ? `, ${failed} skipped` : ""}`
+    );
+  }
+
   const filtered = useMemo(() => {
     // Reset to page 1 whenever filters change (side-effectless via key on grid)
     let items = localAssets;
@@ -614,14 +721,33 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Content Vault</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             All uploaded media — playable, downloadable, trackable
           </p>
+          {missingThumbs.length > 0 && (
+            <button
+              onClick={runBackfill}
+              disabled={backfilling}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/15 disabled:opacity-60"
+            >
+              {backfilling ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Generating thumbnails… {backfillProgress.done}/{backfillProgress.total}
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-3 w-3" />
+                  Generate {missingThumbs.length} missing thumbnails
+                </>
+              )}
+            </button>
+          )}
         </div>
-        <span className="text-sm text-muted-foreground">
+        <span className="shrink-0 text-sm text-muted-foreground">
           {filtered.length} / {localAssets.length}
         </span>
       </div>
