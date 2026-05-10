@@ -68,7 +68,15 @@
       "Bash(/opt/homebrew/opt/libpq/bin/psql 'postgresql://postgres:fanslycsm12345@db.nlwkpkhtevgcdpqbksed.supabase.co:5432/postgres?sslmode=require' -c ' *)",
       "Bash(curl -s \"https://nlwkpkhtevgcdpqbksed.supabase.co/rest/v1/\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sd2twa2h0ZXZnY2RwcWJrc2VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NTI3MTEsImV4cCI6MjA5MjEyODcxMX0.LTGp4N-IyOPHp6IqSQyb8c3cQpLp25yrOBFTQdDJaWc\")",
       "Bash(npm run *)",
-      "Bash(grep -n \"VaultCard$\\\\|VaultCard\\\\s*\\\\n\\\\|onUpdateNsfw=\" /Users/leon/Desktop/fansly_CSM/src/components/vault/vault-view.tsx)"
+      "Bash(grep -n \"VaultCard$\\\\|VaultCard\\\\s*\\\\n\\\\|onUpdateNsfw=\" /Users/leon/Desktop/fansly_CSM/src/components/vault/vault-view.tsx)",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "mcp__Claude_in_Chrome__select_browser",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__browser_batch",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "mcp__Claude_in_Chrome__read_page",
+      "mcp__Claude_in_Chrome__resize_window"
     ]
   }
 }

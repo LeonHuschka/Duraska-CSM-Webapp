@@ -16,7 +16,6 @@ import {
   saveAssetThumbnail,
 } from "@/app/(app)/vault/actions";
 import {
-  generateThumbnail,
   generateThumbnailFromUrl,
   thumbnailPathFor,
 } from "@/lib/thumbnails";
@@ -641,23 +640,17 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
   const processAsset = useCallback(async (asset: VaultAsset) => {
     const supabase = createClient();
     try {
-      // Path 1: URL-based — browser smart-fetches only what it needs
-      let thumb = await generateThumbnailFromUrl(
+      // URL-based smart fetch only. Browser fetches ~1-5 MB instead of
+      // the full file. If this fails (timeout, CORS, weird codec) we
+      // SKIP the asset rather than falling back to a full blob download
+      // — that fallback used to silently spike egress to 100 MB+ per
+      // failed asset. Skipped assets can be picked up later by the
+      // local Node script (scripts/backfill-thumbnails.mjs) which uses
+      // ffmpeg + range requests and is far more reliable.
+      const thumb = await generateThumbnailFromUrl(
         asset.signedUrl,
         asset.mime_type
       );
-      // Path 2: blob fallback for awkward codecs / CORS edge cases
-      if (!thumb) {
-        try {
-          const res = await fetch(asset.signedUrl);
-          if (res.ok) {
-            const blob = await res.blob();
-            thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
-          }
-        } catch {
-          /* falls through to failure path */
-        }
-      }
       if (!thumb) return;
 
       const tPath = thumbnailPathFor(asset.file_path);
