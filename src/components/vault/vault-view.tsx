@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useRef, useEffect, useTransition, useCallback } from "react";
-import { Download, Search, X, Archive, Check, Loader2, Image as ImageIcon } from "lucide-react";
+import { Download, Search, X, Archive, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import {
@@ -718,28 +718,21 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     [drainQueue]
   );
 
-  const missingThumbs = useMemo(
-    () => localAssets.filter((a) => !a.thumbnailUrl),
-    [localAssets]
-  );
-
-  function runBackfillAll() {
-    if (missingThumbs.length === 0) {
-      toast.info("All assets already have thumbnails");
-      return;
+  // Auto-run backfill once on mount: queue every asset that's missing a
+  // thumbnail. The worker pool drains it in the background while the user
+  // does whatever they want — including closing the tab. Next visit picks
+  // up wherever it left off (any thumbs that already landed in the DB are
+  // simply skipped because their thumbnailUrl is now non-null).
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (localAssets.length === 0) return;
+    autoStartedRef.current = true;
+    for (const a of localAssets) {
+      if (!a.thumbnailUrl) enqueueAsset(a);
     }
-    let added = 0;
-    for (const a of missingThumbs) {
-      if (!enqueuedRef.current.has(a.id)) {
-        enqueuedRef.current.add(a.id);
-        queueRef.current.push(a);
-        added++;
-      }
-    }
-    setBf((s) => ({ ...s, queued: queueRef.current.length }));
-    if (added > 0) toast.success(`Queued ${added} for backfill`);
-    drainQueue();
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localAssets.length]);
 
   const filtered = useMemo(() => {
     // Reset to page 1 whenever filters change (side-effectless via key on grid)
@@ -785,24 +778,13 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
           <p className="mt-1 text-sm text-muted-foreground">
             All uploaded media — playable, downloadable, trackable
           </p>
-          {/* Backfill status: subtle indicator when something's processing,
-              plus an explicit "do them all now" button if you don't want
-              to wait for the auto-on-scroll behaviour. */}
+          {/* Backfill auto-starts on mount and runs in the background.
+              We just show progress; nothing to click. */}
           {bf.running && (
             <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Generating thumbnails… {bf.done} done, {bf.queued} queued
             </p>
-          )}
-          {!bf.running && missingThumbs.length > 0 && (
-            <button
-              onClick={runBackfillAll}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/15"
-              title="Otherwise thumbnails generate automatically as you scroll"
-            >
-              <ImageIcon className="h-3 w-3" />
-              Generate all {missingThumbs.length} missing now
-            </button>
           )}
         </div>
         <span className="shrink-0 text-sm text-muted-foreground">
