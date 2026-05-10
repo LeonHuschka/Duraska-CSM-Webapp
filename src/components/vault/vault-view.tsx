@@ -340,18 +340,38 @@ function VaultCard({
         className="relative aspect-[9/16] w-full overflow-hidden bg-muted/30 cursor-pointer"
         onClick={handleMediaClick}
       >
-        {/* Media — only rendered once visible */}
-        {visible && isVideo && (
+        {/* Media — only rendered once visible. Videos render as static
+            placeholders by default (no preload) and only load on tap.
+            preload="metadata" used to pull 100 KB–2 MB per card just for
+            the thumbnail; that was the main egress source. */}
+        {visible && isVideo && playing && (
           <video
             ref={videoRef}
             key={asset.id}
-            src={`${asset.signedUrl}#t=0.001`}
+            src={asset.signedUrl}
             playsInline
-            preload="metadata"       // loads first frame as visible thumbnail (~few KB)
-            controls={playing}       // show controls only while playing
+            preload="auto"
+            autoPlay
+            controls
             onEnded={() => setPlaying(false)}
             className="h-full w-full object-cover"
           />
+        )}
+        {visible && isVideo && !playing && (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 via-slate-900 to-black">
+            <div className="rounded-full bg-white/10 p-3 backdrop-blur-sm">
+              <svg
+                className="h-7 w-7 text-white/90"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+            <span className="px-2 text-center text-[9px] font-medium text-white/40 line-clamp-2">
+              Tap to play
+            </span>
+          </div>
         )}
         {visible && isImage && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -494,16 +514,6 @@ function VaultCard({
           )}
         </div>
 
-        {/* Play icon — hover on desktop, always on mobile */}
-        {isVideo && visible && !playing && (
-          <div className="absolute inset-0 flex items-center justify-center transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-events-none">
-            <div className="rounded-full bg-black/40 p-3 backdrop-blur-sm">
-              <svg className="h-5 w-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Meta below thumbnail ── */}

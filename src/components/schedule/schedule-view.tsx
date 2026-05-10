@@ -252,18 +252,22 @@ function DroppableTimeslot({
         {/* Media area — square crop, time+platform overlaid */}
         <div className="relative aspect-square w-full overflow-hidden bg-muted/30">
           {asset && isVideo ? (
-            <video
-              key={asset.id}
-              playsInline
-              preload="metadata"
-              src={`${asset.signedUrl}#t=0.001`}
-              className="h-full w-full object-cover"
-            />
+            // No preload — placeholder only. Avoids 100KB-2MB metadata
+            // fetch per slot. The vault has the full playable preview.
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-black">
+              <div className="rounded-full bg-white/10 p-2 backdrop-blur-sm">
+                <svg className="h-5 w-5 text-white/80" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            </div>
           ) : asset && isImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={asset.signedUrl}
               alt={asset.file_name}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover"
             />
           ) : (
@@ -395,19 +399,22 @@ function DroppableTimeslot({
                   : "ring-transparent"
             }`}>
               {isVideo ? (
+                // preload="none" → no bytes fetched until user hits play
                 <video
                   key={asset.id}
                   controls
                   playsInline
-                  preload="metadata"
-                  src={`${asset.signedUrl}#t=0.001`}
-                  className="h-full w-full object-contain"
+                  preload="none"
+                  src={asset.signedUrl}
+                  className="h-full w-full object-contain bg-black"
                 />
               ) : isImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={asset.signedUrl}
                   alt={asset.file_name}
+                  loading="lazy"
+                  decoding="async"
                   className="h-full w-full object-contain"
                 />
               ) : null}

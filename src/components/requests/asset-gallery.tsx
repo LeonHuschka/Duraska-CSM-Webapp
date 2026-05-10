@@ -62,11 +62,12 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
           {/* Preview */}
           <div className={`relative bg-muted/30 ${isVideo(asset.mime_type) ? "aspect-[9/16]" : "aspect-video"}`}>
             {isVideo(asset.mime_type) ? (
+              // preload="none" → no bytes fetched until user hits play
               <video
                 controls
                 playsInline
-                preload="metadata"
-                src={`${asset.signedUrl}#t=0.001`}
+                preload="none"
+                src={asset.signedUrl}
                 className="h-full w-full rounded-t-xl object-contain bg-black"
               />
             ) : (
@@ -74,6 +75,8 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
               <img
                 src={asset.signedUrl}
                 alt={asset.file_name}
+                loading="lazy"
+                decoding="async"
                 className="h-full w-full rounded-t-xl object-cover"
               />
             )}
