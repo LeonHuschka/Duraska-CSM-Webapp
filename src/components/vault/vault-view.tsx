@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef, useEffect, useTransition } from "react";
+import { useMemo, useState, useRef, useEffect, useTransition, useCallback } from "react";
 import { Download, Search, X, Archive, Check, Loader2, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -97,10 +97,12 @@ function VaultCard({
   asset,
   onUpdate,
   onUpdateNsfw,
+  onVisible,
 }: {
   asset: VaultAsset;
   onUpdate: (id: string, platformStatus: Record<string, string>) => void;
   onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
+  onVisible: (asset: VaultAsset) => void;
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const isImage = asset.mime_type?.startsWith("image/");
@@ -117,17 +119,26 @@ function VaultCard({
   const [postOpen, setPostOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  // Lazy-load: observe when card enters viewport
+  // Lazy-load: observe when card enters viewport. Also ping the parent
+  // so it can auto-enqueue this asset for thumbnail backfill if missing.
+  const onVisibleRef = useRef(onVisible);
+  onVisibleRef.current = onVisible;
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          onVisibleRef.current(asset);
+          observer.disconnect();
+        }
+      },
       { rootMargin: "200px" } // start loading 200px before entering view
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [asset]);
 
   const platformEntries = Object.entries(asset.platformStatus);
   const isUnposted = platformEntries.length === 0;
@@ -608,120 +619,126 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
     );
   }
 
-  // ── Backfill: generate thumbnails for old assets that don't have them.
-  //    One-time cost: fetches each missing-thumbnail asset once, generates
-  //    a ~30 KB JPEG client-side, uploads it. After that every future
-  //    vault visit skips the original entirely → massive ongoing savings.
-  const [backfilling, setBackfilling] = useState(false);
-  const [backfillProgress, setBackfillProgress] = useState({ done: 0, total: 0 });
+  // ── Thumbnail backfill: shared queue + worker pool.
+  //
+  //  Two ways assets enter the queue:
+  //    A. Auto-on-visibility — when a card without a thumbnail scrolls
+  //       into view, it's enqueued. So as you browse, the gaps fill in
+  //       silently in the background. No button needed.
+  //    B. Manual — the "Generate all" button enqueues every missing one
+  //       at once for impatient cases.
+  //
+  //  Workers prefer the URL-based generator (browser fetches ~1-5 MB of
+  //  each video instead of the full 50-200 MB) and fall back to the
+  //  blob path on failure. CONCURRENCY=2 is a balance — enough to feel
+  //  responsive, not so many that we spike egress or memory.
+  const CONCURRENCY = 2;
+  const queueRef = useRef<VaultAsset[]>([]);
+  const enqueuedRef = useRef<Set<string>>(new Set());
+  const activeWorkersRef = useRef(0);
+  const [bf, setBf] = useState({ done: 0, queued: 0, running: false });
+
+  const processAsset = useCallback(async (asset: VaultAsset) => {
+    const supabase = createClient();
+    try {
+      // Path 1: URL-based — browser smart-fetches only what it needs
+      let thumb = await generateThumbnailFromUrl(
+        asset.signedUrl,
+        asset.mime_type
+      );
+      // Path 2: blob fallback for awkward codecs / CORS edge cases
+      if (!thumb) {
+        try {
+          const res = await fetch(asset.signedUrl);
+          if (res.ok) {
+            const blob = await res.blob();
+            thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
+          }
+        } catch {
+          /* falls through to failure path */
+        }
+      }
+      if (!thumb) return;
+
+      const tPath = thumbnailPathFor(asset.file_path);
+      const { error: upErr } = await supabase.storage
+        .from("content-assets")
+        .upload(tPath, thumb, { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+      const { error: saveErr } = await saveAssetThumbnail({
+        asset_id: asset.id,
+        thumbnail_path: tPath,
+      });
+      if (saveErr) throw new Error(saveErr);
+
+      const { data: signed } = await supabase.storage
+        .from("content-assets")
+        .createSignedUrl(tPath, 3600);
+      setLocalAssets((prev) =>
+        prev.map((a) =>
+          a.id === asset.id
+            ? { ...a, thumbnailUrl: signed?.signedUrl ?? null, thumbnailPath: tPath }
+            : a
+        )
+      );
+    } catch (err) {
+      console.warn("[backfill] asset failed", asset.id, err);
+    }
+  }, []);
+
+  const drainQueue = useCallback(async () => {
+    while (activeWorkersRef.current < CONCURRENCY && queueRef.current.length > 0) {
+      const asset = queueRef.current.shift()!;
+      activeWorkersRef.current++;
+      setBf((s) => ({ ...s, running: true }));
+      // Fire and forget — worker decrements + drains again on completion
+      (async () => {
+        await processAsset(asset);
+        activeWorkersRef.current--;
+        setBf((s) => ({
+          done: s.done + 1,
+          queued: queueRef.current.length,
+          running: activeWorkersRef.current > 0 || queueRef.current.length > 0,
+        }));
+        drainQueue();
+      })();
+    }
+  }, [processAsset]);
+
+  const enqueueAsset = useCallback(
+    (asset: VaultAsset) => {
+      // Skip if already has a thumbnail or already in/processed by the queue
+      if (asset.thumbnailUrl) return;
+      if (enqueuedRef.current.has(asset.id)) return;
+      enqueuedRef.current.add(asset.id);
+      queueRef.current.push(asset);
+      setBf((s) => ({ ...s, queued: queueRef.current.length }));
+      drainQueue();
+    },
+    [drainQueue]
+  );
 
   const missingThumbs = useMemo(
     () => localAssets.filter((a) => !a.thumbnailUrl),
     [localAssets]
   );
 
-  async function runBackfill() {
-    if (backfilling) return;
-    const todo = [...missingThumbs];
-    if (todo.length === 0) {
+  function runBackfillAll() {
+    if (missingThumbs.length === 0) {
       toast.info("All assets already have thumbnails");
       return;
     }
-    setBackfilling(true);
-    setBackfillProgress({ done: 0, total: todo.length });
-    const supabase = createClient();
-    let success = 0;
-    let failed = 0;
-    let done = 0;
-
-    // Strategy:
-    //   1. Try URL-based generation first — browser only fetches ~1-5 MB
-    //      of each video instead of the full 50-200 MB. ~30-100× faster
-    //      AND much less egress.
-    //   2. If that fails (CORS issue, weird codec, etc.) fall back to
-    //      fetching the blob and generating from there.
-    //   3. Run 3 workers in parallel — bandwidth-bound, more workers
-    //      doesn't help much past this and risks browser memory limits.
-    async function processAsset(asset: VaultAsset): Promise<void> {
-      try {
-        // Path 1: URL-based (fast, low egress)
-        let thumb = await generateThumbnailFromUrl(
-          asset.signedUrl,
-          asset.mime_type
-        );
-
-        // Path 2: blob fallback (only if URL path failed)
-        if (!thumb) {
-          try {
-            const res = await fetch(asset.signedUrl);
-            if (res.ok) {
-              const blob = await res.blob();
-              thumb = await generateThumbnail(blob, asset.mime_type ?? undefined);
-            }
-          } catch {
-            // ignore — counted as failure below
-          }
-        }
-
-        if (!thumb) {
-          failed++;
-          return;
-        }
-
-        const tPath = thumbnailPathFor(asset.file_path);
-        const { error: upErr } = await supabase.storage
-          .from("content-assets")
-          .upload(tPath, thumb, { contentType: "image/jpeg", upsert: true });
-        if (upErr) throw upErr;
-        const { error: saveErr } = await saveAssetThumbnail({
-          asset_id: asset.id,
-          thumbnail_path: tPath,
-        });
-        if (saveErr) throw new Error(saveErr);
-
-        // Sign the new thumbnail so the card updates immediately
-        const { data: signed } = await supabase.storage
-          .from("content-assets")
-          .createSignedUrl(tPath, 3600);
-        setLocalAssets((prev) =>
-          prev.map((a) =>
-            a.id === asset.id
-              ? {
-                  ...a,
-                  thumbnailUrl: signed?.signedUrl ?? null,
-                  thumbnailPath: tPath,
-                }
-              : a
-          )
-        );
-        success++;
-      } catch (err) {
-        console.warn("[backfill] asset failed", asset.id, err);
-        failed++;
-      } finally {
-        done++;
-        setBackfillProgress({ done, total: todo.length });
+    let added = 0;
+    for (const a of missingThumbs) {
+      if (!enqueuedRef.current.has(a.id)) {
+        enqueuedRef.current.add(a.id);
+        queueRef.current.push(a);
+        added++;
       }
     }
-
-    // Worker pool: 3 concurrent
-    const CONCURRENCY = 3;
-    let cursor = 0;
-    async function worker() {
-      while (true) {
-        const i = cursor++;
-        if (i >= todo.length) return;
-        await processAsset(todo[i]);
-      }
-    }
-    await Promise.all(
-      Array.from({ length: CONCURRENCY }, () => worker())
-    );
-
-    setBackfilling(false);
-    toast.success(
-      `Thumbnails: ${success} created${failed > 0 ? `, ${failed} skipped` : ""}`
-    );
+    setBf((s) => ({ ...s, queued: queueRef.current.length }));
+    if (added > 0) toast.success(`Queued ${added} for backfill`);
+    drainQueue();
   }
 
   const filtered = useMemo(() => {
@@ -768,23 +785,23 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
           <p className="mt-1 text-sm text-muted-foreground">
             All uploaded media — playable, downloadable, trackable
           </p>
-          {missingThumbs.length > 0 && (
+          {/* Backfill status: subtle indicator when something's processing,
+              plus an explicit "do them all now" button if you don't want
+              to wait for the auto-on-scroll behaviour. */}
+          {bf.running && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Generating thumbnails… {bf.done} done, {bf.queued} queued
+            </p>
+          )}
+          {!bf.running && missingThumbs.length > 0 && (
             <button
-              onClick={runBackfill}
-              disabled={backfilling}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/15 disabled:opacity-60"
+              onClick={runBackfillAll}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/15"
+              title="Otherwise thumbnails generate automatically as you scroll"
             >
-              {backfilling ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Generating thumbnails… {backfillProgress.done}/{backfillProgress.total}
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="h-3 w-3" />
-                  Generate {missingThumbs.length} missing thumbnails
-                </>
-              )}
+              <ImageIcon className="h-3 w-3" />
+              Generate all {missingThumbs.length} missing now
             </button>
           )}
         </div>
@@ -896,6 +913,7 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
                 asset={asset}
                 onUpdate={handleAssetUpdate}
                 onUpdateNsfw={handleNsfwUpdate}
+                onVisible={enqueueAsset}
               />
             ))}
           </div>

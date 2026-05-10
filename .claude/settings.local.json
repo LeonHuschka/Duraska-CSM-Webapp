@@ -67,7 +67,8 @@
       "Bash(ping -c 1 -W 2 db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(/opt/homebrew/opt/libpq/bin/psql 'postgresql://postgres:fanslycsm12345@db.nlwkpkhtevgcdpqbksed.supabase.co:5432/postgres?sslmode=require' -c ' *)",
       "Bash(curl -s \"https://nlwkpkhtevgcdpqbksed.supabase.co/rest/v1/\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5sd2twa2h0ZXZnY2RwcWJrc2VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NTI3MTEsImV4cCI6MjA5MjEyODcxMX0.LTGp4N-IyOPHp6IqSQyb8c3cQpLp25yrOBFTQdDJaWc\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(grep -n \"VaultCard$\\\\|VaultCard\\\\s*\\\\n\\\\|onUpdateNsfw=\" /Users/leon/Desktop/fansly_CSM/src/components/vault/vault-view.tsx)"
     ]
   }
 }
