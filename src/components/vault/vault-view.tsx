@@ -143,12 +143,14 @@ function VaultCard({
   const isUnposted = platformEntries.length === 0;
 
   function handleMediaClick() {
-    if (!isVideo || !videoRef.current) return;
+    if (!isVideo) return;
     if (playing) {
-      videoRef.current.pause();
+      // <video> is mounted when playing — pause it via the ref
+      videoRef.current?.pause();
       setPlaying(false);
     } else {
-      videoRef.current.play();
+      // Not playing yet → mount the <video autoPlay> element. Don't
+      // touch videoRef here, it's null until the next render.
       setPlaying(true);
     }
   }
