@@ -76,7 +76,16 @@
       "mcp__Claude_in_Chrome__browser_batch",
       "mcp__Claude_in_Chrome__get_page_text",
       "mcp__Claude_in_Chrome__read_page",
-      "mcp__Claude_in_Chrome__resize_window"
+      "mcp__Claude_in_Chrome__resize_window",
+      "Bash(git ls-remote *)",
+      "Bash(gh api *)",
+      "Bash(curl -s \"https://api.github.com/repos/LeonHuschka/Duraska-CSM-Webapp/commits/main\")",
+      "Bash(curl -sI \"https://duraska-csm-webapp.vercel.app/vault\")",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/login\")",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/_next/static/chunks/app/\\(app\\)/vault/page-1c8449f6f92fc071.js\" -o /dev/null -w \"local-build hash: %{http_code}\\\\n\")",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/_next/static/chunks/app/\\(app\\)/vault/page-2d7b83b8b2ddfbe4.js\" -o /dev/null -w \"earlier hash: %{http_code}\\\\n\")",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/_next/build-manifest.json\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/_next/app-build-manifest.json\")"
     ]
   }
 }

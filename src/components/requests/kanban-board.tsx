@@ -40,6 +40,7 @@ const COLUMNS = [
   { id: "edited", label: "Edited", color: "bg-blue-400" },
   { id: "scheduled", label: "Scheduled", color: "bg-emerald-400" },
   { id: "posted", label: "Posted", color: "bg-green-400" },
+  { id: "archived", label: "Archived", color: "bg-slate-400" },
 ] as const;
 
 interface KanbanBoardProps {
