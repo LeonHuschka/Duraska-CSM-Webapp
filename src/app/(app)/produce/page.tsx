@@ -37,18 +37,18 @@ export default async function ProducePage() {
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
-  // Models only see "requested", others see requested + shooted + edited
-  const statusFilter = isModel
-    ? ["requested"]
-    : ["requested", "shooted", "edited"];
+  // Models only see "requested" (their daily worklist).
+  // Other roles get the full pipeline so they can switch context to any
+  // status via the filter dropdown — including scheduled/posted/archived.
+  const requestsQuery = supabase
+    .from("content_requests")
+    .select("*")
+    .eq("persona_id", personaId)
+    .order("created_at", { ascending: false });
+  if (isModel) requestsQuery.in("status", ["requested"]);
 
   const [requestsResult, typesResult, shotLastWeekResult, advanceResult, readyResult, timeslotsResult] = await Promise.all([
-    supabase
-      .from("content_requests")
-      .select("*")
-      .eq("persona_id", personaId)
-      .in("status", statusFilter)
-      .order("created_at", { ascending: false }),
+    requestsQuery,
     supabase
       .from("content_types")
       .select("*")

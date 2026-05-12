@@ -327,6 +327,9 @@ export function ProduceView({
                 <SelectItem value="requested">Requested</SelectItem>
                 <SelectItem value="shooted">Shooted</SelectItem>
                 <SelectItem value="edited">Edited</SelectItem>
+                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="posted">Posted</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
               </SelectContent>
             </Select>
           )}
