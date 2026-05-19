@@ -154,16 +154,30 @@ async function thumbnailFromVideo(blob: Blob): Promise<Blob | null> {
     video.preload = "auto";
     video.src = url;
 
+    // Hard timeout — iOS Safari sometimes never fires loadedmetadata for
+    // large blob URLs (200 MB+ phone videos), which used to hang the
+    // entire upload loop and kill the model's ability to submit anything.
+    // 12 s is plenty for a local in-memory blob to load metadata; if it
+    // doesn't, we bail and the caller skips the thumbnail (upload still
+    // succeeds via the upload-flow's try/catch wrapper).
+    const TIMEOUT_MS = 12_000;
+
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         video.onloadedmetadata = null;
         video.onerror = null;
       };
+      const t = setTimeout(() => {
+        cleanup();
+        reject(new Error("metadata timeout"));
+      }, TIMEOUT_MS);
       video.onloadedmetadata = () => {
+        clearTimeout(t);
         cleanup();
         resolve();
       };
       video.onerror = () => {
+        clearTimeout(t);
         cleanup();
         reject(new Error("video metadata load failed"));
       };
@@ -175,11 +189,17 @@ async function thumbnailFromVideo(blob: Blob): Promise<Blob | null> {
         video.onseeked = null;
         video.onerror = null;
       };
+      const t = setTimeout(() => {
+        cleanup();
+        reject(new Error("seek timeout"));
+      }, TIMEOUT_MS);
       video.onseeked = () => {
+        clearTimeout(t);
         cleanup();
         resolve();
       };
       video.onerror = () => {
+        clearTimeout(t);
         cleanup();
         reject(new Error("video seek failed"));
       };
