@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Upload, Loader2, X, Link as LinkIcon, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { createSelfProducedRequest } from "@/app/(app)/vault/actions";
+import {
+  createSelfProducedRequest,
+  getNextSelfProducedTitle,
+} from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
@@ -47,17 +50,35 @@ export function SelfUploadDialog({
   onComplete,
 }: SelfUploadDialogProps) {
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
   const [inspoLink, setInspoLink] = useState("");
   const [contentTypeId, setContentTypeId] = useState<string>("none");
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [previewTitle, setPreviewTitle] = useState<string>("…");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // When dialog opens or content type changes, fetch the next title preview
+  // from the server. Same logic that runs server-side on submit — so what
+  // the user sees is what they get.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setPreviewTitle("…");
+    getNextSelfProducedTitle(contentTypeId === "none" ? null : contentTypeId)
+      .then((r) => {
+        if (!cancelled) setPreviewTitle(r.title);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewTitle("Untitled #?");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, contentTypeId]);
+
   function reset() {
-    setTitle("");
     setInspoLink("");
     setContentTypeId("none");
     setIsNsfw(false);
@@ -81,17 +102,13 @@ export function SelfUploadDialog({
       toast.error("Pick at least one file");
       return;
     }
-    if (!title.trim()) {
-      toast.error("Title is required");
-      return;
-    }
 
     setUploading(true);
     setProgress({ done: 0, total: files.length });
 
-    // 1. Create the content_request
+    // 1. Create the content_request — title is computed server-side from
+    //    content type + auto-incremented number.
     const created = await createSelfProducedRequest({
-      title: title.trim(),
       inspo_link: inspoLink.trim() || null,
       content_type_id: contentTypeId === "none" ? null : contentTypeId,
       is_nsfw: isNsfw,
@@ -102,6 +119,7 @@ export function SelfUploadDialog({
       return;
     }
     const requestId = created.request_id;
+    const finalTitle = created.title ?? "";
 
     const supabase = createClient();
     let completed = 0;
@@ -162,7 +180,7 @@ export function SelfUploadDialog({
     setUploading(false);
     if (completed > 0) {
       toast.success(
-        `${completed} file${completed > 1 ? "s" : ""} uploaded — request "${title.trim()}" created`
+        `${completed} file${completed > 1 ? "s" : ""} uploaded — "${finalTitle}" created`
       );
       reset();
       setOpen(false);
@@ -180,20 +198,7 @@ export function SelfUploadDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button
-          variant="default"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => {
-            // Auto-suggest a title with timestamp
-            if (!title) {
-              const now = new Date();
-              setTitle(
-                `Self #${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`
-              );
-            }
-          }}
-        >
+        <Button variant="default" size="sm" className="gap-1.5">
           <Camera className="h-3.5 w-3.5" />
           Upload self-produced
         </Button>
@@ -203,16 +208,12 @@ export function SelfUploadDialog({
           <DialogTitle>Upload self-produced content</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          {/* Title */}
-          <div className="space-y-1.5">
-            <Label htmlFor="title">Title</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Self-Roleplay #1"
-              disabled={uploading}
-            />
+          {/* Auto-generated title preview */}
+          <div className="rounded-md border border-border/40 bg-muted/30 px-3 py-2.5">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Title (auto-generated)
+            </p>
+            <p className="mt-0.5 text-sm font-medium">{previewTitle}</p>
           </div>
 
           {/* Inspo Link */}
@@ -336,7 +337,7 @@ export function SelfUploadDialog({
           {/* Submit */}
           <Button
             onClick={handleSubmit}
-            disabled={uploading || files.length === 0 || !title.trim()}
+            disabled={uploading || files.length === 0}
             className="w-full"
           >
             {uploading ? (

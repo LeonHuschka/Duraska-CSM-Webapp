@@ -13,17 +13,69 @@ async function getPersonaId() {
 }
 
 /**
+ * Compute the next title for self-produced content: "{ContentType} #N".
+ *
+ * Scans existing content_requests for the persona whose title matches
+ * "{prefix} #<number>" — finds the max N and returns N+1. Falls back to
+ * "Untitled" prefix when no content type is picked.
+ *
+ * Counts ALL requests with that prefix regardless of status / stage —
+ * so the numbering doesn't reset when content moves through the pipeline.
+ */
+export async function getNextSelfProducedTitle(content_type_id: string | null) {
+  const supabase = await createClient();
+  const personaId = await getPersonaId();
+
+  let prefix = "Untitled";
+  if (content_type_id) {
+    const { data: ct } = await supabase
+      .from("content_types")
+      .select("name")
+      .eq("id", content_type_id)
+      .eq("persona_id", personaId)
+      .maybeSingle();
+    if (ct?.name) prefix = ct.name;
+  }
+
+  // Match titles like "Prefix #42". Pull only the title column to stay light.
+  // Use ilike to be permissive on casing.
+  const { data: rows } = await supabase
+    .from("content_requests")
+    .select("title")
+    .eq("persona_id", personaId)
+    .ilike("title", `${prefix} #%`);
+
+  let maxN = 0;
+  const re = new RegExp(`^${escapeRegex(prefix)}\\s*#(\\d+)`, "i");
+  for (const r of rows ?? []) {
+    const m = r.title?.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxN) maxN = n;
+    }
+  }
+
+  return { title: `${prefix} #${maxN + 1}`, prefix };
+}
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Self-produced content: model (or any persona member) creates a new
  * content_request straight from the Vault, marked as already shot.
  * Returns the new request_id + persona_id so the client can run the
  * normal upload + asset-record flow.
  *
- * Note: stage="raw" + status="shooted" is the default — fits the
- * pipeline: model shoots based on her own IG inspo → editor processes
- * later → moves to "edited".
+ * Title is generated server-side from the content type + auto-incremented
+ * number — keeps naming consistent and avoids the model having to think
+ * about it.
+ *
+ * stage="raw" + status="shooted" — fits the pipeline: model shoots based
+ * on her own IG inspo → editor processes later → moves to "edited".
  */
 export async function createSelfProducedRequest(data: {
-  title: string;
   inspo_link?: string | null;
   content_type_id?: string | null;
   is_nsfw: boolean;
@@ -35,7 +87,12 @@ export async function createSelfProducedRequest(data: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated", request_id: null };
+  if (!user) return { error: "Not authenticated", request_id: null, title: null };
+
+  // Compute the title server-side from content type + next number
+  const { title } = await getNextSelfProducedTitle(
+    data.content_type_id ?? null
+  );
 
   // Find the next position so it lands at the top of "shooted" column
   const { data: maxRow } = await supabase
@@ -51,7 +108,7 @@ export async function createSelfProducedRequest(data: {
     .from("content_requests")
     .insert({
       persona_id: personaId,
-      title: data.title,
+      title,
       description: "Self-produced based on inspo",
       inspo_link: data.inspo_link ?? null,
       content_type_id: data.content_type_id ?? null,
@@ -65,13 +122,14 @@ export async function createSelfProducedRequest(data: {
     .single();
 
   if (error || !inserted) {
-    return { error: error?.message ?? "Insert failed", request_id: null };
+    return { error: error?.message ?? "Insert failed", request_id: null, title: null };
   }
 
   return {
     error: null,
     request_id: inserted.id,
     persona_id: inserted.persona_id,
+    title,
   };
 }
 
