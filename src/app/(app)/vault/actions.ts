@@ -13,6 +13,69 @@ async function getPersonaId() {
 }
 
 /**
+ * Self-produced content: model (or any persona member) creates a new
+ * content_request straight from the Vault, marked as already shot.
+ * Returns the new request_id + persona_id so the client can run the
+ * normal upload + asset-record flow.
+ *
+ * Note: stage="raw" + status="shooted" is the default — fits the
+ * pipeline: model shoots based on her own IG inspo → editor processes
+ * later → moves to "edited".
+ */
+export async function createSelfProducedRequest(data: {
+  title: string;
+  inspo_link?: string | null;
+  content_type_id?: string | null;
+  is_nsfw: boolean;
+}) {
+  const supabase = await createClient();
+  const personaId = await getPersonaId();
+  const now = new Date().toISOString();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated", request_id: null };
+
+  // Find the next position so it lands at the top of "shooted" column
+  const { data: maxRow } = await supabase
+    .from("content_requests")
+    .select("position")
+    .eq("persona_id", personaId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextPosition = (maxRow?.position ?? 0) + 1;
+
+  const { data: inserted, error } = await supabase
+    .from("content_requests")
+    .insert({
+      persona_id: personaId,
+      title: data.title,
+      description: "Self-produced based on inspo",
+      inspo_link: data.inspo_link ?? null,
+      content_type_id: data.content_type_id ?? null,
+      is_nsfw: data.is_nsfw,
+      status: "shooted",
+      shooted_at: now,
+      position: nextPosition,
+      created_by: user.id,
+    })
+    .select("id, persona_id")
+    .single();
+
+  if (error || !inserted) {
+    return { error: error?.message ?? "Insert failed", request_id: null };
+  }
+
+  return {
+    error: null,
+    request_id: inserted.id,
+    persona_id: inserted.persona_id,
+  };
+}
+
+/**
  * Persist a thumbnail_path produced by the client-side backfill flow.
  * The actual JPEG upload happens on the client (it has the file in memory)
  * — this just writes the resulting path back to the DB and revalidates.

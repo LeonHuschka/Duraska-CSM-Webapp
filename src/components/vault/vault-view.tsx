@@ -20,6 +20,8 @@ import {
   thumbnailPathFor,
 } from "@/lib/thumbnails";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { SelfUploadDialog } from "@/components/vault/self-upload-dialog";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
 // ─── Platform display config ───────────────────────────────────────────────
@@ -592,7 +594,16 @@ const PLATFORM_FILTER_OPTIONS = [
   { value: "tiktok", label: "TikTok" },
 ];
 
-export function VaultView({ assets }: { assets: VaultAsset[] }) {
+export function VaultView({
+  assets,
+  personaId,
+  contentTypes,
+}: {
+  assets: VaultAsset[];
+  personaId: string;
+  contentTypes: { id: string; name: string }[];
+}) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("edited");
   const [nsfwFilter, setNsfwFilter] = useState<string>("all");
@@ -782,9 +793,16 @@ export function VaultView({ assets }: { assets: VaultAsset[] }) {
             </p>
           )}
         </div>
-        <span className="shrink-0 text-sm text-muted-foreground">
-          {filtered.length} / {localAssets.length}
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <SelfUploadDialog
+            personaId={personaId}
+            contentTypes={contentTypes}
+            onComplete={() => router.refresh()}
+          />
+          <span className="text-sm text-muted-foreground">
+            {filtered.length} / {localAssets.length}
+          </span>
+        </div>
       </div>
 
       {/* Search */}

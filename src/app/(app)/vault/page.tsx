@@ -37,15 +37,25 @@ export default async function VaultPage() {
 
   // 1. All requests for this persona (lightweight — just what we need).
   //    Explicit high limit to bypass the default 1000-row cap.
-  const { data: requests } = await supabase
-    .from("content_requests")
-    .select("id, title, is_nsfw")
-    .eq("persona_id", personaId)
-    .limit(5000);
+  //    Also fetch content_types in parallel for the self-upload dialog.
+  const [requestsResult, typesResult] = await Promise.all([
+    supabase
+      .from("content_requests")
+      .select("id, title, is_nsfw")
+      .eq("persona_id", personaId)
+      .limit(5000),
+    supabase
+      .from("content_types")
+      .select("id, name")
+      .eq("persona_id", personaId)
+      .order("position", { ascending: true }),
+  ]);
+  const requests = requestsResult.data;
+  const contentTypes = (typesResult.data ?? []) as { id: string; name: string }[];
 
   const requestIds = (requests ?? []).map((r) => r.id);
   if (requestIds.length === 0) {
-    return <VaultView assets={[]} />;
+    return <VaultView assets={[]} personaId={personaId} contentTypes={contentTypes} />;
   }
 
   const requestMap = Object.fromEntries(
@@ -68,7 +78,9 @@ export default async function VaultPage() {
     .limit(2000);
 
   if (!assets || assets.length === 0) {
-    return <VaultView assets={[]} />;
+    return (
+      <VaultView assets={[]} personaId={personaId} contentTypes={contentTypes} />
+    );
   }
 
   // 3. All schedule slots for those requests (to build posting status)
@@ -148,5 +160,11 @@ export default async function VaultPage() {
     })
     .filter(Boolean) as VaultAsset[];
 
-  return <VaultView assets={assetsWithUrls} />;
+  return (
+    <VaultView
+      assets={assetsWithUrls}
+      personaId={personaId}
+      contentTypes={contentTypes}
+    />
+  );
 }
