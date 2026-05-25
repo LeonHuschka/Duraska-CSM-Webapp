@@ -51,7 +51,11 @@ export function SelfUploadDialog({
 }: SelfUploadDialogProps) {
   const [open, setOpen] = useState(false);
   const [inspoLink, setInspoLink] = useState("");
-  const [contentTypeId, setContentTypeId] = useState<string>("none");
+  // Content type is REQUIRED — auto-defaults to the first available type
+  // so the title is always categorized (no more "Untitled #N").
+  const [contentTypeId, setContentTypeId] = useState<string>(
+    contentTypes[0]?.id ?? ""
+  );
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -64,14 +68,18 @@ export function SelfUploadDialog({
   // the user sees is what they get.
   useEffect(() => {
     if (!open) return;
+    if (!contentTypeId) {
+      setPreviewTitle("Pick a content type ↓");
+      return;
+    }
     let cancelled = false;
     setPreviewTitle("…");
-    getNextSelfProducedTitle(contentTypeId === "none" ? null : contentTypeId)
+    getNextSelfProducedTitle(contentTypeId)
       .then((r) => {
         if (!cancelled) setPreviewTitle(r.title);
       })
       .catch(() => {
-        if (!cancelled) setPreviewTitle("Untitled #?");
+        if (!cancelled) setPreviewTitle("?");
       });
     return () => {
       cancelled = true;
@@ -80,7 +88,7 @@ export function SelfUploadDialog({
 
   function reset() {
     setInspoLink("");
-    setContentTypeId("none");
+    setContentTypeId(contentTypes[0]?.id ?? "");
     setIsNsfw(false);
     setFiles([]);
     setProgress({ done: 0, total: 0 });
@@ -102,6 +110,10 @@ export function SelfUploadDialog({
       toast.error("Pick at least one file");
       return;
     }
+    if (!contentTypeId) {
+      toast.error("Please pick a content type");
+      return;
+    }
 
     setUploading(true);
     setProgress({ done: 0, total: files.length });
@@ -110,7 +122,7 @@ export function SelfUploadDialog({
     //    content type + auto-incremented number.
     const created = await createSelfProducedRequest({
       inspo_link: inspoLink.trim() || null,
-      content_type_id: contentTypeId === "none" ? null : contentTypeId,
+      content_type_id: contentTypeId,
       is_nsfw: isNsfw,
     });
     if (created.error || !created.request_id) {
@@ -237,17 +249,23 @@ export function SelfUploadDialog({
           {/* Content Type + NSFW row */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="type">Content Type</Label>
+              <Label htmlFor="type">
+                Content Type <span className="text-red-400">*</span>
+              </Label>
               <Select
                 value={contentTypeId}
                 onValueChange={setContentTypeId}
                 disabled={uploading || contentTypes.length === 0}
               >
-                <SelectTrigger id="type">
-                  <SelectValue placeholder="Optional" />
+                <SelectTrigger
+                  id="type"
+                  className={
+                    !contentTypeId ? "border-amber-500/60" : undefined
+                  }
+                >
+                  <SelectValue placeholder="Required — pick one" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
                   {contentTypes.map((t) => (
                     <SelectItem key={t.id} value={t.id}>
                       {t.name}
@@ -337,7 +355,7 @@ export function SelfUploadDialog({
           {/* Submit */}
           <Button
             onClick={handleSubmit}
-            disabled={uploading || files.length === 0}
+            disabled={uploading || files.length === 0 || !contentTypeId}
             className="w-full"
           >
             {uploading ? (

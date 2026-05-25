@@ -89,10 +89,18 @@ export async function createSelfProducedRequest(data: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated", request_id: null, title: null };
 
+  // Content type is required so the title is always categorized
+  // ("Roleplay #42" rather than "Untitled #42").
+  if (!data.content_type_id) {
+    return {
+      error: "Content type is required",
+      request_id: null,
+      title: null,
+    };
+  }
+
   // Compute the title server-side from content type + next number
-  const { title } = await getNextSelfProducedTitle(
-    data.content_type_id ?? null
-  );
+  const { title } = await getNextSelfProducedTitle(data.content_type_id);
 
   // Find the next position so it lands at the top of "shooted" column
   const { data: maxRow } = await supabase
