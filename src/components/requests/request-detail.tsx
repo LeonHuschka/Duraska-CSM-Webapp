@@ -12,6 +12,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TrialBadge } from "@/components/ui/trial-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -96,6 +97,7 @@ export function RequestDetail({
   const [dueDate, setDueDate] = useState(request.due_date ?? "");
   const [inspoLink, setInspoLink] = useState(request.inspo_link ?? "");
   const [isNsfw, setIsNsfw] = useState(request.is_nsfw);
+  const [isTrial, setIsTrial] = useState(request.is_trial ?? false);
 
   const rawAssets = assets.filter((a) => a.stage === "raw");
   const editedAssets = assets.filter((a) => a.stage === "edited");
@@ -110,6 +112,7 @@ export function RequestDetail({
           due_date: dueDate || undefined,
           inspo_link: inspoLink || undefined,
           is_nsfw: isNsfw,
+          is_trial: isTrial,
         });
         toast.success("Request updated");
         setEditOpen(false);
@@ -158,9 +161,12 @@ export function RequestDetail({
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {request.title}
-          </h1>
+          <div className="flex items-center gap-2.5">
+            {request.is_trial && <TrialBadge size="lg" />}
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {request.title}
+            </h1>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant="outline"
@@ -175,6 +181,11 @@ export function RequestDetail({
             ) : (
               <Badge variant="outline" className="text-xs bg-green-500/15 text-green-400 border-green-500/30">
                 SFW
+              </Badge>
+            )}
+            {request.is_trial && (
+              <Badge variant="outline" className="text-xs bg-cyan-400/15 text-cyan-300 border-cyan-400/40 font-bold uppercase tracking-wider">
+                Trial Reel — Post as Trial
               </Badge>
             )}
             <Badge
@@ -353,6 +364,34 @@ export function RequestDetail({
                 <span
                   className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
                     isNsfw ? "translate-x-[18px]" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Trial Reel toggle */}
+            <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <TrialBadge size="md" />
+                <div>
+                  <Label className="text-sm">Trial Reel</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Must be posted as a trial reel
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isTrial}
+                onClick={() => setIsTrial((v) => !v)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                  isTrial ? "bg-cyan-400" : "bg-muted-foreground/30"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                    isTrial ? "translate-x-[18px]" : "translate-x-0.5"
                   }`}
                 />
               </button>

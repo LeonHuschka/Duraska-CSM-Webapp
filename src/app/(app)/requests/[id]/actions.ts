@@ -79,6 +79,7 @@ export async function updateRequestDetail(
     status?: string;
     inspo_link?: string;
     is_nsfw?: boolean;
+    is_trial?: boolean;
   }
 ) {
   const supabase = await createClient();
@@ -98,6 +99,7 @@ export async function updateRequestDetail(
       due_date: data.due_date || null,
       inspo_link: data.inspo_link || null,
       is_nsfw: data.is_nsfw ?? false,
+      ...(data.is_trial !== undefined ? { is_trial: data.is_trial } : {}),
       updated_at: now,
       ...(data.status === "shooted" ? { shooted_at: now } : {}),
     })

@@ -27,7 +27,7 @@ export default async function SchedulePage() {
         .order("scheduled_for", { ascending: true }),
       supabase
         .from("content_requests")
-        .select("id, title, status")
+        .select("id, title, status, is_trial")
         .eq("persona_id", personaId)
         .order("title", { ascending: true }),
       supabase
@@ -41,7 +41,7 @@ export default async function SchedulePage() {
       // scheduledPlatformsMap to remove it per-platform once scheduled there.
       supabase
         .from("content_requests")
-        .select("id, title, status, priority, content_type_id, is_nsfw")
+        .select("id, title, status, priority, content_type_id, is_nsfw, is_trial")
         .eq("persona_id", personaId)
         .in("status", ["edited", "scheduled", "posted"])
         .order("updated_at", { ascending: false }),

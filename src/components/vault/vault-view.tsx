@@ -22,6 +22,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { SelfUploadDialog } from "@/components/vault/self-upload-dialog";
+import { TrialBadge } from "@/components/ui/trial-badge";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
 // ─── Platform display config ───────────────────────────────────────────────
@@ -437,18 +438,21 @@ function VaultCard({
         {/* Top gradient */}
         <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
 
-        {/* Top-left: NSFW/SFW badge (click to toggle) + stage */}
+        {/* Top-left: NSFW/SFW badge (click to toggle) + stage + optional Trial */}
         <div className="absolute left-2 top-2 flex flex-col gap-1">
-          <button
-            onClick={toggleNsfw}
-            disabled={pending}
-            title="Click to toggle NSFW / SFW"
-            className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide transition-all hover:ring-2 hover:ring-white/40 disabled:opacity-60 w-fit ${
-              asset.is_nsfw ? "bg-blue-600/90 text-white" : "bg-green-600/90 text-white"
-            }`}
-          >
-            {pending ? "…" : asset.is_nsfw ? "NSFW" : "SFW"}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={toggleNsfw}
+              disabled={pending}
+              title="Click to toggle NSFW / SFW"
+              className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide transition-all hover:ring-2 hover:ring-white/40 disabled:opacity-60 w-fit ${
+                asset.is_nsfw ? "bg-blue-600/90 text-white" : "bg-green-600/90 text-white"
+              }`}
+            >
+              {pending ? "…" : asset.is_nsfw ? "NSFW" : "SFW"}
+            </button>
+            {asset.is_trial && <TrialBadge size="sm" />}
+          </div>
           <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
             {asset.stage}
           </span>

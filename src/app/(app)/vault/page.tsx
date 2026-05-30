@@ -18,6 +18,7 @@ export interface VaultAsset {
   // from request
   request_title: string;
   is_nsfw: boolean;
+  is_trial: boolean;
   // posting info: platform → best status
   platformStatus: Record<string, string>;
 }
@@ -41,7 +42,7 @@ export default async function VaultPage() {
   const [requestsResult, typesResult] = await Promise.all([
     supabase
       .from("content_requests")
-      .select("id, title, is_nsfw")
+      .select("id, title, is_nsfw, is_trial")
       .eq("persona_id", personaId)
       .limit(5000),
     supabase
@@ -59,7 +60,10 @@ export default async function VaultPage() {
   }
 
   const requestMap = Object.fromEntries(
-    (requests ?? []).map((r) => [r.id, { title: r.title, is_nsfw: r.is_nsfw }])
+    (requests ?? []).map((r) => [
+      r.id,
+      { title: r.title, is_nsfw: r.is_nsfw, is_trial: r.is_trial },
+    ])
   );
 
   // 2. Most-recent non-deleted assets.
@@ -155,6 +159,7 @@ export default async function VaultPage() {
         thumbnailPath: asset.thumbnail_path ?? null,
         request_title: req?.title ?? "Untitled",
         is_nsfw: req?.is_nsfw ?? false,
+        is_trial: req?.is_trial ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},
       } satisfies VaultAsset;
     })

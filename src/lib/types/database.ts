@@ -156,6 +156,7 @@ export type Database = {
           reference_image_urls: string[] | null;
           content_type_id: string | null;
           is_nsfw: boolean;
+          is_trial: boolean;
           status: string;
           priority: string;
           due_date: string | null;
@@ -176,6 +177,7 @@ export type Database = {
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
+          is_trial?: boolean;
           status?: string;
           priority?: string;
           due_date?: string | null;
@@ -196,6 +198,7 @@ export type Database = {
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
+          is_trial?: boolean;
           status?: string;
           priority?: string;
           due_date?: string | null;

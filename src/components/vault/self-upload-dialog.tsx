@@ -11,6 +11,7 @@ import {
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
+import { TrialBadge } from "@/components/ui/trial-badge";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +58,7 @@ export function SelfUploadDialog({
     contentTypes[0]?.id ?? ""
   );
   const [isNsfw, setIsNsfw] = useState(false);
+  const [isTrial, setIsTrial] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -90,6 +92,7 @@ export function SelfUploadDialog({
     setInspoLink("");
     setContentTypeId(contentTypes[0]?.id ?? "");
     setIsNsfw(false);
+    setIsTrial(false);
     setFiles([]);
     setProgress({ done: 0, total: 0 });
   }
@@ -124,6 +127,7 @@ export function SelfUploadDialog({
       inspo_link: inspoLink.trim() || null,
       content_type_id: contentTypeId,
       is_nsfw: isNsfw,
+      is_trial: isTrial,
     });
     if (created.error || !created.request_id) {
       toast.error(created.error ?? "Failed to create request");
@@ -292,6 +296,26 @@ export function SelfUploadDialog({
               </button>
             </div>
           </div>
+
+          {/* Trial Reel toggle — full width so it's prominent */}
+          <button
+            type="button"
+            onClick={() => setIsTrial((v) => !v)}
+            disabled={uploading}
+            className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              isTrial
+                ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-300"
+                : "border-border/50 bg-card hover:bg-accent/30"
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <TrialBadge size="sm" />
+              Trial Reel
+            </span>
+            <span className="text-[11px] uppercase tracking-wider opacity-70">
+              {isTrial ? "on" : "off"}
+            </span>
+          </button>
 
           {/* File picker */}
           <div className="space-y-1.5">

@@ -19,6 +19,7 @@ export async function createRequest(data: {
   due_date?: string;
   inspo_link?: string;
   is_nsfw?: boolean;
+  is_trial?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -54,6 +55,7 @@ export async function createRequest(data: {
     due_date: data.due_date || null,
     inspo_link: data.inspo_link || null,
     is_nsfw: data.is_nsfw ?? false,
+    is_trial: data.is_trial ?? false,
     created_by: user.id,
     position: Date.now(),
   });

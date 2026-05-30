@@ -39,6 +39,7 @@ import {
   seedDefaultContentTypes,
 } from "@/app/(app)/requests/actions";
 import type { ContentType } from "@/lib/types/database";
+import { TrialBadge } from "@/components/ui/trial-badge";
 
 interface FormValues {
   content_type_id: string;
@@ -46,6 +47,7 @@ interface FormValues {
   priority: string;
   inspo_link: string;
   is_nsfw: boolean;
+  is_trial: boolean;
 }
 
 interface CreateRequestDialogProps {
@@ -91,6 +93,7 @@ export function CreateRequestDialog({
       priority: "medium",
       inspo_link: "",
       is_nsfw: false,
+      is_trial: false,
     },
   });
 
@@ -170,6 +173,7 @@ export function CreateRequestDialog({
         due_date: addDays(selectedDueDays),
         inspo_link: values.inspo_link || undefined,
         is_nsfw: values.is_nsfw,
+        is_trial: values.is_trial,
       });
       toast.success("Request created");
       reset();
@@ -407,6 +411,34 @@ export function CreateRequestDialog({
               <span
                 className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
                   watch("is_nsfw") ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Trial Reel toggle */}
+          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <TrialBadge size="md" />
+              <div>
+                <Label className="text-sm">Trial Reel</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Must be posted as a trial reel
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={watch("is_trial")}
+              onClick={() => setValue("is_trial", !watch("is_trial"))}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                watch("is_trial") ? "bg-cyan-400" : "bg-muted-foreground/30"
+              }`}
+            >
+              <span
+                className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                  watch("is_trial") ? "translate-x-[18px]" : "translate-x-0.5"
                 }`}
               />
             </button>

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TrialBadge } from "@/components/ui/trial-badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -214,9 +215,12 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
       ) : (
       <>
       <div className="flex items-start justify-between gap-2">
-        <h4 className="text-sm font-medium leading-snug line-clamp-2">
-          {request.title}
-        </h4>
+        <div className="flex items-start gap-1.5 flex-1 min-w-0">
+          {request.is_trial && <TrialBadge size="sm" className="mt-0.5" />}
+          <h4 className="text-sm font-medium leading-snug line-clamp-2">
+            {request.title}
+          </h4>
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

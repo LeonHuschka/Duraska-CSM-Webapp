@@ -21,6 +21,7 @@ import type {
   PostingTimeslot,
 } from "@/lib/types/database";
 import { Badge } from "@/components/ui/badge";
+import { TrialBadge } from "@/components/ui/trial-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -66,12 +67,12 @@ interface ScheduleAsset {
 
 interface ScheduleViewProps {
   slots: ScheduleSlot[];
-  requests: Pick<ContentRequest, "id" | "title" | "status">[];
+  requests: Pick<ContentRequest, "id" | "title" | "status" | "is_trial">[];
   assets?: ScheduleAsset[];
   timeslots: PostingTimeslot[];
   editedRequests: Pick<
     ContentRequest,
-    "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw"
+    "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw" | "is_trial"
   >[];
 }
 
@@ -173,7 +174,7 @@ function DraggableRequest({
   request,
   isDragging,
 }: {
-  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw">;
+  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw" | "is_trial">;
   isDragging?: boolean;
 }) {
   return (
@@ -198,6 +199,7 @@ function DraggableRequest({
           SFW
         </Badge>
       )}
+      {request.is_trial && <TrialBadge size="sm" />}
     </div>
   );
 }
@@ -218,7 +220,7 @@ function DroppableTimeslot({
   id: string;
   timeLabel: string;
   slot: ScheduleSlot | null;
-  linkedRequest: Pick<ContentRequest, "id" | "title" | "status"> | null;
+  linkedRequest: Pick<ContentRequest, "id" | "title" | "status" | "is_trial"> | null;
   asset: ScheduleAsset | null;
   platform: string;
   onUnschedule: (slotId: string) => void;
@@ -336,9 +338,12 @@ function DroppableTimeslot({
         {/* Title + action below media */}
         <div className="px-1.5 py-1.5 space-y-1">
           {slot && linkedRequest ? (
-            <p className="text-[10px] font-medium leading-tight line-clamp-1 text-foreground">
-              {linkedRequest.title}
-            </p>
+            <div className="flex items-center gap-1">
+              {linkedRequest.is_trial && <TrialBadge size="sm" />}
+              <p className="text-[10px] font-medium leading-tight line-clamp-1 text-foreground flex-1">
+                {linkedRequest.title}
+              </p>
+            </div>
           ) : (
             <p className="text-[10px] text-muted-foreground/40">—</p>
           )}
@@ -443,7 +448,10 @@ function DroppableTimeslot({
               ) : null}
             </div>
           )}
-          <p className="mt-2 text-xs font-medium truncate px-0.5">{linkedRequest.title}</p>
+          <div className="mt-2 flex items-center gap-1.5 px-0.5">
+            {linkedRequest.is_trial && <TrialBadge size="sm" />}
+            <p className="text-xs font-medium truncate flex-1">{linkedRequest.title}</p>
+          </div>
           {slot.caption && (
             <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2 whitespace-pre-wrap px-0.5">
               {slot.caption}
@@ -1145,7 +1153,7 @@ export function ScheduleView({
 function DraggableRequestWrapper({
   request,
 }: {
-  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw">;
+  request: Pick<ContentRequest, "id" | "title" | "status" | "priority" | "content_type_id" | "is_nsfw" | "is_trial">;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: request.id,

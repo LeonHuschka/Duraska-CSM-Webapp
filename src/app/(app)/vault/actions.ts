@@ -79,6 +79,7 @@ export async function createSelfProducedRequest(data: {
   inspo_link?: string | null;
   content_type_id?: string | null;
   is_nsfw: boolean;
+  is_trial?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -121,6 +122,7 @@ export async function createSelfProducedRequest(data: {
       inspo_link: data.inspo_link ?? null,
       content_type_id: data.content_type_id ?? null,
       is_nsfw: data.is_nsfw,
+      is_trial: data.is_trial ?? false,
       status: "shooted",
       shooted_at: now,
       position: nextPosition,
