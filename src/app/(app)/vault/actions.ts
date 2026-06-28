@@ -80,6 +80,7 @@ export async function createSelfProducedRequest(data: {
   content_type_id?: string | null;
   is_nsfw: boolean;
   is_trial?: boolean;
+  is_warmup?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -123,6 +124,7 @@ export async function createSelfProducedRequest(data: {
       content_type_id: data.content_type_id ?? null,
       is_nsfw: data.is_nsfw,
       is_trial: data.is_trial ?? false,
+      is_warmup: data.is_warmup ?? false,
       status: "shooted",
       shooted_at: now,
       position: nextPosition,
@@ -220,6 +222,27 @@ export async function markAssetPostedFromVault(data: {
   revalidatePath("/vault");
   revalidatePath("/schedule");
   revalidatePath("/requests");
+  return { error: null };
+}
+
+/**
+ * Toggle the warmup-pool flag on the underlying content request.
+ * Lets you move existing content into (or out of) the warmup pool from
+ * the Vault.
+ */
+export async function setRequestWarmup(data: {
+  request_id: string;
+  is_warmup: boolean;
+}) {
+  const supabase = await createClient();
+  await getPersonaId();
+  const { error } = await supabase
+    .from("content_requests")
+    .update({ is_warmup: data.is_warmup, updated_at: new Date().toISOString() })
+    .eq("id", data.request_id);
+  if (error) return { error: error.message };
+  revalidatePath("/vault");
+  revalidatePath("/warmup");
   return { error: null };
 }
 

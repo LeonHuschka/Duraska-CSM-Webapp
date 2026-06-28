@@ -19,6 +19,7 @@ export interface VaultAsset {
   request_title: string;
   is_nsfw: boolean;
   is_trial: boolean;
+  is_warmup: boolean;
   // posting info: platform → best status
   platformStatus: Record<string, string>;
 }
@@ -42,7 +43,7 @@ export default async function VaultPage() {
   const [requestsResult, typesResult] = await Promise.all([
     supabase
       .from("content_requests")
-      .select("id, title, is_nsfw, is_trial")
+      .select("id, title, is_nsfw, is_trial, is_warmup")
       .eq("persona_id", personaId)
       .limit(5000),
     supabase
@@ -62,7 +63,7 @@ export default async function VaultPage() {
   const requestMap = Object.fromEntries(
     (requests ?? []).map((r) => [
       r.id,
-      { title: r.title, is_nsfw: r.is_nsfw, is_trial: r.is_trial },
+      { title: r.title, is_nsfw: r.is_nsfw, is_trial: r.is_trial, is_warmup: r.is_warmup },
     ])
   );
 
@@ -160,6 +161,7 @@ export default async function VaultPage() {
         request_title: req?.title ?? "Untitled",
         is_nsfw: req?.is_nsfw ?? false,
         is_trial: req?.is_trial ?? false,
+        is_warmup: req?.is_warmup ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},
       } satisfies VaultAsset;
     })

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useRef, useEffect, useTransition, useCallback } from "react";
-import { Download, Search, X, Archive, Check, Loader2 } from "lucide-react";
+import { Download, Search, X, Archive, Check, Loader2, Flame } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,6 +13,7 @@ import {
   markAssetPostedFromVault,
   unmarkAssetPostedFromVault,
   setRequestNsfw,
+  setRequestWarmup,
   saveAssetThumbnail,
 } from "@/app/(app)/vault/actions";
 import {
@@ -99,11 +100,13 @@ function VaultCard({
   asset,
   onUpdate,
   onUpdateNsfw,
+  onUpdateWarmup,
   onVisible,
 }: {
   asset: VaultAsset;
   onUpdate: (id: string, platformStatus: Record<string, string>) => void;
   onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
+  onUpdateWarmup: (requestId: string, isWarmup: boolean) => void;
   onVisible: (asset: VaultAsset) => void;
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
@@ -316,6 +319,24 @@ function VaultCard({
     });
   }
 
+  function toggleWarmup(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !asset.is_warmup;
+    startTransition(async () => {
+      onUpdateWarmup(asset.request_id, next);
+      const result = await setRequestWarmup({
+        request_id: asset.request_id,
+        is_warmup: next,
+      });
+      if (result.error) {
+        toast.error(result.error);
+        onUpdateWarmup(asset.request_id, !next);
+      } else {
+        toast.success(next ? "Moved to warm-up pool" : "Removed from warm-up pool");
+      }
+    });
+  }
+
   function togglePosted(platform: string) {
     const isPosted = asset.platformStatus[platform] === "posted";
     startTransition(async () => {
@@ -453,13 +474,34 @@ function VaultCard({
             </button>
             {asset.is_trial && <TrialBadge size="sm" />}
           </div>
-          <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
-            {asset.stage}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
+              {asset.stage}
+            </span>
+            {asset.is_warmup && (
+              <span className="flex items-center gap-0.5 rounded-md bg-amber-500/90 px-1 py-0.5 text-[9px] font-bold text-white w-fit">
+                <Flame className="h-2.5 w-2.5" /> Warm-up
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Top-right: Action buttons — always visible on mobile, hover on desktop */}
         <div className="absolute right-2 top-2 flex items-center gap-1.5 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          {/* Warm-up pool toggle */}
+          <button
+            onClick={toggleWarmup}
+            disabled={pending}
+            title={asset.is_warmup ? "In warm-up pool — click to remove" : "Move to warm-up pool"}
+            className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+              asset.is_warmup
+                ? "bg-amber-500/90 text-white hover:bg-amber-500"
+                : "bg-black/50 text-white hover:bg-black/70"
+            }`}
+          >
+            <Flame className="h-3.5 w-3.5" />
+          </button>
+
           {/* Mark as posted */}
           <Popover open={postOpen} onOpenChange={setPostOpen}>
             <PopoverTrigger asChild>
@@ -632,6 +674,12 @@ export function VaultView({
     // belongs to the same request.
     setLocalAssets((prev) =>
       prev.map((a) => (a.request_id === requestId ? { ...a, is_nsfw: isNsfw } : a))
+    );
+  }
+
+  function handleWarmupUpdate(requestId: string, isWarmup: boolean) {
+    setLocalAssets((prev) =>
+      prev.map((a) => (a.request_id === requestId ? { ...a, is_warmup: isWarmup } : a))
     );
   }
 
@@ -912,6 +960,7 @@ export function VaultView({
                 asset={asset}
                 onUpdate={handleAssetUpdate}
                 onUpdateNsfw={handleNsfwUpdate}
+                onUpdateWarmup={handleWarmupUpdate}
                 onVisible={enqueueAsset}
               />
             ))}

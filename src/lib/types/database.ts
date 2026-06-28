@@ -157,6 +157,7 @@ export type Database = {
           content_type_id: string | null;
           is_nsfw: boolean;
           is_trial: boolean;
+          is_warmup: boolean;
           status: string;
           priority: string;
           due_date: string | null;
@@ -178,6 +179,7 @@ export type Database = {
           content_type_id?: string | null;
           is_nsfw?: boolean;
           is_trial?: boolean;
+          is_warmup?: boolean;
           status?: string;
           priority?: string;
           due_date?: string | null;
@@ -199,6 +201,7 @@ export type Database = {
           content_type_id?: string | null;
           is_nsfw?: boolean;
           is_trial?: boolean;
+          is_warmup?: boolean;
           status?: string;
           priority?: string;
           due_date?: string | null;
@@ -410,6 +413,96 @@ export type Database = {
           },
         ];
       };
+      accounts: {
+        Row: {
+          id: string;
+          persona_id: string;
+          platform: string;
+          handle: string;
+          display_name: string | null;
+          status: string;
+          warmup_started_at: string;
+          warmup_completed_at: string | null;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          platform: string;
+          handle: string;
+          display_name?: string | null;
+          status?: string;
+          warmup_started_at?: string;
+          warmup_completed_at?: string | null;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          platform?: string;
+          handle?: string;
+          display_name?: string | null;
+          status?: string;
+          warmup_started_at?: string;
+          warmup_completed_at?: string | null;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      warmup_slots: {
+        Row: {
+          id: string;
+          account_id: string;
+          day_number: number;
+          position: number;
+          asset_kind: string;
+          asset_id: string | null;
+          text_content: string | null;
+          notes: string | null;
+          status: string;
+          posted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          account_id: string;
+          day_number: number;
+          position?: number;
+          asset_kind: string;
+          asset_id?: string | null;
+          text_content?: string | null;
+          notes?: string | null;
+          status?: string;
+          posted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          account_id?: string;
+          day_number?: number;
+          position?: number;
+          asset_kind?: string;
+          asset_id?: string | null;
+          text_content?: string | null;
+          notes?: string | null;
+          status?: string;
+          posted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -449,3 +542,8 @@ export type Platform = "instagram" | "fansly" | "tiktok" | "other";
 export type PostingTimeslot =
   Database["public"]["Tables"]["posting_timeslots"]["Row"];
 export type PersonaWithRole = Persona & { role: PersonaRole };
+
+export type Account = Database["public"]["Tables"]["accounts"]["Row"];
+export type WarmupSlot = Database["public"]["Tables"]["warmup_slots"]["Row"];
+export type AccountStatus = "warmup" | "graduated" | "paused" | "dead";
+export type WarmupSlotStatus = "pending" | "ready" | "posted" | "skipped";
