@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import {
   generateWarmupSlots,
+  WARMUP_DURATION_DAYS,
   type WarmupPlatform,
 } from "@/lib/warmup-spec";
 
@@ -73,6 +74,27 @@ export async function createAccount(data: {
 
   revalidatePath("/warmup");
   return { error: null, account_id: account.id };
+}
+
+/**
+ * Manually override which warm-up day the account is currently on.
+ * Implemented by shifting warmup_started_at so that
+ * "today = start + (day-1)" — keeps the due-today / overdue logic intact.
+ */
+export async function setWarmupDay(accountId: string, day: number) {
+  const supabase = await createClient();
+  const clamped = Math.max(1, Math.min(WARMUP_DURATION_DAYS, Math.round(day)));
+  const MS_PER_DAY = 1000 * 60 * 60 * 24;
+  // Anchor to local midnight-ish: start = now - (day-1) days
+  const startedAt = new Date(Date.now() - (clamped - 1) * MS_PER_DAY).toISOString();
+  const { error } = await supabase
+    .from("accounts")
+    .update({ warmup_started_at: startedAt, updated_at: new Date().toISOString() })
+    .eq("id", accountId);
+  if (error) return { error: error.message };
+  revalidatePath("/warmup");
+  revalidatePath(`/warmup/${accountId}`);
+  return { error: null };
 }
 
 export async function updateAccount(

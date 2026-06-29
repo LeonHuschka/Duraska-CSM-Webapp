@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -10,8 +10,8 @@ import {
   Loader2,
   ChevronDown,
   ChevronRight,
-  GraduationCap,
   Plus,
+  Minus,
   X,
   ImageOff,
 } from "lucide-react";
@@ -29,7 +29,7 @@ import {
   saveSlotText,
   setSlotPosted,
   setSlotSkipped,
-  updateAccount,
+  setWarmupDay,
 } from "@/app/(app)/warmup/actions";
 import {
   ASSET_KIND_LABEL,
@@ -61,7 +61,11 @@ export function WarmupAccountView({
   const router = useRouter();
   const [pickerSlot, setPickerSlot] = useState<WarmupSlotView | null>(null);
   const [busySlot, setBusySlot] = useState<string | null>(null);
-  const [graduating, setGraduating] = useState(false);
+  const [savingDay, setSavingDay] = useState(false);
+  const [dayInput, setDayInput] = useState(String(currentDay));
+  useEffect(() => {
+    setDayInput(String(currentDay));
+  }, [currentDay]);
 
   // Group slots by day
   const byDay = useMemo(() => {
@@ -129,15 +133,31 @@ export function WarmupAccountView({
     else router.refresh();
   }
 
-  async function doGraduate() {
-    setGraduating(true);
-    const res = await updateAccount(account.id, { status: "graduated" });
-    setGraduating(false);
-    if (res.error) toast.error(res.error);
-    else {
-      toast.success(`@${account.handle} graduated to the rotation 🎉`);
+  async function changeDay(next: number) {
+    const clamped = Math.max(1, Math.min(WARMUP_DURATION_DAYS, next));
+    if (clamped === currentDay) {
+      setDayInput(String(currentDay));
+      return;
+    }
+    setSavingDay(true);
+    setDayInput(String(clamped));
+    const res = await setWarmupDay(account.id, clamped);
+    setSavingDay(false);
+    if (res.error) {
+      toast.error(res.error);
+      setDayInput(String(currentDay));
+    } else {
       router.refresh();
     }
+  }
+
+  function commitDayInput() {
+    const parsed = parseInt(dayInput, 10);
+    if (Number.isNaN(parsed)) {
+      setDayInput(String(currentDay));
+      return;
+    }
+    changeDay(parsed);
   }
 
   const days = Array.from({ length: WARMUP_DURATION_DAYS }, (_, i) => i + 1);
@@ -159,31 +179,45 @@ export function WarmupAccountView({
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {PLATFORM_LABEL[account.platform] ?? account.platform}
-              {account.display_name ? ` · ${account.display_name}` : ""} · Day{" "}
-              {currentDay} / {WARMUP_DURATION_DAYS}
+              {account.display_name ? ` · ${account.display_name}` : ""}
             </p>
           </div>
-          {account.status === "warmup" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 border-green-500/40 text-green-400 hover:bg-green-500/10"
-              onClick={doGraduate}
-              disabled={graduating}
+
+          {/* Manual current-day control */}
+          <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-1.5">
+            <span className="text-[11px] font-medium text-muted-foreground">Day</span>
+            <button
+              onClick={() => changeDay(currentDay - 1)}
+              disabled={savingDay || currentDay <= 1}
+              className="flex h-6 w-6 items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:bg-accent/40 disabled:opacity-40"
+              aria-label="Previous day"
             >
-              {graduating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <GraduationCap className="h-4 w-4" />
-              )}
-              Graduate to rotation
-            </Button>
-          )}
-          {account.status === "graduated" && (
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/15 px-2.5 py-1 text-xs font-medium text-green-400">
-              <GraduationCap className="h-3.5 w-3.5" /> Graduated
-            </span>
-          )}
+              <Minus className="h-3 w-3" />
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={WARMUP_DURATION_DAYS}
+              value={dayInput}
+              onChange={(e) => setDayInput(e.target.value)}
+              onBlur={() => commitDayInput()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              disabled={savingDay}
+              className="w-10 rounded-md border border-border/50 bg-background px-1 py-0.5 text-center text-sm tabular-nums outline-none focus:border-primary/60"
+            />
+            <button
+              onClick={() => changeDay(currentDay + 1)}
+              disabled={savingDay || currentDay >= WARMUP_DURATION_DAYS}
+              className="flex h-6 w-6 items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:bg-accent/40 disabled:opacity-40"
+              aria-label="Next day"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+            <span className="text-[11px] text-muted-foreground">/ {WARMUP_DURATION_DAYS}</span>
+            {savingDay && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+          </div>
         </div>
 
         {/* Overall progress */}
