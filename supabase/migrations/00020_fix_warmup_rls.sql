@@ -1,20 +1,20 @@
--- Account warmup system.
+-- Fix warm-up RLS + make the whole warm-up schema idempotently correct.
 --
--- An "account" is a single FB/IG/etc handle being warmed up for a persona.
--- Multiple accounts per platform per persona are allowed (typical workflow:
--- run several FB accounts through warmup in parallel).
+-- The original 00019 policies used raw subqueries against persona_members
+-- inside the USING/WITH CHECK expressions. Because persona_members itself
+-- has RLS enabled, those nested reads get RLS-filtered and can return
+-- nothing — silently blocking every insert into accounts / warmup_slots.
 --
--- A "warmup_slot" is a single planned content unit on a specific day of the
--- account's warmup schedule (e.g. "Day 4: feed photo #1", "Day 6: reel #1").
--- Slots are pre-generated when an account is created, based on the warmup
--- spec hardcoded in src/lib/warmup-spec.ts. The model fills slots by
--- attaching a content_asset from the warmup pool and then marks them posted.
+-- The rest of the schema (content_requests, etc.) avoids this by routing
+-- access checks through SECURITY DEFINER helper functions (is_owner(),
+-- is_persona_member()) which bypass RLS. This migration brings warm-up in
+-- line with that pattern.
 --
--- "is_warmup" on content_requests tags a request as belonging to the
--- warmup content pool — uploaded specifically for warming accounts.
--- Requests without this flag are normal / "great pond" content.
+-- Safe to run whether or not 00019 was already applied: it create-if-not-
+-- exists the tables and drop-if-exists the policies before recreating them.
 
-create table public.accounts (
+-- ── Tables (no-op if 00019 already created them) ─────────────────────────
+create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),
   persona_id uuid not null references public.personas(id) on delete cascade,
   platform text not null check (platform in ('facebook','instagram','tiktok','fansly','other')),
@@ -28,11 +28,10 @@ create table public.accounts (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create index if not exists idx_accounts_persona on public.accounts(persona_id);
+create index if not exists idx_accounts_status on public.accounts(persona_id, status);
 
-create index idx_accounts_persona on public.accounts(persona_id);
-create index idx_accounts_status on public.accounts(persona_id, status);
-
-create table public.warmup_slots (
+create table if not exists public.warmup_slots (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references public.accounts(id) on delete cascade,
   day_number int not null check (day_number >= 1),
@@ -50,24 +49,16 @@ create table public.warmup_slots (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create index if not exists idx_warmup_slots_account on public.warmup_slots(account_id, day_number, position);
+create index if not exists idx_warmup_slots_status on public.warmup_slots(account_id, status);
 
-create index idx_warmup_slots_account on public.warmup_slots(account_id, day_number, position);
-create index idx_warmup_slots_status on public.warmup_slots(account_id, status);
-
--- Flag content_requests as belonging to the warmup pool.
 alter table public.content_requests
   add column if not exists is_warmup boolean not null default false;
-
 create index if not exists idx_content_requests_warmup
   on public.content_requests(persona_id, is_warmup)
   where is_warmup = true;
 
--- RLS policies — same model as other persona-scoped tables. Access checks
--- route through the SECURITY DEFINER helpers is_owner() / is_persona_member()
--- (defined in 00009) which bypass RLS. Raw subqueries against persona_members
--- inside a policy would themselves be RLS-filtered and silently block inserts.
-
--- Helper: can the current user access this account (via its persona)?
+-- ── SECURITY DEFINER helper: can the current user access this account? ────
 create or replace function public.can_access_account(p_account_id uuid)
 returns boolean
 language sql
@@ -77,12 +68,20 @@ as $$
   select exists(
     select 1 from public.accounts a
     where a.id = p_account_id
-      and (public.is_owner() or public.is_persona_member(a.persona_id))
+      and (
+        public.is_owner()
+        or public.is_persona_member(a.persona_id)
+      )
   );
 $$;
 
+-- ── accounts policies ────────────────────────────────────────────────────
 alter table public.accounts enable row level security;
-alter table public.warmup_slots enable row level security;
+
+drop policy if exists "accounts_select" on public.accounts;
+drop policy if exists "accounts_insert" on public.accounts;
+drop policy if exists "accounts_update" on public.accounts;
+drop policy if exists "accounts_delete" on public.accounts;
 
 create policy "accounts_select" on public.accounts
   for select to authenticated
@@ -99,6 +98,14 @@ create policy "accounts_update" on public.accounts
 create policy "accounts_delete" on public.accounts
   for delete to authenticated
   using (public.is_owner() or public.is_persona_member(persona_id));
+
+-- ── warmup_slots policies (access via parent account) ────────────────────
+alter table public.warmup_slots enable row level security;
+
+drop policy if exists "warmup_slots_select" on public.warmup_slots;
+drop policy if exists "warmup_slots_insert" on public.warmup_slots;
+drop policy if exists "warmup_slots_update" on public.warmup_slots;
+drop policy if exists "warmup_slots_delete" on public.warmup_slots;
 
 create policy "warmup_slots_select" on public.warmup_slots
   for select to authenticated
