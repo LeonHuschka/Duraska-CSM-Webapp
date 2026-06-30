@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -13,24 +13,20 @@ import {
   Plus,
   Minus,
   X,
-  ImageOff,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  attachAssetToSlot,
-  detachAssetFromSlot,
+  saveSlotMedia,
+  clearSlotMedia,
   saveSlotText,
   setSlotPosted,
   setSlotSkipped,
   setWarmupDay,
 } from "@/app/(app)/warmup/actions";
+import { createClient } from "@/lib/supabase/client";
+import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
 import {
   ASSET_KIND_LABEL,
   ASSET_KIND_EMOJI,
@@ -40,7 +36,7 @@ import {
   type AssetKind,
 } from "@/lib/warmup-spec";
 import type { Account } from "@/lib/types/database";
-import type { WarmupSlotView, PoolAsset } from "@/app/(app)/warmup/[id]/page";
+import type { WarmupSlotView } from "@/app/(app)/warmup/[id]/page";
 
 const PLATFORM_LABEL: Record<string, string> = {
   facebook: "Facebook",
@@ -50,16 +46,15 @@ const PLATFORM_LABEL: Record<string, string> = {
 export function WarmupAccountView({
   account,
   slots,
-  pool,
+  personaId,
   currentDay,
 }: {
   account: Account;
   slots: WarmupSlotView[];
-  pool: PoolAsset[];
+  personaId: string;
   currentDay: number;
 }) {
   const router = useRouter();
-  const [pickerSlot, setPickerSlot] = useState<WarmupSlotView | null>(null);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [savingDay, setSavingDay] = useState(false);
   const [dayInput, setDayInput] = useState(String(currentDay));
@@ -101,19 +96,58 @@ export function WarmupAccountView({
   const totalSlots = slots.length;
   const pct = totalSlots > 0 ? Math.round((totalPosted / totalSlots) * 100) : 0;
 
-  async function doAttach(slotId: string, assetId: string) {
-    setBusySlot(slotId);
-    const res = await attachAssetToSlot(slotId, assetId);
-    setBusySlot(null);
-    if (res.error) toast.error(res.error);
-    else {
-      setPickerSlot(null);
+  // Upload a dragged/picked file directly into a slot. Stored under
+  // personas/{personaId}/warmup/... so the existing storage RLS applies.
+  async function doUpload(slot: WarmupSlotView, file: File) {
+    if (!file.type.startsWith("video/") && !file.type.startsWith("image/")) {
+      toast.error("Only images and videos");
+      return;
+    }
+    setBusySlot(slot.id);
+    try {
+      const supabase = createClient();
+      const uuid = crypto.randomUUID();
+      const filePath = `personas/${personaId}/warmup/${account.id}/${slot.id}/${uuid}_${file.name}`;
+
+      const { error: upErr } = await supabase.storage
+        .from("content-assets")
+        .upload(filePath, file, { upsert: true });
+      if (upErr) throw new Error(upErr.message);
+
+      // Thumbnail (non-fatal)
+      let thumbnailPath: string | null = null;
+      try {
+        const thumb = await generateThumbnail(file);
+        if (thumb) {
+          const tPath = thumbnailPathFor(filePath);
+          const { error: tErr } = await supabase.storage
+            .from("content-assets")
+            .upload(tPath, thumb, { contentType: "image/jpeg", upsert: true });
+          if (!tErr) thumbnailPath = tPath;
+        }
+      } catch (err) {
+        console.warn("[warmup] thumbnail failed", err);
+      }
+
+      const res = await saveSlotMedia(slot.id, {
+        file_path: filePath,
+        file_name: file.name,
+        mime_type: file.type,
+        size_bytes: file.size,
+        thumbnail_path: thumbnailPath,
+      });
+      if (res.error) throw new Error(res.error);
       router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBusySlot(null);
     }
   }
-  async function doDetach(slotId: string) {
+
+  async function doClear(slotId: string) {
     setBusySlot(slotId);
-    const res = await detachAssetFromSlot(slotId);
+    const res = await clearSlotMedia(slotId);
     setBusySlot(null);
     if (res.error) toast.error(res.error);
     else router.refresh();
@@ -312,8 +346,8 @@ export function WarmupAccountView({
                         key={slot.id}
                         slot={slot}
                         busy={busySlot === slot.id}
-                        onPick={() => setPickerSlot(slot)}
-                        onDetach={() => doDetach(slot.id)}
+                        onUpload={(file) => doUpload(slot, file)}
+                        onClear={() => doClear(slot.id)}
                         onPosted={(p) => doPosted(slot.id, p)}
                         onSkip={(s) => doSkip(slot.id, s)}
                         onSaveText={async (txt) => {
@@ -332,66 +366,6 @@ export function WarmupAccountView({
           );
         })}
       </div>
-
-      {/* Asset picker dialog */}
-      <Dialog open={!!pickerSlot} onOpenChange={(o) => !o && setPickerSlot(null)}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              Pick content for{" "}
-              {pickerSlot ? ASSET_KIND_LABEL[pickerSlot.asset_kind as AssetKind] : ""}
-            </DialogTitle>
-          </DialogHeader>
-          {pool.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-              <ImageOff className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                No warm-up content in the pool yet.
-              </p>
-              <p className="text-[11px] text-muted-foreground/60">
-                Upload content via the Vault and toggle &quot;Warm-up&quot;, or move
-                existing content into the warm-up pool.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {pool.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => pickerSlot && doAttach(pickerSlot.id, p.id)}
-                  className="group relative aspect-square overflow-hidden rounded-lg border border-border/40 bg-muted/30 transition-all hover:border-primary/60"
-                  title={p.request_title}
-                >
-                  {p.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={p.thumbnailUrl}
-                      alt={p.request_title}
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-black">
-                      <span className="text-2xl">🎬</span>
-                    </div>
-                  )}
-                  {p.usedCount > 0 && (
-                    <span
-                      className="absolute right-1 top-1 rounded bg-red-500/90 px-1 py-0.5 text-[8px] font-bold text-white"
-                      title={`Already used in ${p.usedCount} warm-up slot(s) — 1 image = 1 post`}
-                    >
-                      used ×{p.usedCount}
-                    </span>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1">
-                    <p className="truncate text-[8px] text-white/80">{p.request_title}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -404,16 +378,16 @@ function byDayInitial(slots: WarmupSlotView[], day: number) {
 function SlotRow({
   slot,
   busy,
-  onPick,
-  onDetach,
+  onUpload,
+  onClear,
   onPosted,
   onSkip,
   onSaveText,
 }: {
   slot: WarmupSlotView;
   busy: boolean;
-  onPick: () => void;
-  onDetach: () => void;
+  onUpload: (file: File) => void;
+  onClear: () => void;
   onPosted: (posted: boolean) => void;
   onSkip: (skipped: boolean) => void;
   onSaveText: (txt: string) => void;
@@ -424,6 +398,9 @@ function SlotRow({
   const isSkipped = slot.status === "skipped";
   const [bioText, setBioText] = useState(slot.text_content ?? "");
   const isVideo = slot.mime_type?.startsWith("video/");
+  const hasMedia = !!slot.file_path;
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div
@@ -490,35 +467,63 @@ function SlotRow({
               </Button>
             )}
           </div>
-        ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {slot.asset_id ? (
-              !isPosted && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 gap-1 text-[11px] text-muted-foreground"
-                  onClick={onDetach}
-                  disabled={busy}
-                >
-                  <X className="h-3 w-3" /> Remove content
-                </Button>
-              )
-            ) : (
-              !isPosted &&
-              !isSkipped && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 gap-1 text-[11px]"
-                  onClick={onPick}
-                  disabled={busy}
-                >
-                  <Plus className="h-3 w-3" /> Attach content
-                </Button>
-              )
+        ) : hasMedia ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="truncate text-[11px] text-muted-foreground max-w-[180px]">
+              {slot.file_name ?? "media attached"}
+            </span>
+            {!isPosted && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 text-[11px] text-muted-foreground"
+                onClick={onClear}
+                disabled={busy}
+              >
+                <X className="h-3 w-3" /> Remove
+              </Button>
             )}
           </div>
+        ) : (
+          !isPosted &&
+          !isSkipped && (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) onUpload(f);
+              }}
+              className={`mt-2 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-3 py-2 text-[11px] transition-colors ${
+                dragOver
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border/50 text-muted-foreground hover:border-primary/40 hover:bg-accent/20"
+              } ${busy ? "pointer-events-none opacity-60" : ""}`}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {busy ? "Uploading…" : "Drag file here or click to upload"}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*,image/*,.mov,.MOV"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUpload(f);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+              />
+            </div>
+          )
         )}
       </div>
 

@@ -133,8 +133,21 @@ export async function deleteAccount(accountId: string) {
   return { error: null };
 }
 
-/** Attach a content_asset (from the warmup pool) to a slot, marking it ready. */
-export async function attachAssetToSlot(slotId: string, assetId: string) {
+/**
+ * Persist directly-uploaded media on a slot. The client uploads the file
+ * (and optional thumbnail) to Storage first, then calls this with the
+ * resulting paths. Marks the slot ready.
+ */
+export async function saveSlotMedia(
+  slotId: string,
+  data: {
+    file_path: string;
+    file_name: string;
+    mime_type: string;
+    size_bytes: number;
+    thumbnail_path: string | null;
+  }
+) {
   const supabase = await createClient();
   const { data: slot } = await supabase
     .from("warmup_slots")
@@ -143,24 +156,47 @@ export async function attachAssetToSlot(slotId: string, assetId: string) {
     .single();
   const { error } = await supabase
     .from("warmup_slots")
-    .update({ asset_id: assetId, status: "ready", updated_at: new Date().toISOString() })
+    .update({
+      file_path: data.file_path,
+      file_name: data.file_name,
+      mime_type: data.mime_type,
+      size_bytes: data.size_bytes,
+      thumbnail_path: data.thumbnail_path,
+      status: "ready",
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", slotId);
   if (error) return { error: error.message };
   if (slot?.account_id) revalidatePath(`/warmup/${slot.account_id}`);
   return { error: null };
 }
 
-/** Remove the attached asset from a slot, back to pending. */
-export async function detachAssetFromSlot(slotId: string) {
+/** Remove the uploaded media from a slot (also deletes from storage). */
+export async function clearSlotMedia(slotId: string) {
   const supabase = await createClient();
   const { data: slot } = await supabase
     .from("warmup_slots")
-    .select("account_id")
+    .select("account_id, file_path, thumbnail_path")
     .eq("id", slotId)
     .single();
+
+  // Best-effort storage cleanup
+  const paths = [slot?.file_path, slot?.thumbnail_path].filter(Boolean) as string[];
+  if (paths.length > 0) {
+    await supabase.storage.from("content-assets").remove(paths);
+  }
+
   const { error } = await supabase
     .from("warmup_slots")
-    .update({ asset_id: null, status: "pending", updated_at: new Date().toISOString() })
+    .update({
+      file_path: null,
+      file_name: null,
+      mime_type: null,
+      size_bytes: null,
+      thumbnail_path: null,
+      status: "pending",
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", slotId);
   if (error) return { error: error.message };
   if (slot?.account_id) revalidatePath(`/warmup/${slot.account_id}`);
@@ -193,13 +229,13 @@ export async function setSlotPosted(slotId: string, posted: boolean) {
   const supabase = await createClient();
   const { data: slot } = await supabase
     .from("warmup_slots")
-    .select("account_id, asset_id, text_content")
+    .select("account_id, file_path, text_content")
     .eq("id", slotId)
     .single();
 
   const status = posted
     ? "posted"
-    : slot?.asset_id || slot?.text_content
+    : slot?.file_path || slot?.text_content
       ? "ready"
       : "pending";
 
@@ -222,12 +258,12 @@ export async function setSlotSkipped(slotId: string, skipped: boolean) {
   const supabase = await createClient();
   const { data: slot } = await supabase
     .from("warmup_slots")
-    .select("account_id, asset_id, text_content")
+    .select("account_id, file_path, text_content")
     .eq("id", slotId)
     .single();
   const status = skipped
     ? "skipped"
-    : slot?.asset_id || slot?.text_content
+    : slot?.file_path || slot?.text_content
       ? "ready"
       : "pending";
   const { error } = await supabase

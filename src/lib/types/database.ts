@@ -466,6 +466,11 @@ export type Database = {
           position: number;
           asset_kind: string;
           asset_id: string | null;
+          file_name: string | null;
+          file_path: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          thumbnail_path: string | null;
           text_content: string | null;
           notes: string | null;
           status: string;
@@ -480,6 +485,11 @@ export type Database = {
           position?: number;
           asset_kind: string;
           asset_id?: string | null;
+          file_name?: string | null;
+          file_path?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          thumbnail_path?: string | null;
           text_content?: string | null;
           notes?: string | null;
           status?: string;
@@ -494,6 +504,11 @@ export type Database = {
           position?: number;
           asset_kind?: string;
           asset_id?: string | null;
+          file_name?: string | null;
+          file_path?: string | null;
+          mime_type?: string | null;
+          size_bytes?: number | null;
+          thumbnail_path?: string | null;
           text_content?: string | null;
           notes?: string | null;
           status?: string;
