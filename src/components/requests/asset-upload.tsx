@@ -5,7 +5,7 @@ import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 
 interface AssetUploadProps {
   requestId: string;
@@ -39,7 +39,7 @@ export function AssetUpload({
       try {
         for (const file of fileArray) {
           const uuid = crypto.randomUUID();
-          const filePath = `personas/${personaId}/requests/${requestId}/${stage}/${uuid}_${file.name}`;
+          const filePath = `personas/${personaId}/requests/${requestId}/${stage}/${uuid}_${safeStorageName(file.name)}`;
 
           const { error: uploadError } = await supabase.storage
             .from("content-assets")

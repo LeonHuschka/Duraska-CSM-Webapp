@@ -26,7 +26,7 @@ import {
   setWarmupDay,
 } from "@/app/(app)/warmup/actions";
 import { createClient } from "@/lib/supabase/client";
-import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 import {
   ASSET_KIND_LABEL,
   ASSET_KIND_EMOJI,
@@ -107,7 +107,7 @@ export function WarmupAccountView({
     try {
       const supabase = createClient();
       const uuid = crypto.randomUUID();
-      const filePath = `personas/${personaId}/warmup/${account.id}/${slot.id}/${uuid}_${file.name}`;
+      const filePath = `personas/${personaId}/warmup/${account.id}/${slot.id}/${uuid}_${safeStorageName(file.name)}`;
 
       const { error: upErr } = await supabase.storage
         .from("content-assets")

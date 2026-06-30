@@ -9,7 +9,7 @@ import {
   getNextSelfProducedTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { TrialBadge } from "@/components/ui/trial-badge";
 import {
@@ -143,7 +143,7 @@ export function SelfUploadDialog({
     // 2. Upload each file as a raw asset + generate thumbnail
     for (const file of files) {
       const uuid = crypto.randomUUID();
-      const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${file.name}`;
+      const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${safeStorageName(file.name)}`;
 
       const { error: upErr } = await supabase.storage
         .from("content-assets")

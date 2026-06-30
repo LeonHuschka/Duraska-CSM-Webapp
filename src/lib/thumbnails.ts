@@ -242,6 +242,27 @@ function drawToBlob(
 }
 
 /**
+ * Make a filename safe for use in a Supabase Storage key.
+ * Storage rejects keys with spaces and many special/unicode characters
+ * ("Invalid key"). We keep the extension and replace everything else in
+ * the basename with underscores. The original name should still be stored
+ * separately (e.g. file_name column) for display.
+ */
+export function safeStorageName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  const rawExt = dot > 0 ? name.slice(dot + 1) : "";
+  const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const rawBase = dot > 0 ? name.slice(0, dot) : name;
+  const base =
+    rawBase
+      .normalize("NFKD")
+      .replace(/[^\w-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "") || "file";
+  return ext ? `${base}.${ext}` : base;
+}
+
+/**
  * Derive the thumbnail storage path from the original file path.
  * Same folder, same basename, `.thumb.jpg` suffix.
  */

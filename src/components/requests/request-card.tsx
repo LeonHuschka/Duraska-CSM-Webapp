@@ -27,7 +27,7 @@ import {
 } from "@/app/(app)/requests/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import { createClient } from "@/lib/supabase/client";
-import { generateThumbnail, thumbnailPathFor } from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 import type { ContentRequest } from "@/lib/types/database";
 
 const STATUS_FLOW = ["requested", "shooted", "edited", "scheduled", "posted"];
@@ -81,7 +81,7 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
       try {
         for (const file of fileArray) {
           const uuid = crypto.randomUUID();
-          const filePath = `personas/${personaId}/requests/${request.id}/edited/${uuid}_${file.name}`;
+          const filePath = `personas/${personaId}/requests/${request.id}/edited/${uuid}_${safeStorageName(file.name)}`;
 
           const { error: uploadError } = await supabase.storage
             .from("content-assets")
