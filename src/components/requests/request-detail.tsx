@@ -241,9 +241,15 @@ export function RequestDetail({
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-semibold">Raw Content</h2>
+            <h2 className="text-lg font-semibold">
+              Raw Takes {rawAssets.length > 0 && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({rawAssets.length})
+                </span>
+              )}
+            </h2>
             <p className="text-sm text-muted-foreground">
-              Upload photos and videos from the shoot
+              All takes the model shot for this reel
             </p>
           </div>
           <AssetUpload
@@ -257,9 +263,15 @@ export function RequestDetail({
 
         <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-semibold">Edited Content</h2>
+            <h2 className="text-lg font-semibold">
+              Final Cuts {editedAssets.length > 0 && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({editedAssets.length})
+                </span>
+              )}
+            </h2>
             <p className="text-sm text-muted-foreground">
-              Upload the final edited video
+              Upload the finished cut(s) — one or more variations
             </p>
           </div>
           <AssetUpload

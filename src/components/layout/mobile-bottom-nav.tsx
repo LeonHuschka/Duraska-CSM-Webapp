@@ -3,21 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  CalendarDays,
+  LayoutDashboard,
   Settings,
-  Camera,
   Archive,
-  Flame,
+  Upload,
+  Scissors,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePersona } from "@/hooks/use-persona";
 
-// Dashboard + Overview omitted from mobile (sidebar-only) to keep 5 items max.
 const allNavItems = [
-  { href: "/produce", label: "Requests", icon: Camera, roles: ["owner", "manager", "va", "model"] },
-  { href: "/schedule", label: "Schedule", icon: CalendarDays, roles: ["owner", "manager", "va"] },
-  { href: "/warmup", label: "Warm-Up", icon: Flame, roles: ["owner", "manager", "va", "model"] },
-  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va", "model"] },
+  { href: "/", label: "Home", icon: LayoutDashboard, roles: ["owner", "manager", "va"] },
+  { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
+  { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
+  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },
   { href: "/settings/personas", label: "Settings", icon: Settings, roles: ["owner", "manager"] },
 ];
 

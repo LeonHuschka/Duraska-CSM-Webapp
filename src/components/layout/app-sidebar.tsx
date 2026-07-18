@@ -5,24 +5,22 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Kanban,
-  CalendarDays,
   Settings,
-  Camera,
   Archive,
-  Flame,
+  Upload,
+  Scissors,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PersonaSwitcher } from "./persona-switcher";
 import { usePersona } from "@/hooks/use-persona";
 
+// Slimmed nav. Legacy routes (/requests, /schedule, /warmup, /produce)
+// still work by URL but are intentionally not surfaced here.
 const allNavItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["owner", "manager", "va"] },
-  { href: "/produce", label: "Requests", icon: Camera, roles: ["owner", "manager", "va", "model"] },
-  { href: "/requests", label: "Overview", icon: Kanban, roles: ["owner", "manager", "va"] },
-  { href: "/schedule", label: "Schedule", icon: CalendarDays, roles: ["owner", "manager", "va"] },
-  { href: "/warmup", label: "Warm-Up", icon: Flame, roles: ["owner", "manager", "va", "model"] },
-  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va", "model"] },
+  { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
+  { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
+  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },
   { href: "/settings/personas", label: "Settings", icon: Settings, roles: ["owner", "manager"] },
 ];
 
