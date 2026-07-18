@@ -148,11 +148,11 @@ export function RequestDetail({
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link
-          href="/requests"
+          href="/editing"
           className="flex items-center gap-1.5 transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Requests
+          Editing
         </Link>
         <span>/</span>
         <span className="text-foreground">{request.title}</span>

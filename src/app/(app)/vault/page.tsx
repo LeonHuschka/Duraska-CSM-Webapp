@@ -20,8 +20,16 @@ export interface VaultAsset {
   is_nsfw: boolean;
   is_trial: boolean;
   is_warmup: boolean;
-  // posting info: platform → best status
+  // posting info: platform → best status (used by the platform filter)
   platformStatus: Record<string, string>;
+  // accounts this request has been marked posted on
+  postedAccountIds: string[];
+}
+
+export interface PostingAccount {
+  id: string;
+  platform: string;
+  handle: string;
 }
 
 export default async function VaultPage() {
@@ -39,25 +47,15 @@ export default async function VaultPage() {
 
   // 1. All requests for this persona (lightweight — just what we need).
   //    Explicit high limit to bypass the default 1000-row cap.
-  //    Also fetch content_types in parallel for the self-upload dialog.
-  const [requestsResult, typesResult] = await Promise.all([
-    supabase
-      .from("content_requests")
-      .select("id, title, is_nsfw, is_trial, is_warmup")
-      .eq("persona_id", personaId)
-      .limit(5000),
-    supabase
-      .from("content_types")
-      .select("id, name")
-      .eq("persona_id", personaId)
-      .order("position", { ascending: true }),
-  ]);
-  const requests = requestsResult.data;
-  const contentTypes = (typesResult.data ?? []) as { id: string; name: string }[];
+  const { data: requests } = await supabase
+    .from("content_requests")
+    .select("id, title, is_nsfw, is_trial, is_warmup")
+    .eq("persona_id", personaId)
+    .limit(5000);
 
   const requestIds = (requests ?? []).map((r) => r.id);
   if (requestIds.length === 0) {
-    return <VaultView assets={[]} personaId={personaId} contentTypes={contentTypes} />;
+    return <VaultView assets={[]} accounts={[]} />;
   }
 
   const requestMap = Object.fromEntries(
@@ -83,21 +81,29 @@ export default async function VaultPage() {
     .limit(2000);
 
   if (!assets || assets.length === 0) {
-    return (
-      <VaultView assets={[]} personaId={personaId} contentTypes={contentTypes} />
-    );
+    return <VaultView assets={[]} accounts={[]} />;
   }
 
-  // 3. All schedule slots for those requests (to build posting status)
+  // 3a. Registered posting accounts (for the mark-posted picker)
+  const { data: accountRows } = await supabase
+    .from("accounts")
+    .select("id, platform, handle")
+    .eq("persona_id", personaId)
+    .neq("status", "dead")
+    .order("platform", { ascending: true });
+  const accounts = (accountRows ?? []) as PostingAccount[];
+
+  // 3b. All schedule slots for those requests (to build posting status)
   const { data: slots } = await supabase
     .from("schedule_slots")
-    .select("request_id, platform, status")
+    .select("request_id, platform, status, account_id")
     .eq("persona_id", personaId)
     .in("request_id", requestIds);
 
   // Build platform-status map per request: posted > scheduled > planned
   const STATUS_RANK: Record<string, number> = { posted: 3, scheduled: 2, planned: 1 };
   const slotsByRequest: Record<string, Record<string, string>> = {};
+  const postedAccountsByRequest: Record<string, Set<string>> = {};
   for (const slot of slots ?? []) {
     const rid = slot.request_id;
     if (!rid) continue;
@@ -107,6 +113,9 @@ export default async function VaultPage() {
     const oldRank = STATUS_RANK[existing] ?? 0;
     if (newRank > oldRank) {
       slotsByRequest[rid][slot.platform] = slot.status;
+    }
+    if (slot.status === "posted" && slot.account_id) {
+      (postedAccountsByRequest[rid] ??= new Set()).add(slot.account_id);
     }
   }
 
@@ -163,15 +172,12 @@ export default async function VaultPage() {
         is_trial: req?.is_trial ?? false,
         is_warmup: req?.is_warmup ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},
+        postedAccountIds: Array.from(
+          postedAccountsByRequest[asset.request_id] ?? []
+        ),
       } satisfies VaultAsset;
     })
     .filter(Boolean) as VaultAsset[];
 
-  return (
-    <VaultView
-      assets={assetsWithUrls}
-      personaId={personaId}
-      contentTypes={contentTypes}
-    />
-  );
+  return <VaultView assets={assetsWithUrls} accounts={accounts} />;
 }

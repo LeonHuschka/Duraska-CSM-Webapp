@@ -178,19 +178,27 @@ export async function saveAssetThumbnail(data: {
  */
 export async function markAssetPostedFromVault(data: {
   request_id: string;
-  platform: string;
+  account_id: string;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
   const now = new Date().toISOString();
 
-  // Look for an existing slot on this platform for this request
+  // Resolve the account's platform (schedule_slots still stores platform).
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("platform")
+    .eq("id", data.account_id)
+    .maybeSingle();
+  const platform = account?.platform ?? "other";
+
+  // Look for an existing slot for this request on this account
   const { data: existing } = await supabase
     .from("schedule_slots")
-    .select("id, status")
+    .select("id")
     .eq("persona_id", personaId)
     .eq("request_id", data.request_id)
-    .eq("platform", data.platform)
+    .eq("account_id", data.account_id)
     .order("scheduled_for", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -204,7 +212,8 @@ export async function markAssetPostedFromVault(data: {
   } else {
     const { error } = await supabase.from("schedule_slots").insert({
       persona_id: personaId,
-      platform: data.platform,
+      platform,
+      account_id: data.account_id,
       scheduled_for: now,
       posted_at: now,
       request_id: data.request_id,
@@ -220,7 +229,7 @@ export async function markAssetPostedFromVault(data: {
     .eq("id", data.request_id);
 
   revalidatePath("/vault");
-  revalidatePath("/schedule");
+  revalidatePath("/editing");
   revalidatePath("/requests");
   return { error: null };
 }
@@ -272,13 +281,11 @@ export async function setRequestNsfw(data: {
 }
 
 /**
- * Undo: remove the "posted" mark for (request_id, platform).
- * Deletes the slot if it was created from the vault, or reverts to "scheduled"
- * if the slot was a real scheduled posting.
+ * Undo: remove the "posted" mark for (request_id, account_id).
  */
 export async function unmarkAssetPostedFromVault(data: {
   request_id: string;
-  platform: string;
+  account_id: string;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
@@ -288,7 +295,7 @@ export async function unmarkAssetPostedFromVault(data: {
     .select("id")
     .eq("persona_id", personaId)
     .eq("request_id", data.request_id)
-    .eq("platform", data.platform)
+    .eq("account_id", data.account_id)
     .eq("status", "posted")
     .order("posted_at", { ascending: false })
     .limit(1)
@@ -296,9 +303,6 @@ export async function unmarkAssetPostedFromVault(data: {
 
   if (!slot) return { error: null };
 
-  // For vault-marked posts (scheduled_for == posted_at within a few seconds),
-  // delete the slot. Otherwise just revert status. Simpler: just delete —
-  // the vault flow doesn't preserve scheduling intent.
   const { error } = await supabase
     .from("schedule_slots")
     .delete()
@@ -306,8 +310,21 @@ export async function unmarkAssetPostedFromVault(data: {
 
   if (error) return { error: error.message };
 
+  // If no more posted slots for this request, revert status to edited.
+  const { count } = await supabase
+    .from("schedule_slots")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", data.request_id)
+    .eq("status", "posted");
+  if ((count ?? 0) === 0) {
+    await supabase
+      .from("content_requests")
+      .update({ status: "edited", updated_at: new Date().toISOString() })
+      .eq("id", data.request_id);
+  }
+
   revalidatePath("/vault");
-  revalidatePath("/schedule");
+  revalidatePath("/editing");
   revalidatePath("/requests");
   return { error: null };
 }

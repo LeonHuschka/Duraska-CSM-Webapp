@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Film,
   Scissors,
   ExternalLink,
   Search,
   X,
   CheckCircle2,
   Send,
+  Film,
+  ChevronRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { TrialBadge } from "@/components/ui/trial-badge";
@@ -22,15 +23,12 @@ const TABS = [
 ] as const;
 
 function timeAgo(iso: string): string {
-  const d = new Date(iso).getTime();
-  const diff = Date.now() - d;
-  const day = 1000 * 60 * 60 * 24;
-  const days = Math.floor(diff / day);
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   if (days <= 0) return "today";
-  if (days === 1) return "1d ago";
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
+  if (days === 1) return "1d";
+  if (days < 30) return `${days}d`;
+  return `${Math.floor(days / 30)}mo`;
 }
 
 export function EditingView({ jobs }: { jobs: EditJob[] }) {
@@ -58,7 +56,7 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
   }, [jobs, tab, search]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Editing</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -110,7 +108,7 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
         )}
       </div>
 
-      {/* Grid */}
+      {/* List */}
       {filtered.length === 0 ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border/50 bg-card/50 p-8 text-center">
           <div className="rounded-xl bg-primary/10 p-3">
@@ -126,65 +124,63 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="divide-y divide-border/40 overflow-hidden rounded-xl border border-border/40 bg-card">
           {filtered.map((job) => (
             <Link
               key={job.id}
               href={`/requests/${job.id}`}
-              className="group flex flex-col overflow-hidden rounded-xl border border-border/40 bg-card transition-all hover:border-border/70 hover:shadow-md"
+              className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/40 active:bg-accent/60"
             >
-              {/* Preview */}
-              <div className="relative aspect-[9/16] w-full overflow-hidden bg-muted/30">
-                {job.thumbnailUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={job.thumbnailUrl}
-                    alt={job.title}
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-black">
-                    <Film className="h-7 w-7 text-white/40" />
-                  </div>
-                )}
+              {/* leading icon */}
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/50">
+                <Film className="h-4 w-4 text-muted-foreground" />
+              </div>
 
-                {/* take count */}
-                <div className="absolute left-2 top-2 flex items-center gap-1">
-                  <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+              {/* main */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-medium">{job.title}</span>
+                  {job.is_trial && <TrialBadge size="sm" />}
+                  {!job.is_nsfw ? null : (
+                    <span className="rounded bg-blue-500/15 px-1 text-[9px] font-bold text-blue-400">
+                      NSFW
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span>{job.content_type_name ?? "—"}</span>
+                  <span>·</span>
+                  <span>
                     {job.rawCount} take{job.rawCount === 1 ? "" : "s"}
                   </span>
-                  {job.is_trial && <TrialBadge size="sm" />}
-                </div>
-
-                {/* edited count / done indicator */}
-                {job.editedCount > 0 && (
-                  <div className="absolute right-2 top-2">
-                    <span className="flex items-center gap-1 rounded-md bg-green-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      <CheckCircle2 className="h-2.5 w-2.5" />
-                      {job.editedCount} cut{job.editedCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                )}
-
-                {/* inspo indicator */}
-                {job.inspo_link && (
-                  <div className="absolute bottom-2 right-2 rounded-full bg-black/60 p-1.5">
-                    <ExternalLink className="h-3 w-3 text-white" />
-                  </div>
-                )}
-              </div>
-
-              {/* Meta */}
-              <div className="flex flex-col gap-0.5 px-2.5 py-2">
-                <p className="truncate text-xs font-medium">{job.title}</p>
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span className="truncate">
-                    {job.content_type_name ?? "—"}
-                  </span>
-                  <span className="shrink-0">{timeAgo(job.created_at)}</span>
+                  {job.editedCount > 0 && (
+                    <>
+                      <span>·</span>
+                      <span className="font-medium text-green-400">
+                        {job.editedCount} cut{job.editedCount === 1 ? "" : "s"}
+                      </span>
+                    </>
+                  )}
+                  <span>·</span>
+                  <span>{timeAgo(job.created_at)}</span>
                 </div>
               </div>
+
+              {/* inspo quick-open */}
+              {job.inspo_link && (
+                <a
+                  href={job.inspo_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                  title="Open inspo reel"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
             </Link>
           ))}
         </div>

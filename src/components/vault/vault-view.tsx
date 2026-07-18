@@ -20,16 +20,17 @@ import {
   thumbnailPathFor,
 } from "@/lib/thumbnails";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
-import { SelfUploadDialog } from "@/components/vault/self-upload-dialog";
 import { TrialBadge } from "@/components/ui/trial-badge";
-import type { VaultAsset } from "@/app/(app)/vault/page";
+import Link from "next/link";
+import type { VaultAsset, PostingAccount } from "@/app/(app)/vault/page";
 
 // ─── Platform display config ───────────────────────────────────────────────
 const PLATFORM_LABELS: Record<string, string> = {
   fansly: "Fansly",
   instagram: "IG",
   tiktok: "TikTok",
+  facebook: "FB",
+  x: "X",
   other: "Other",
 };
 
@@ -37,19 +38,9 @@ const PLATFORM_DOT: Record<string, string> = {
   fansly: "bg-blue-500",
   instagram: "bg-pink-500",
   tiktok: "bg-slate-400",
+  facebook: "bg-blue-600",
+  x: "bg-neutral-200",
   other: "bg-gray-500",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  posted: "bg-green-500/80 text-white",
-  scheduled: "bg-amber-500/80 text-white",
-  planned: "bg-gray-500/60 text-white",
-};
-
-const STATUS_ICON: Record<string, string> = {
-  posted: "✓",
-  scheduled: "⏳",
-  planned: "·",
 };
 
 function formatBytes(bytes: number | null): string {
@@ -87,23 +78,19 @@ function ensureExtension(fileName: string, mimeType: string): string {
   return `${base}.${expected}`;
 }
 
-const MARK_POSTED_PLATFORMS = [
-  { value: "fansly", label: "Fansly" },
-  { value: "instagram", label: "Instagram" },
-  { value: "tiktok", label: "TikTok" },
-] as const;
-
 // ─── Single vault card ──────────────────────────────────────────────────────
 // Uses IntersectionObserver so videos/images only load when they enter the viewport.
 function VaultCard({
   asset,
-  onUpdate,
+  accounts,
   onUpdateNsfw,
+  onUpdatePosted,
   onVisible,
 }: {
   asset: VaultAsset;
-  onUpdate: (id: string, platformStatus: Record<string, string>) => void;
+  accounts: PostingAccount[];
   onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
+  onUpdatePosted: (requestId: string, postedAccountIds: string[]) => void;
   onVisible: (asset: VaultAsset) => void;
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
@@ -142,8 +129,9 @@ function VaultCard({
     return () => observer.disconnect();
   }, [asset]);
 
-  const platformEntries = Object.entries(asset.platformStatus);
-  const isUnposted = platformEntries.length === 0;
+  const postedSet = new Set(asset.postedAccountIds);
+  const postedAccounts = accounts.filter((a) => postedSet.has(a.id));
+  const isUnposted = asset.postedAccountIds.length === 0;
 
   function handleMediaClick() {
     if (!isVideo) return;
@@ -316,37 +304,33 @@ function VaultCard({
     });
   }
 
-  function togglePosted(platform: string) {
-    const isPosted = asset.platformStatus[platform] === "posted";
+  function togglePostedAccount(account: PostingAccount) {
+    const isPosted = postedSet.has(account.id);
     startTransition(async () => {
       // Optimistic update
-      const next = { ...asset.platformStatus };
-      if (isPosted) {
-        delete next[platform];
-      } else {
-        next[platform] = "posted";
-      }
-      onUpdate(asset.id, next);
+      const next = isPosted
+        ? asset.postedAccountIds.filter((id) => id !== account.id)
+        : [...asset.postedAccountIds, account.id];
+      onUpdatePosted(asset.request_id, next);
 
       const result = isPosted
         ? await unmarkAssetPostedFromVault({
             request_id: asset.request_id,
-            platform,
+            account_id: account.id,
           })
         : await markAssetPostedFromVault({
             request_id: asset.request_id,
-            platform,
+            account_id: account.id,
           });
 
       if (result.error) {
         toast.error(result.error);
-        // Revert
-        onUpdate(asset.id, asset.platformStatus);
+        onUpdatePosted(asset.request_id, asset.postedAccountIds); // revert
       } else {
         toast.success(
           isPosted
-            ? `Unmarked as posted on ${platform}`
-            : `Marked as posted on ${platform}`
+            ? `Unmarked @${account.handle}`
+            : `Posted on @${account.handle}`
         );
       }
     });
@@ -479,34 +463,54 @@ function VaultCard({
             <PopoverContent
               align="end"
               side="bottom"
-              className="w-44 p-1.5"
+              className="w-52 p-1.5"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Mark posted on
+                Posted on account
               </div>
-              {MARK_POSTED_PLATFORMS.map((p) => {
-                const isPosted = asset.platformStatus[p.value] === "posted";
-                return (
-                  <button
-                    key={p.value}
-                    onClick={() => {
-                      togglePosted(p.value);
-                      setPostOpen(false);
-                    }}
-                    disabled={pending}
-                    className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+              {accounts.length === 0 ? (
+                <div className="px-2 py-3 text-center">
+                  <p className="text-[11px] text-muted-foreground">
+                    No accounts yet.
+                  </p>
+                  <Link
+                    href="/settings/accounts"
+                    className="mt-1 inline-block text-[11px] font-medium text-primary hover:underline"
                   >
-                    <span className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 rounded-full ${PLATFORM_DOT[p.value]}`}
-                      />
-                      {p.label}
-                    </span>
-                    {isPosted && <Check className="h-3.5 w-3.5 text-green-500" />}
-                  </button>
-                );
-              })}
+                    Add accounts →
+                  </Link>
+                </div>
+              ) : (
+                <div className="max-h-56 overflow-y-auto">
+                  {accounts.map((acc) => {
+                    const isPosted = postedSet.has(acc.id);
+                    return (
+                      <button
+                        key={acc.id}
+                        onClick={() => togglePostedAccount(acc)}
+                        disabled={pending}
+                        className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${PLATFORM_DOT[acc.platform] ?? "bg-gray-500"}`}
+                          />
+                          <span className="truncate">
+                            <span className="text-muted-foreground">
+                              {PLATFORM_LABELS[acc.platform] ?? acc.platform}
+                            </span>{" "}
+                            @{acc.handle}
+                          </span>
+                        </span>
+                        {isPosted && (
+                          <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </PopoverContent>
           </Popover>
 
@@ -542,22 +546,22 @@ function VaultCard({
           </button>
         </div>
 
-        {/* Bottom gradient + platform tags */}
+        {/* Bottom gradient + posted-account tags */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
           {isUnposted ? (
             <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-medium text-white/60">
-              Not posted yet
+              Available
             </span>
           ) : (
             <div className="flex flex-wrap gap-1">
-              {platformEntries.map(([platform, status]) => (
+              {postedAccounts.map((acc) => (
                 <span
-                  key={platform}
-                  className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${STATUS_COLOR[status] ?? "bg-gray-500/80 text-white"}`}
+                  key={acc.id}
+                  className="flex items-center gap-1 rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white"
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[platform] ?? "bg-gray-400"}`} />
-                  {PLATFORM_LABELS[platform] ?? platform}
-                  <span>{STATUS_ICON[status] ?? ""}</span>
+                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[acc.platform] ?? "bg-gray-400"}`} />
+                  @{acc.handle}
+                  <span>✓</span>
                 </span>
               ))}
             </div>
@@ -592,22 +596,17 @@ const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
 const PLATFORM_FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "unposted", label: "Not posted" },
-  { value: "fansly", label: "Fansly" },
-  { value: "instagram", label: "Instagram" },
-  { value: "tiktok", label: "TikTok" },
+  { value: "available", label: "Available" },
+  { value: "posted", label: "Posted" },
 ];
 
 export function VaultView({
   assets,
-  personaId,
-  contentTypes,
+  accounts,
 }: {
   assets: VaultAsset[];
-  personaId: string;
-  contentTypes: { id: string; name: string }[];
+  accounts: PostingAccount[];
 }) {
-  const router = useRouter();
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("edited");
   const [nsfwFilter, setNsfwFilter] = useState<string>("all");
@@ -621,9 +620,13 @@ export function VaultView({
     setLocalAssets(assets);
   }, [assets]);
 
-  function handleAssetUpdate(id: string, platformStatus: Record<string, string>) {
+  function handlePostedUpdate(requestId: string, postedAccountIds: string[]) {
+    // posted status lives on the request, so update every asset that
+    // belongs to the same request.
     setLocalAssets((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, platformStatus } : a))
+      prev.map((a) =>
+        a.request_id === requestId ? { ...a, postedAccountIds } : a
+      )
     );
   }
 
@@ -757,10 +760,10 @@ export function VaultView({
     } else if (nsfwFilter === "nsfw") {
       items = items.filter((a) => a.is_nsfw);
     }
-    if (platformFilter === "unposted") {
-      items = items.filter((a) => Object.keys(a.platformStatus).length === 0);
-    } else if (platformFilter !== "all") {
-      items = items.filter((a) => platformFilter in a.platformStatus);
+    if (platformFilter === "available") {
+      items = items.filter((a) => a.postedAccountIds.length === 0);
+    } else if (platformFilter === "posted") {
+      items = items.filter((a) => a.postedAccountIds.length > 0);
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -798,16 +801,9 @@ export function VaultView({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <SelfUploadDialog
-            personaId={personaId}
-            contentTypes={contentTypes}
-            onComplete={() => router.refresh()}
-          />
-          <span className="text-sm text-muted-foreground">
-            {filtered.length} / {localAssets.length}
-          </span>
-        </div>
+        <span className="shrink-0 text-sm text-muted-foreground">
+          {filtered.length} / {localAssets.length}
+        </span>
       </div>
 
       {/* Search */}
@@ -829,15 +825,15 @@ export function VaultView({
         )}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Filters — single horizontally-scrollable row on mobile */}
+      <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:flex-wrap md:px-0">
         {/* Stage */}
-        <div className="flex items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
           {STAGE_OPTIONS.map((s) => (
             <button
               key={s.value}
               onClick={() => setStageFilter(s.value)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 stageFilter === s.value
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground"
@@ -849,12 +845,12 @@ export function VaultView({
         </div>
 
         {/* NSFW */}
-        <div className="flex items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
           {NSFW_OPTIONS.map((n) => (
             <button
               key={n}
               onClick={() => setNsfwFilter(n)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 nsfwFilter === n
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:text-foreground"
@@ -866,25 +862,20 @@ export function VaultView({
         </div>
 
         {/* Platform */}
-        <div className="flex items-center gap-1 overflow-x-auto">
-          <div className="flex items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
-            {PLATFORM_FILTER_OPTIONS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => setPlatformFilter(p.value)}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
-                  platformFilter === p.value
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {p.value !== "all" && p.value !== "unposted" && (
-                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[p.value] ?? "bg-gray-500"}`} />
-                )}
-                {p.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
+          {PLATFORM_FILTER_OPTIONS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setPlatformFilter(p.value)}
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                platformFilter === p.value
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -911,8 +902,9 @@ export function VaultView({
               <VaultCard
                 key={asset.id}
                 asset={asset}
-                onUpdate={handleAssetUpdate}
+                accounts={accounts}
                 onUpdateNsfw={handleNsfwUpdate}
+                onUpdatePosted={handlePostedUpdate}
                 onVisible={enqueueAsset}
               />
             ))}

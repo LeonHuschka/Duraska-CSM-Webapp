@@ -289,6 +289,7 @@ export type Database = {
           id: string;
           request_id: string | null;
           asset_id: string | null;
+          account_id: string | null;
           persona_id: string;
           platform: string;
           caption: string | null;
@@ -303,6 +304,7 @@ export type Database = {
           id?: string;
           request_id?: string | null;
           asset_id?: string | null;
+          account_id?: string | null;
           persona_id: string;
           platform?: string;
           caption?: string | null;
@@ -317,6 +319,7 @@ export type Database = {
           id?: string;
           request_id?: string | null;
           asset_id?: string | null;
+          account_id?: string | null;
           persona_id?: string;
           platform?: string;
           caption?: string | null;
