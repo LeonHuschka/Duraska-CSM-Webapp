@@ -63,21 +63,25 @@ export default async function EditingPage() {
     }
   }
 
-  const jobs: EditJob[] = (requests ?? []).map((r) => {
-    const counts = countsByReq[r.id] ?? { raw: 0, edited: 0 };
-    return {
-      id: r.id,
-      title: r.title,
-      status: r.status,
-      is_nsfw: r.is_nsfw,
-      is_trial: r.is_trial,
-      inspo_link: r.inspo_link,
-      created_at: r.created_at,
-      content_type_name: r.content_type_id ? typeName[r.content_type_id] ?? null : null,
-      rawCount: counts.raw,
-      editedCount: counts.edited,
-    };
-  });
+  const jobs: EditJob[] = (requests ?? [])
+    .map((r) => {
+      const counts = countsByReq[r.id] ?? { raw: 0, edited: 0 };
+      return {
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        is_nsfw: r.is_nsfw,
+        is_trial: r.is_trial,
+        inspo_link: r.inspo_link,
+        created_at: r.created_at,
+        content_type_name: r.content_type_id ? typeName[r.content_type_id] ?? null : null,
+        rawCount: counts.raw,
+        editedCount: counts.edited,
+      };
+    })
+    // Only real edit jobs — must have raw takes to cut. Skips empty/legacy
+    // requests that never got content uploaded.
+    .filter((j) => j.rawCount > 0);
 
   return <EditingView jobs={jobs} />;
 }

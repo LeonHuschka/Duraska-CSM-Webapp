@@ -92,30 +92,7 @@ async function thumbnailFromVideoUrl(url: string): Promise<Blob | null> {
     };
   });
 
-  const seekTime = Math.min(0.5, (video.duration || 1) * 0.1);
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      video.onseeked = null;
-      video.onerror = null;
-    };
-    const t = setTimeout(() => {
-      cleanup();
-      reject(new Error("seek timeout"));
-    }, 30000);
-    video.onseeked = () => {
-      clearTimeout(t);
-      cleanup();
-      resolve();
-    };
-    video.onerror = () => {
-      clearTimeout(t);
-      cleanup();
-      reject(new Error("seek failed"));
-    };
-    video.currentTime = seekTime;
-  });
-
-  return drawToBlob(video, video.videoWidth, video.videoHeight);
+  return captureBestVideoFrame(video, 30000);
 }
 
 async function thumbnailFromImageUrl(url: string): Promise<Blob | null> {
@@ -183,32 +160,131 @@ async function thumbnailFromVideo(blob: Blob): Promise<Blob | null> {
       };
     });
 
-    const seekTime = Math.min(0.5, (video.duration || 1) * 0.1);
-    await new Promise<void>((resolve, reject) => {
-      const cleanup = () => {
-        video.onseeked = null;
-        video.onerror = null;
-      };
-      const t = setTimeout(() => {
-        cleanup();
-        reject(new Error("seek timeout"));
-      }, TIMEOUT_MS);
-      video.onseeked = () => {
-        clearTimeout(t);
-        cleanup();
-        resolve();
-      };
-      video.onerror = () => {
-        clearTimeout(t);
-        cleanup();
-        reject(new Error("video seek failed"));
-      };
-      video.currentTime = seekTime;
-    });
-
-    return drawToBlob(video, video.videoWidth, video.videoHeight);
+    return await captureBestVideoFrame(video, TIMEOUT_MS);
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+// ─── Robust video frame capture (avoids black frames) ───────────────────────
+// Fade-ins / black intros used to produce all-black thumbnails. We try a few
+// timestamps and pick the first non-dark frame, waiting for the frame to be
+// actually painted before drawing.
+async function captureBestVideoFrame(
+  video: HTMLVideoElement,
+  timeoutMs: number
+): Promise<Blob | null> {
+  const dur =
+    video.duration && isFinite(video.duration) ? video.duration : 0;
+  const raw =
+    dur > 0
+      ? [Math.min(1, dur * 0.25), dur * 0.5, dur * 0.1, Math.min(2, dur * 0.6), 0.1]
+      : [0.5, 0.1];
+  const times = Array.from(
+    new Set(
+      raw.map((t) =>
+        Math.max(0.05, Math.min(t, dur > 0 ? Math.max(0.05, dur - 0.05) : t))
+      )
+    )
+  );
+
+  let lastBlob: Blob | null = null;
+  for (const t of times) {
+    try {
+      await seekAndWaitForFrame(video, t, timeoutMs);
+    } catch {
+      continue;
+    }
+    const canvas = drawToCanvas(video, video.videoWidth, video.videoHeight);
+    if (!canvas) continue;
+    const blob = await canvasToJpeg(canvas);
+    if (!blob) continue;
+    lastBlob = blob;
+    if (canvasBrightness(canvas) > 12) return blob; // bright enough → good
+  }
+  return lastBlob; // all candidates dark → return the best we got
+}
+
+function seekAndWaitForFrame(
+  video: HTMLVideoElement,
+  time: number,
+  timeoutMs: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => finish(() => reject(new Error("seek timeout"))), timeoutMs);
+    function cleanup() {
+      video.onseeked = null;
+      video.onerror = null;
+      clearTimeout(timer);
+    }
+    function finish(fn: () => void) {
+      if (done) return;
+      done = true;
+      cleanup();
+      fn();
+    }
+    video.onseeked = () => {
+      // Wait for the frame to be actually decoded/painted before drawing.
+      const rvfc = (video as unknown as {
+        requestVideoFrameCallback?: (cb: () => void) => number;
+      }).requestVideoFrameCallback;
+      if (typeof rvfc === "function") {
+        rvfc.call(video, () => finish(resolve));
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => finish(resolve)));
+      }
+    };
+    video.onerror = () => finish(() => reject(new Error("seek failed")));
+    try {
+      video.currentTime = time;
+    } catch {
+      finish(() => reject(new Error("seek set failed")));
+    }
+  });
+}
+
+function drawToCanvas(
+  source: CanvasImageSource,
+  srcWidth: number,
+  srcHeight: number
+): HTMLCanvasElement | null {
+  if (!srcWidth || !srcHeight) return null;
+  const ratio = Math.min(1, THUMB_MAX_WIDTH / srcWidth);
+  const w = Math.round(srcWidth * ratio);
+  const h = Math.round(srcHeight * ratio);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(source, 0, 0, w, h);
+  return canvas;
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/jpeg", THUMB_QUALITY)
+  );
+}
+
+/** Average luminance 0–255. Returns 255 (assume fine) if the canvas is tainted. */
+function canvasBrightness(canvas: HTMLCanvasElement): number {
+  try {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return 255;
+    const { width, height } = canvas;
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let sum = 0;
+    let count = 0;
+    const step = Math.max(1, Math.floor((width * height) / 2000)) * 4;
+    for (let i = 0; i < data.length; i += step) {
+      sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      count++;
+    }
+    return count ? sum / count : 255;
+  } catch {
+    return 255;
   }
 }
 

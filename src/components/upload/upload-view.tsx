@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
   createSelfProducedRequest,
-  getNextSelfProducedTitle,
+  getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import {
@@ -18,13 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 /**
  * Upload page — the model's entry point.
@@ -37,17 +30,8 @@ import {
  * Mobile-first: big touch targets, single column, minimal typing (title
  * is auto-generated from content type + counter).
  */
-export function UploadView({
-  personaId,
-  contentTypes,
-}: {
-  personaId: string;
-  contentTypes: { id: string; name: string }[];
-}) {
+export function UploadView({ personaId }: { personaId: string }) {
   const [inspoLink, setInspoLink] = useState("");
-  const [contentTypeId, setContentTypeId] = useState<string>(
-    contentTypes[0]?.id ?? ""
-  );
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -58,19 +42,15 @@ export function UploadView({
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
-    if (!contentTypeId) {
-      setPreviewTitle("Pick a content type");
-      return;
-    }
     let cancelled = false;
-    setPreviewTitle("…");
-    getNextSelfProducedTitle(contentTypeId)
+    getNextReelTitle()
       .then((r) => !cancelled && setPreviewTitle(r.title))
-      .catch(() => !cancelled && setPreviewTitle("?"));
+      .catch(() => !cancelled && setPreviewTitle("Reel"));
     return () => {
       cancelled = true;
     };
-  }, [contentTypeId]);
+    // Re-fetch after a successful upload resets doneInfo → back to form
+  }, [doneInfo]);
 
   const handleFiles = useCallback((picked: FileList | File[]) => {
     const arr = Array.from(picked).filter(
@@ -95,10 +75,6 @@ export function UploadView({
   }
 
   async function handleSubmit() {
-    if (!contentTypeId) {
-      toast.error("Please pick a content type");
-      return;
-    }
     if (files.length === 0) {
       toast.error("Add at least one take");
       return;
@@ -109,7 +85,6 @@ export function UploadView({
 
     const created = await createSelfProducedRequest({
       inspo_link: inspoLink.trim() || null,
-      content_type_id: contentTypeId,
       is_nsfw: isNsfw,
     });
     if (created.error || !created.request_id) {
@@ -217,25 +192,6 @@ export function UploadView({
           Job (auto-named)
         </p>
         <p className="mt-0.5 text-base font-semibold">{previewTitle}</p>
-      </div>
-
-      {/* Content type */}
-      <div className="space-y-1.5">
-        <Label>
-          Content Type <span className="text-red-400">*</span>
-        </Label>
-        <Select value={contentTypeId} onValueChange={setContentTypeId} disabled={uploading}>
-          <SelectTrigger className={`h-11 ${!contentTypeId ? "border-amber-500/60" : ""}`}>
-            <SelectValue placeholder="Required — pick one" />
-          </SelectTrigger>
-          <SelectContent>
-            {contentTypes.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Inspo link */}
@@ -346,7 +302,7 @@ export function UploadView({
         <div className="mx-auto max-w-md">
           <Button
             onClick={handleSubmit}
-            disabled={uploading || files.length === 0 || !contentTypeId}
+            disabled={uploading || files.length === 0}
             className="h-12 w-full text-base"
           >
             {uploading ? (

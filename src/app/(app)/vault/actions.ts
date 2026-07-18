@@ -22,31 +22,22 @@ async function getPersonaId() {
  * Counts ALL requests with that prefix regardless of status / stage —
  * so the numbering doesn't reset when content moves through the pipeline.
  */
-export async function getNextSelfProducedTitle(content_type_id: string | null) {
+const REEL_PREFIX = "Reel";
+
+export async function getNextReelTitle() {
   const supabase = await createClient();
   const personaId = await getPersonaId();
 
-  let prefix = "Untitled";
-  if (content_type_id) {
-    const { data: ct } = await supabase
-      .from("content_types")
-      .select("name")
-      .eq("id", content_type_id)
-      .eq("persona_id", personaId)
-      .maybeSingle();
-    if (ct?.name) prefix = ct.name;
-  }
-
-  // Match titles like "Prefix #42". Pull only the title column to stay light.
-  // Use ilike to be permissive on casing.
+  // Match "Reel #N" titles and return the next number. Reels are all just
+  // copied IG reels — there's no meaningful classifier, so we only count.
   const { data: rows } = await supabase
     .from("content_requests")
     .select("title")
     .eq("persona_id", personaId)
-    .ilike("title", `${prefix} #%`);
+    .ilike("title", `${REEL_PREFIX} #%`);
 
   let maxN = 0;
-  const re = new RegExp(`^${escapeRegex(prefix)}\\s*#(\\d+)`, "i");
+  const re = /^Reel\s*#(\d+)/i;
   for (const r of rows ?? []) {
     const m = r.title?.match(re);
     if (m) {
@@ -55,11 +46,7 @@ export async function getNextSelfProducedTitle(content_type_id: string | null) {
     }
   }
 
-  return { title: `${prefix} #${maxN + 1}`, prefix };
-}
-
-function escapeRegex(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return { title: `${REEL_PREFIX} #${maxN + 1}` };
 }
 
 /**
@@ -77,7 +64,6 @@ function escapeRegex(s: string) {
  */
 export async function createSelfProducedRequest(data: {
   inspo_link?: string | null;
-  content_type_id?: string | null;
   is_nsfw: boolean;
   is_trial?: boolean;
   is_warmup?: boolean;
@@ -91,18 +77,8 @@ export async function createSelfProducedRequest(data: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated", request_id: null, title: null };
 
-  // Content type is required so the title is always categorized
-  // ("Roleplay #42" rather than "Untitled #42").
-  if (!data.content_type_id) {
-    return {
-      error: "Content type is required",
-      request_id: null,
-      title: null,
-    };
-  }
-
-  // Compute the title server-side from content type + next number
-  const { title } = await getNextSelfProducedTitle(data.content_type_id);
+  // Simple auto-incrementing "Reel #N" — no classification.
+  const { title } = await getNextReelTitle();
 
   // Find the next position so it lands at the top of "shooted" column
   const { data: maxRow } = await supabase
@@ -121,7 +97,7 @@ export async function createSelfProducedRequest(data: {
       title,
       description: "Self-produced based on inspo",
       inspo_link: data.inspo_link ?? null,
-      content_type_id: data.content_type_id ?? null,
+      content_type_id: null,
       is_nsfw: data.is_nsfw,
       is_trial: data.is_trial ?? false,
       is_warmup: data.is_warmup ?? false,

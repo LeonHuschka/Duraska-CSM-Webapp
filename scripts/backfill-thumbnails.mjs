@@ -84,12 +84,13 @@ function extractFrame(inputBuffer, isVideo) {
           "error",
           "-i",
           "pipe:0",
-          "-ss",
-          "0.5",
+          // ffmpeg's `thumbnail` filter scans a window of frames and picks
+          // the most representative one — this naturally avoids black
+          // fade-in / intro frames that a fixed -ss 0.5 seek often hit.
+          "-vf",
+          `thumbnail=n=100,scale='min(${THUMB_MAX_WIDTH},iw)':-2`,
           "-frames:v",
           "1",
-          "-vf",
-          `scale='min(${THUMB_MAX_WIDTH},iw)':-2`,
           "-q:v",
           "5",
           "-f",
@@ -185,18 +186,26 @@ async function processAsset(asset) {
 
 // ── Main loop with worker pool ─────────────────────────────────────────
 async function main() {
-  console.log("→ Querying assets with no thumbnail…");
+  // REGEN=all reprocesses assets that ALREADY have a thumbnail (to fix
+  // black-frame thumbnails). Default only fills missing ones.
+  const regenAll = (process.env.REGEN || "").toLowerCase() === "all";
+  console.log(
+    regenAll
+      ? "→ REGEN=all — reprocessing ALL video/image assets…"
+      : "→ Querying assets with no thumbnail…"
+  );
 
   // Pull in batches to avoid the 1000-row default cap
   let from = 0;
   const PAGE = 1000;
   const all = [];
   while (true) {
-    const { data, error } = await supabase
+    let q = supabase
       .from("content_assets")
       .select("id, file_path, mime_type, file_name")
-      .is("thumbnail_path", null)
-      .is("deleted_at", null)
+      .is("deleted_at", null);
+    if (!regenAll) q = q.is("thumbnail_path", null);
+    const { data, error } = await q
       .order("uploaded_at", { ascending: false })
       .range(from, from + PAGE - 1);
     if (error) throw error;

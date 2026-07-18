@@ -21,6 +21,13 @@ import {
 } from "@/lib/thumbnails";
 import { createClient } from "@/lib/supabase/client";
 import { TrialBadge } from "@/components/ui/trial-badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import Link from "next/link";
 import type { VaultAsset, PostingAccount } from "@/app/(app)/vault/page";
 
@@ -825,58 +832,46 @@ export function VaultView({
         )}
       </div>
 
-      {/* Filters — single horizontally-scrollable row on mobile */}
-      <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:flex-wrap md:px-0">
-        {/* Stage */}
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
-          {STAGE_OPTIONS.map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setStageFilter(s.value)}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                stageFilter === s.value
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
+      {/* Filters — tap-friendly dropdowns (no horizontal dragging on mobile) */}
+      <div className="grid grid-cols-3 gap-2">
+        <Select value={stageFilter} onValueChange={setStageFilter}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STAGE_OPTIONS.map((s) => (
+              <SelectItem key={s.value} value={s.value} className="text-xs">
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        {/* NSFW */}
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
-          {NSFW_OPTIONS.map((n) => (
-            <button
-              key={n}
-              onClick={() => setNsfwFilter(n)}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                nsfwFilter === n
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {n === "all" ? "SFW + NSFW" : n.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <Select value={nsfwFilter} onValueChange={setNsfwFilter}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {NSFW_OPTIONS.map((n) => (
+              <SelectItem key={n} value={n} className="text-xs">
+                {n === "all" ? "SFW + NSFW" : n.toUpperCase()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        {/* Platform */}
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border/40 bg-card p-0.5">
-          {PLATFORM_FILTER_OPTIONS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPlatformFilter(p.value)}
-              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                platformFilter === p.value
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <Select value={platformFilter} onValueChange={setPlatformFilter}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PLATFORM_FILTER_OPTIONS.map((p) => (
+              <SelectItem key={p.value} value={p.value} className="text-xs">
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Grid */}

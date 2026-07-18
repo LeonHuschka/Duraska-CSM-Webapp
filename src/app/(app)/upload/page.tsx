@@ -1,10 +1,8 @@
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { UploadView } from "@/components/upload/upload-view";
 
 export default async function UploadPage() {
-  const supabase = await createClient();
   const cookieStore = await cookies();
   const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
 
@@ -16,16 +14,5 @@ export default async function UploadPage() {
     );
   }
 
-  const { data: types } = await supabase
-    .from("content_types")
-    .select("id, name")
-    .eq("persona_id", personaId)
-    .order("position", { ascending: true });
-
-  return (
-    <UploadView
-      personaId={personaId}
-      contentTypes={(types ?? []) as { id: string; name: string }[]}
-    />
-  );
+  return <UploadView personaId={personaId} />;
 }
