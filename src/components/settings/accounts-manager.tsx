@@ -32,25 +32,36 @@ export function AccountsManager({ accounts }: { accounts: RegisteredAccount[] })
       return;
     }
     setCreating(true);
-    const res = await createPostingAccount({ platform, handle });
-    setCreating(false);
-    if (res.error) {
-      toast.error(res.error);
-      return;
+    try {
+      const res = await createPostingAccount({ platform, handle });
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Added @${handle.trim().replace(/^@/, "")}`);
+      setHandle("");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add account");
+    } finally {
+      setCreating(false);
     }
-    toast.success(`Added @${handle.trim().replace(/^@/, "")}`);
-    setHandle("");
-    router.refresh();
   }
 
   async function handleDelete(id: string, h: string) {
     setDeletingId(id);
-    const res = await deletePostingAccount(id);
-    setDeletingId(null);
-    if (res.error) toast.error(res.error);
-    else {
+    try {
+      const res = await deletePostingAccount(id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       toast.success(`Removed @${h}`);
       router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove account");
+    } finally {
+      setDeletingId(null);
     }
   }
 

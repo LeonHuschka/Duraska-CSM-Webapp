@@ -12,13 +12,6 @@ async function getPersonaId() {
   return personaId;
 }
 
-export const POSTING_PLATFORMS = [
-  "facebook",
-  "instagram",
-  "tiktok",
-  "x",
-] as const;
-
 /** Register an active posting account. */
 export async function createPostingAccount(data: {
   platform: string;
