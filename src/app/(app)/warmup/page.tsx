@@ -1,6 +1,5 @@
-import { cookies } from "next/headers";
+import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { WarmupView } from "@/components/warmup/warmup-view";
 import { WARMUP_DURATION_DAYS } from "@/lib/warmup-spec";
 
@@ -21,8 +20,7 @@ export interface AccountSummary {
 
 export default async function WarmupPage() {
   const supabase = await createClient();
-  const cookieStore = await cookies();
-  const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
+  const personaId = await getActivePersonaId();
 
   if (!personaId) {
     return (

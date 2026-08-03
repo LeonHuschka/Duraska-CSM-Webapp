@@ -1,7 +1,6 @@
-import { cookies } from "next/headers";
+import { getActivePersonaId } from "@/lib/persona";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { RequestDetail } from "@/components/requests/request-detail";
 import type { ContentRequest, ContentAsset } from "@/lib/types/database";
 
@@ -18,8 +17,7 @@ export default async function RequestDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const cookieStore = await cookies();
-  const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
+  const personaId = await getActivePersonaId();
 
   if (!personaId) {
     return (

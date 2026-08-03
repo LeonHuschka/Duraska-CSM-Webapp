@@ -38,13 +38,14 @@ export function TopBar({ userEmail, userName }: TopBarProps) {
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border/50 px-4 md:justify-end md:px-6">
-      {/* Mobile: logo text instead of hamburger (bottom nav handles navigation) */}
-      <span className="text-sm font-semibold tracking-tight text-foreground md:hidden">
-        Duraska
-      </span>
-      {/* Tablet-only: keep hamburger as fallback for the slide-in sidebar */}
-      <div className="hidden sm:block md:hidden">
+      {/* Mobile: hamburger + logo. The hamburger opens the slide-in sidebar,
+          which is the ONLY place the persona switcher lives — without it a
+          phone-only user can never set their active persona. */}
+      <div className="flex items-center gap-2 md:hidden">
         <MobileSidebar />
+        <span className="text-sm font-semibold tracking-tight text-foreground">
+          Duraska
+        </span>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

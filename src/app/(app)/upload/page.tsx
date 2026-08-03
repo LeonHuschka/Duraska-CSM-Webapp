@@ -1,10 +1,8 @@
-import { cookies } from "next/headers";
-import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
+import { getActivePersonaId } from "@/lib/persona";
 import { UploadView } from "@/components/upload/upload-view";
 
 export default async function UploadPage() {
-  const cookieStore = await cookies();
-  const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
+  const personaId = await getActivePersonaId();
 
   if (!personaId) {
     return (

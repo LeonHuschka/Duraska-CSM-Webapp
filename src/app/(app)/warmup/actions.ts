@@ -1,20 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
+import { requireActivePersonaId } from "@/lib/persona";
 import {
   generateWarmupSlots,
   WARMUP_DURATION_DAYS,
   type WarmupPlatform,
 } from "@/lib/warmup-spec";
 
-async function getPersonaId() {
-  const cookieStore = await cookies();
-  const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
-  if (!personaId) throw new Error("No active persona selected");
-  return personaId;
+// Cookie when valid, otherwise the user's first membership. Mobile users
+// never get the cookie set (no persona switcher on phones), so relying on
+// it alone used to break uploads entirely.
+async function getPersonaId(): Promise<string> {
+  return requireActivePersonaId();
 }
 
 /**

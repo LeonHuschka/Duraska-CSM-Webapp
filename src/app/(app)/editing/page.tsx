@@ -1,6 +1,5 @@
-import { cookies } from "next/headers";
+import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { EditingView } from "@/components/editing/editing-view";
 
 export interface EditJob {
@@ -18,8 +17,7 @@ export interface EditJob {
 
 export default async function EditingPage() {
   const supabase = await createClient();
-  const cookieStore = await cookies();
-  const personaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
+  const personaId = await getActivePersonaId();
 
   if (!personaId) {
     return (
