@@ -47,9 +47,13 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
         />
       </div>
 
-      <div className="px-3 pb-4">
-        <PersonaSwitcher />
-      </div>
+      {/* The model IS the persona — she has nothing to switch between, so
+          the switcher is hidden for her. */}
+      {role !== "model" && (
+        <div className="px-3 pb-4">
+          <PersonaSwitcher />
+        </div>
+      )}
 
       <nav className="flex-1 space-y-0.5 px-3">
         {navItems.map((item) => {

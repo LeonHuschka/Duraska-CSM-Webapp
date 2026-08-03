@@ -17,9 +17,11 @@ import { MobileSidebar } from "./mobile-sidebar";
 interface TopBarProps {
   userEmail: string;
   userName: string | null;
+  /** The model has no persona to switch between — hide the sidebar trigger. */
+  isModel?: boolean;
 }
 
-export function TopBar({ userEmail, userName }: TopBarProps) {
+export function TopBar({ userEmail, userName, isModel = false }: TopBarProps) {
   const [isPending, startTransition] = useTransition();
 
   function handleSignOut() {
@@ -42,7 +44,7 @@ export function TopBar({ userEmail, userName }: TopBarProps) {
           which is the ONLY place the persona switcher lives — without it a
           phone-only user can never set their active persona. */}
       <div className="flex items-center gap-2 md:hidden">
-        <MobileSidebar />
+        {!isModel && <MobileSidebar />}
         <span className="text-sm font-semibold tracking-tight text-foreground">
           Duraska
         </span>
