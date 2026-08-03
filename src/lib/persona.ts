@@ -28,11 +28,21 @@ export async function getActivePersonaId(): Promise<string | null> {
 
   const { data: memberships } = await supabase
     .from("persona_members")
-    .select("persona_id")
+    .select("persona_id, role")
     .eq("user_id", user.id);
 
-  const ids = (memberships ?? []).map((m) => m.persona_id);
-  if (ids.length === 0) return null;
+  const rows = memberships ?? [];
+  if (rows.length === 0) return null;
+
+  // A model IS her persona. Pin her to it regardless of cookie state or
+  // membership ordering — she has no switcher to correct a wrong guess,
+  // and she must never resolve to another model's persona.
+  const ownModelPersona = rows.find((m) => m.role === "model");
+  if (ownModelPersona) return ownModelPersona.persona_id;
+
+  // Staff (owner / manager / va) can belong to several personas: honour the
+  // cookie when it points at one of theirs, otherwise take the first.
+  const ids = rows.map((m) => m.persona_id);
   if (saved && ids.includes(saved)) return saved;
   return ids[0];
 }
