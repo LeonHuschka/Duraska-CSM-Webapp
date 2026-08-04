@@ -25,6 +25,14 @@ export const maxDuration = 60;
  * link untouched to be re-checked on the next run.
  */
 
+// Turned off on 2026-08-04. Instagram answers this server with the same
+// login wall for a live reel and a deleted one, so the check produces no
+// verdict at all — and while a looser rule was in place it would have
+// deleted 52 valid links. Dead links are retired by a 💔 reaction until
+// the check runs from an IP Instagram answers. The alert below is
+// unaffected and keeps running.
+const LINK_CHECK_ENABLED = false;
+
 // Every open link gets checked on every run, not a slice of them. Instagram
 // answers in about a second, so the run is bounded by fan-out plus a wall
 // clock the function can't outlive — whatever is left keeps its old
@@ -76,7 +84,7 @@ async function runForPersona(
     .eq("status", "open")
     .order("checked_at", { ascending: true, nullsFirst: true });
 
-  const queue = [...(toCheck ?? [])];
+  const queue = LINK_CHECK_ENABLED ? [...(toCheck ?? [])] : [];
   type Verdict = {
     link: (typeof queue)[number];
     alive: boolean | null;
