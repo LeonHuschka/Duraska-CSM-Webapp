@@ -194,12 +194,27 @@ async function probe(
     if (present.some((m) => html.includes(m))) {
       return { alive: true, reason: `${label}: media present` };
     }
-    // Served the wall rather than the post — that tells us nothing about
-    // whether the post exists.
-    if (/loginForm|"challenge"|accounts\/login/i.test(html)) {
-      return { alive: null, reason: `${label}: login wall` };
+
+    // Absence of media is NOT death. Instagram serves the same wall to a
+    // crawler once it has seen enough requests, and reading that as "gone"
+    // would delete perfectly good links — it did, for a live reel, during
+    // testing. Deletion requires the page to say so.
+    const gone = [
+      "isn't available",
+      "isn&#039;t available",
+      "Diese Seite ist leider nicht verf",
+      "Page Not Found",
+      "content is no longer available",
+    ];
+    if (gone.some((m) => html.includes(m))) {
+      return { alive: false, reason: `${label}: page says the post is gone` };
     }
-    return { alive: false, reason: `${label}: no media in a real response` };
+
+    const title = /<title[^>]*>([^<]{0,40})/i.exec(html)?.[1]?.trim();
+    return {
+      alive: null,
+      reason: `${label}: no verdict (${html.length}b, title "${title ?? "—"}")`,
+    };
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "TimeoutError";
     return {

@@ -403,35 +403,29 @@ export async function simulatePipeline() {
       `status "${afterBroken?.status}" — the real message would be deleted from the topic`
     );
 
-    // 6 — the detector, judged on both answers it has to get right:
-    // a reel that exists and one that never did. Getting "gone" for the
-    // fake one is worthless if it says the same about a live one.
-    const { data: realLink } = await supabase
-      .from("content_links")
-      .select("url")
-      .eq("persona_id", personaId)
-      .eq("status", "open")
-      .limit(1)
-      .maybeSingle();
-    const fake = await checkInstagramAlive(
-      "https://www.instagram.com/reel/CzzzzzzzzzZ/"
-    );
-    const live = realLink
-      ? await checkInstagramAlive(realLink.url)
-      : { alive: null, reason: "no open link to test against" };
-    const verdict = (v: { alive: boolean | null; reason: string }) =>
-      v.alive === true ? "alive" : v.alive === false ? "gone" : "unclear";
+    // 6 — the detector, judged against two real reels Leon verified by
+    // hand: one live, one deleted. A made-up shortcode is not the same
+    // thing as a removed post, and testing against one proved nothing.
+    const FIXTURE_LIVE = "https://www.instagram.com/reel/Dawbew9hO0B/";
+    const FIXTURE_GONE = "https://www.instagram.com/reel/DXw_Ga2RTdW/";
+    const live = await checkInstagramAlive(FIXTURE_LIVE);
+    const goneOne = await checkInstagramAlive(FIXTURE_GONE);
+    const verdict = (v: { alive: boolean | null }) =>
+      v.alive === true ? "alive" : v.alive === false ? "gone" : "no verdict";
+    const correct = live.alive === true && goneOne.alive === false;
     say(
       "Dead-link detection",
-      fake.alive === false && live.alive === true,
-      `a reel that never existed → "${verdict(fake)}" (${fake.reason})\n` +
-        `one of your open links → "${verdict(live)}" (${live.reason})\n` +
-        (fake.alive === false && live.alive === true
+      correct,
+      `a reel that is live → "${verdict(live)}" (${live.reason})\n` +
+        `a reel that was deleted → "${verdict(goneOne)}" (${goneOne.reason})\n` +
+        (correct
           ? "the cron can delete dead links on its own"
-          : "not reliable enough to delete automatically")
+          : live.alive === false
+            ? "DANGER: it called a live reel dead — deletion must stay off"
+            : "no reliable verdict, so nothing gets deleted automatically")
     );
 
-    // 6 — the alert the cron would post, without posting it
+    // 7 — the alert the cron would post, without posting it
     const { data: allLinks } = await supabase
       .from("content_links")
       .select("status")
