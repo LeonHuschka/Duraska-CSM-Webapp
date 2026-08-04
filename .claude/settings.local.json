@@ -115,7 +115,11 @@
       "Bash(openssl rand *)",
       "Bash(echo \"TELEGRAM_WEBHOOK_SECRET=$\\(openssl rand -hex 32\\)\")",
       "Bash(echo \"CRON_SECRET=$\\(openssl rand -hex 32\\)\")",
-      "Bash(curl -s \"https://api.github.com/repos/LeonHuschka/Duraska-CSM-Webapp/commits/ad135e7/status\")"
+      "Bash(curl -s \"https://api.github.com/repos/LeonHuschka/Duraska-CSM-Webapp/commits/ad135e7/status\")",
+      "Bash(curl -s -o /dev/null -w '  -> %{http_code}\\\\n' -X POST https://duraska-csm-webapp.vercel.app/api/telegram/webhook -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong-on-purpose' -d '{}')",
+      "Bash(curl -s -o /dev/null -w '  -> %{http_code}\\\\n' -X POST https://duraska-csm-webapp.vercel.app/api/telegram/webhook -H 'content-type: application/json' -d '{}')",
+      "Bash(curl -s -o /dev/null -w '  content-check -> %{http_code}\\\\n' https://duraska-csm-webapp.vercel.app/api/cron/content-check)",
+      "Bash(curl -s -o /dev/null -w '  reports       -> %{http_code}\\\\n' https://duraska-csm-webapp.vercel.app/api/cron/reports)"
     ]
   }
 }

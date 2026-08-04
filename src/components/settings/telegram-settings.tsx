@@ -3,13 +3,21 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Send, Link2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import {
+  Loader2,
+  Send,
+  Link2,
+  AlertTriangle,
+  CheckCircle2,
+  Activity,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   saveTelegramConfig,
   registerWebhook,
+  webhookStatus,
 } from "@/app/(app)/settings/telegram/actions";
 import type { TelegramConfigRow } from "@/app/(app)/settings/telegram/page";
 
@@ -27,6 +35,8 @@ export function TelegramSettings({
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [hooking, setHooking] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [f, setF] = useState({
     chat_id: config?.chat_id?.toString() ?? "",
     requests_thread_id: config?.requests_thread_id?.toString() ?? "",
@@ -61,6 +71,21 @@ export function TelegramSettings({
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleStatus() {
+    setChecking(true);
+    try {
+      const res = await webhookStatus();
+      if (res.error) {
+        toast.error(res.error);
+        setStatus(null);
+      } else {
+        setStatus(res.info ?? {});
+      }
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -111,10 +136,47 @@ export function TelegramSettings({
             )}
             Register webhook
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleStatus}
+            disabled={checking || !botConfigured}
+            className="gap-1.5"
+          >
+            {checking ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Activity className="h-3.5 w-3.5" />
+            )}
+            Check status
+          </Button>
           <span className="text-xs text-muted-foreground">
             {openLinks} open inspo links tracked
           </span>
         </div>
+
+        {/* Telegram's own view of the webhook — the fastest way to see why
+            nothing is arriving (wrong URL, no webhook, delivery errors). */}
+        {status && (
+          <dl className="mt-3 space-y-1 rounded-lg bg-muted/30 p-3 text-[11px]">
+            <StatusRow
+              label="Webhook URL"
+              value={(status.url as string) || "— not registered —"}
+              bad={!status.url}
+            />
+            <StatusRow
+              label="Pending updates"
+              value={String(status.pending_update_count ?? 0)}
+            />
+            {!!status.last_error_message && (
+              <StatusRow
+                label="Last error"
+                value={String(status.last_error_message)}
+                bad
+              />
+            )}
+          </dl>
+        )}
       </div>
 
       {/* How to find ids */}
@@ -123,13 +185,26 @@ export function TelegramSettings({
           <Send className="h-3.5 w-3.5" /> Finding the IDs
         </h3>
         <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+          <li>
+            In BotFather: <code>/setprivacy</code> → pick the bot →{" "}
+            <b>Disable</b>.
+            <span className="block text-amber-400/90">
+              Required. With privacy mode on (the default) the bot cannot see
+              normal messages — it would never notice your Instagram links.
+            </span>
+          </li>
           <li>Add the bot to the group and make it an <b>admin</b> (it needs
             &quot;delete messages&quot; and reaction rights).</li>
+          <li>Click <b>Register webhook</b> above.</li>
           <li>Send <code>/id</code> inside the <b>content requests</b> topic —
             the bot replies with the chat and topic ID.</li>
           <li>Do the same inside <b>TALK / INSTRUCTIONS</b> for that topic ID.</li>
           <li>Paste them below and save.</li>
         </ol>
+        <p className="mt-2 text-[11px] text-muted-foreground/70">
+          If <code>/id</code> stays silent, hit <b>Check status</b> above — it
+          shows Telegram&apos;s own view of the webhook and any delivery error.
+        </p>
       </div>
 
       {/* Wiring */}
@@ -190,6 +265,27 @@ export function TelegramSettings({
         {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
         Save settings
       </Button>
+    </div>
+  );
+}
+
+function StatusRow({
+  label,
+  value,
+  bad = false,
+}: {
+  label: string;
+  value: string;
+  bad?: boolean;
+}) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-28 shrink-0 text-muted-foreground">{label}</dt>
+      <dd
+        className={`min-w-0 flex-1 break-all ${bad ? "text-red-400" : "text-foreground"}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
