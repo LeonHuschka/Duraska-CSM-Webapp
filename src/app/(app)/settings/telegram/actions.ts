@@ -403,16 +403,32 @@ export async function simulatePipeline() {
       `status "${afterBroken?.status}" — the real message would be deleted from the topic`
     );
 
-    // 6 — what the dead-link check would conclude, on a real removed reel
-    const dead = await checkInstagramAlive(
+    // 6 — the detector, judged on both answers it has to get right:
+    // a reel that exists and one that never did. Getting "gone" for the
+    // fake one is worthless if it says the same about a live one.
+    const { data: realLink } = await supabase
+      .from("content_links")
+      .select("url")
+      .eq("persona_id", personaId)
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+    const fake = await checkInstagramAlive(
       "https://www.instagram.com/reel/CzzzzzzzzzZ/"
     );
+    const live = realLink
+      ? await checkInstagramAlive(realLink.url)
+      : { alive: null, reason: "no open link to test against" };
+    const verdict = (v: { alive: boolean | null; reason: string }) =>
+      v.alive === true ? "alive" : v.alive === false ? "gone" : "unclear";
     say(
       "Dead-link detection",
-      true,
-      dead.alive === false
-        ? `verdict "gone" (${dead.reason}) → message would be deleted`
-        : `verdict "unclear" (${dead.reason}) → nothing is deleted, re-checked next run`
+      fake.alive === false && live.alive === true,
+      `a reel that never existed → "${verdict(fake)}" (${fake.reason})\n` +
+        `one of your open links → "${verdict(live)}" (${live.reason})\n` +
+        (fake.alive === false && live.alive === true
+          ? "the cron can delete dead links on its own"
+          : "not reliable enough to delete automatically")
     );
 
     // 6 — the alert the cron would post, without posting it

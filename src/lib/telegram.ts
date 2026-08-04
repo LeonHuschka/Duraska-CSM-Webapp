@@ -150,40 +150,53 @@ export function instagramKey(url: string): string | null {
 }
 
 /**
- * Best-effort availability check.
+ * Is this reel still on Instagram?
  *
- * NOTE: Instagram actively blocks datacenter IPs and often answers with a
- * login wall or 429 rather than a real 404. A negative result here is NOT
- * proof the post is gone, which is why callers must not delete anything on
- * this signal alone.
+ * Asking for the reel page is useless from a server: Instagram answers a
+ * datacenter IP with the same login wall whether the post exists or not,
+ * which is why this used to return "unclear" for everything and nothing was
+ * ever cleaned up. The embed endpoint is built for third-party sites, so it
+ * answers without a session — and it only carries `shortcode_media` when
+ * there is media to show.
+ *
+ * A verdict of `false` is therefore evidence, not a guess. `null` still
+ * means "could not tell" and callers must not act on it.
  */
 export async function checkInstagramAlive(
   url: string
 ): Promise<{ alive: boolean | null; reason: string }> {
+  const code = instagramKey(url);
+  if (!code) return { alive: null, reason: "no shortcode in url" };
+
   try {
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (compatible; DuraskaBot/1.0; +https://duraska.com)",
-        accept: "text/html",
-      },
-    });
+    const res = await fetch(
+      `https://www.instagram.com/p/${code}/embed/captioned/`,
+      {
+        redirect: "follow",
+        headers: {
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+          accept: "text/html",
+          "accept-language": "en-US,en;q=0.9",
+        },
+      }
+    );
     if (res.status === 404) return { alive: false, reason: "404" };
     if (res.status === 429 || res.status === 401 || res.status === 403) {
       return { alive: null, reason: `blocked (${res.status})` };
     }
     if (!res.ok) return { alive: null, reason: `http ${res.status}` };
+
     const html = await res.text();
-    // A removed post redirects to the login/error page and loses its OG tags.
-    if (/"og:video"|"og:image"|<meta property="og:title"/i.test(html)) {
-      return { alive: true, reason: "og tags present" };
+    if (html.includes("shortcode_media")) {
+      return { alive: true, reason: "embed carries media" };
     }
-    if (/Sorry, this page isn't available|Diese Seite ist leider nicht/i.test(html)) {
-      return { alive: false, reason: "removed page" };
+    // The embed for a removed post renders an empty shell — same status,
+    // no media payload.
+    if (html.includes("contextJSON") || html.includes("EmbedIsBroken")) {
+      return { alive: false, reason: "embed has no media" };
     }
-    return { alive: null, reason: "inconclusive" };
+    return { alive: null, reason: "unrecognised embed response" };
   } catch (err) {
     return {
       alive: null,

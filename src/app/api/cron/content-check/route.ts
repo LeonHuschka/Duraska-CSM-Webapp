@@ -77,60 +77,77 @@ async function runForPersona(
     .order("checked_at", { ascending: true, nullsFirst: true });
 
   const queue = [...(toCheck ?? [])];
-  let dead = 0;
-  let deleted = 0;
-  let checked = 0;
+  type Verdict = {
+    link: (typeof queue)[number];
+    alive: boolean | null;
+    reason: string;
+  };
+  const verdicts: Verdict[] = [];
 
+  // Read every verdict before acting on any of them. If Instagram ever
+  // starts refusing the embed endpoint too, every link reads as gone at
+  // once — and deleting on that would wipe the whole topic in one run.
   async function worker() {
     for (;;) {
       if (Date.now() > deadline) return;
       const link = queue.shift();
       if (!link) return;
-
-      const { alive } = await checkInstagramAlive(link.url);
-      checked++;
-      let nextStatus: string | undefined;
-
-      // `alive === null` means Instagram answered with a login wall, a 429
-      // or something else unreadable. That is not evidence, so the link is
-      // left exactly as it was and gets re-checked next run. Only a real
-      // 404 or a removed-post page counts as gone.
-      if (alive === false) {
-        nextStatus = "dead";
-        dead++;
-        const res = await deleteMessage({
-          chat_id: link.chat_id,
-          message_id: Number(link.message_id),
-        });
-        if (res.ok) {
-          deleted++;
-        } else {
-          // Telegram refuses some deletions (too old, rights revoked).
-          // Mark it instead of letting it vanish from view silently.
-          await setMessageReaction({
-            chat_id: link.chat_id,
-            message_id: Number(link.message_id),
-            emoji: REACTION.dead,
-          });
-        }
-      }
-
-      await supabase
-        .from("content_links")
-        .update({
-          checked_at: new Date().toISOString(),
-          link_ok: alive,
-          ...(nextStatus ? { status: nextStatus } : {}),
-        })
-        .eq("id", link.id);
+      const { alive, reason } = await checkInstagramAlive(link.url);
+      verdicts.push({ link, alive, reason });
     }
   }
-
   await Promise.all(
     Array.from({ length: Math.min(CHECK_CONCURRENCY, queue.length) }, worker)
   );
   // Say what was left rather than reporting a clean sweep that wasn't.
   const unchecked = queue.length;
+  const checked = verdicts.length;
+
+  const goneCount = verdicts.filter((v) => v.alive === false).length;
+  // Real attrition is a few links; half the backlog dying between two runs
+  // means the detector broke, not that the posts did.
+  const trustworthy = checked < 3 || goneCount / checked <= 0.5;
+  if (!trustworthy) {
+    console.warn(
+      `[cron] ${goneCount}/${checked} links read as gone — treating the check as broken, deleting nothing`
+    );
+  }
+
+  let dead = 0;
+  let deleted = 0;
+
+  for (const v of verdicts) {
+    // `alive === null` means the answer was unreadable. That is not
+    // evidence, so the link is left as it was and re-checked next run.
+    const isGone = v.alive === false && trustworthy;
+    if (isGone) {
+      dead++;
+      const res = await deleteMessage({
+        chat_id: v.link.chat_id,
+        message_id: Number(v.link.message_id),
+      });
+      if (res.ok) {
+        deleted++;
+      } else {
+        // Telegram refuses some deletions (too old, rights revoked).
+        // Mark it instead of letting it vanish from view silently.
+        await setMessageReaction({
+          chat_id: v.link.chat_id,
+          message_id: Number(v.link.message_id),
+          emoji: REACTION.dead,
+        });
+      }
+    }
+
+    await supabase
+      .from("content_links")
+      .update({
+        checked_at: new Date().toISOString(),
+        link_ok: v.alive,
+        ...(isGone ? { status: "dead" } : {}),
+      })
+      .eq("id", v.link.id);
+  }
 
   // ── 2. Pipeline health ──
   const { data: links } = await supabase
@@ -182,6 +199,7 @@ async function runForPersona(
     unchecked,
     dead,
     deleted,
+    detectorTrusted: trustworthy,
     openLinks,
     shotNotUploaded,
     unedited,
