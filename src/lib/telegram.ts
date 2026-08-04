@@ -200,7 +200,23 @@ export async function checkInstagramAlive(
     if (html.includes("contextJSON") || html.includes("EmbedIsBroken")) {
       return { alive: false, reason: "embed has no media" };
     }
-    return { alive: null, reason: "unrecognised embed response" };
+    // Neither marker present: Instagram served this server something other
+    // than an embed. Fingerprint it — without knowing what comes back there
+    // is no way to tell whether a usable signal exists at all.
+    const marks = [
+      "login",
+      "consent",
+      "challenge",
+      "Something went wrong",
+      "not-logged-in",
+      "Page Not Found",
+      "og:title",
+    ].filter((m) => html.toLowerCase().includes(m.toLowerCase()));
+    const title = /<title[^>]*>([^<]{0,60})/i.exec(html)?.[1]?.trim();
+    return {
+      alive: null,
+      reason: `unrecognised embed (${html.length}b, title "${title ?? "—"}", markers: ${marks.join("/") || "none"})`,
+    };
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "TimeoutError";
     return {
