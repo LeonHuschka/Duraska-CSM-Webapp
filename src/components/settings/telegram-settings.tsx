@@ -357,9 +357,8 @@ export function TelegramSettings({
           </li>
           <li>
             💔 = <b>the post is gone</b>. The bot deletes the message and drops
-            the link. Instagram shows this server the same login wall whether a
-            reel exists or not, so a person who opened it is the only reliable
-            judge.
+            the link. It checks for dead posts by itself every morning too —
+            this is the shortcut for when you spot one first.
           </li>
         </ol>
         <p className="mt-2 text-[11px] text-muted-foreground/70">
