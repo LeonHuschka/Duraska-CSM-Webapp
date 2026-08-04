@@ -8,6 +8,7 @@ export interface RegisteredAccount {
   handle: string;
   status: string;
   telegram_chat_id: number | null;
+  telegram_thread_id: number | null;
 }
 
 export default async function AccountsSettingsPage() {
@@ -22,7 +23,7 @@ export default async function AccountsSettingsPage() {
 
   const { data } = await supabase
     .from("accounts")
-    .select("id, platform, handle, status, telegram_chat_id")
+    .select("id, platform, handle, status, telegram_chat_id, telegram_thread_id")
     .eq("persona_id", personaId)
     .order("platform", { ascending: true })
     .order("handle", { ascending: true });

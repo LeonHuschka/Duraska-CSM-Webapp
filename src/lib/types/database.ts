@@ -428,6 +428,7 @@ export type Database = {
           warmup_completed_at: string | null;
           notes: string | null;
           telegram_chat_id: number | null;
+          telegram_thread_id: number | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -443,6 +444,7 @@ export type Database = {
           warmup_completed_at?: string | null;
           notes?: string | null;
           telegram_chat_id?: number | null;
+          telegram_thread_id?: number | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -458,6 +460,7 @@ export type Database = {
           warmup_completed_at?: string | null;
           notes?: string | null;
           telegram_chat_id?: number | null;
+          telegram_thread_id?: number | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;

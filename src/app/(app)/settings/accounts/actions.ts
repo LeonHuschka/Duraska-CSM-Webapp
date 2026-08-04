@@ -44,17 +44,28 @@ export async function createPostingAccount(data: {
  */
 export async function setAccountTelegramChat(
   accountId: string,
-  chatId: string
+  chatId: string,
+  threadId?: string
 ) {
   const supabase = await createClient();
   await getPersonaId();
-  const parsed = chatId.trim() === "" ? null : Number(chatId.trim());
-  if (parsed !== null && Number.isNaN(parsed)) {
-    return { error: "Chat ID must be a number" };
-  }
+  const num = (v: string | undefined) => {
+    if (v === undefined || v.trim() === "") return null;
+    const n = Number(v.trim());
+    return Number.isNaN(n) ? undefined : n;
+  };
+  const parsed = num(chatId);
+  const parsedThread = num(threadId);
+  if (parsed === undefined) return { error: "Chat ID must be a number" };
+  if (parsedThread === undefined) return { error: "Topic ID must be a number" };
   const { error } = await supabase
     .from("accounts")
-    .update({ telegram_chat_id: parsed, updated_at: new Date().toISOString() })
+    .update({
+      telegram_chat_id: parsed,
+      // A topic without a chat can never match, so drop it with the chat.
+      telegram_thread_id: parsed === null ? null : parsedThread,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", accountId);
   if (error) return { error: error.message };
   revalidatePath("/settings/accounts");

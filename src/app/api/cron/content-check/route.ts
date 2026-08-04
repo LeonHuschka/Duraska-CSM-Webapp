@@ -81,7 +81,11 @@ async function runForPersona(
     .from("content_links")
     .select("id, url, chat_id, message_id")
     .eq("persona_id", cfg.persona_id)
-    .in("status", ["open", "shot"])
+    // Only links nobody has acted on yet. Once the model has reacted, the
+    // reel is filmed and whether Instagram still hosts the original is of
+    // no consequence — and deleting the message she reacted to would be
+    // actively wrong.
+    .eq("status", "open")
     .order("checked_at", { ascending: true, nullsFirst: true });
 
   const queue = [...(toCheck ?? [])];

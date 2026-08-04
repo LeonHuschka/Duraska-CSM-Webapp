@@ -52,10 +52,11 @@ export function AccountsManager({ accounts }: { accounts: RegisteredAccount[] })
   async function handleChatId(
     id: string,
     value: string,
-    current: number | null
+    current: number | null,
+    thread?: string
   ) {
     if (value.trim() === (current?.toString() ?? "")) return; // unchanged
-    const res = await setAccountTelegramChat(id, value);
+    const res = await setAccountTelegramChat(id, value, thread);
     if (res.error) toast.error(res.error);
     else {
       toast.success(value.trim() ? "Telegram group linked" : "Group unlinked");
@@ -175,7 +176,29 @@ export function AccountsManager({ accounts }: { accounts: RegisteredAccount[] })
                       defaultValue={a.telegram_chat_id?.toString() ?? ""}
                       placeholder="Telegram chat ID"
                       className="h-8 flex-1 text-xs"
-                      onBlur={(e) => handleChatId(a.id, e.target.value, a.telegram_chat_id)}
+                      onBlur={(e) =>
+                        handleChatId(
+                          a.id,
+                          e.target.value,
+                          a.telegram_chat_id,
+                          a.telegram_thread_id?.toString() ?? ""
+                        )
+                      }
+                    />
+                    {/* Accounts share one forum group, so the topic is what
+                        actually identifies them. */}
+                    <Input
+                      defaultValue={a.telegram_thread_id?.toString() ?? ""}
+                      placeholder="Topic ID"
+                      className="h-8 w-24 shrink-0 text-xs"
+                      onBlur={(e) =>
+                        handleChatId(
+                          a.id,
+                          a.telegram_chat_id?.toString() ?? "",
+                          null,
+                          e.target.value
+                        )
+                      }
                     />
                     <button
                       onClick={() => handleDelete(a.id, a.handle)}

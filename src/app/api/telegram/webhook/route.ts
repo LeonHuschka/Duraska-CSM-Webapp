@@ -202,13 +202,41 @@ async function handleMessage(msg: TgMessage) {
 async function handleScreenshot(msg: TgMessage) {
   const supabase = createAdminClient();
 
-  // Which account does this chat belong to?
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id, persona_id, handle, platform")
-    .eq("telegram_chat_id", msg.chat.id)
-    .maybeSingle();
-  if (!account) return; // chat not mapped to an account — ignore
+  // Which account does this screenshot belong to? The accounts sit in
+  // topics of one forum group, so the chat id is the same for all of them
+  // and only the topic tells them apart. An account that does get its own
+  // group is stored with no topic and matches chat-wide.
+  const thread = msg.message_thread_id ?? null;
+  const cols = "id, persona_id, handle, platform";
+  let account: {
+    id: string;
+    persona_id: string;
+    handle: string;
+    platform: string;
+  } | null = null;
+
+  if (thread != null) {
+    const { data } = await supabase
+      .from("accounts")
+      .select(cols)
+      .eq("telegram_chat_id", msg.chat.id)
+      .eq("telegram_thread_id", thread)
+      .maybeSingle();
+    account = data;
+  }
+  if (!account) {
+    const { data } = await supabase
+      .from("accounts")
+      .select(cols)
+      .eq("telegram_chat_id", msg.chat.id)
+      .is("telegram_thread_id", null)
+      .maybeSingle();
+    account = data;
+  }
+  if (!account) {
+    console.log("[telegram] screenshot from unmapped chat", msg.chat.id, "topic", thread);
+    return;
+  }
 
   // Already processed? (Telegram can redeliver.)
   const { data: existing } = await supabase
