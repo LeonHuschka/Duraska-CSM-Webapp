@@ -47,6 +47,13 @@ const MEDIA_EXT_MIME: Record<string, string> = {
   gif: "image/gif",
 };
 
+// Supabase enforces a project-wide upload cap that overrides any per-bucket
+// setting (50 MB on the free plan). Anything above it fails with "exceeded
+// the maximum allowed size" — after the whole file has been sent. Flag it up
+// front instead so she doesn't waste minutes on a doomed upload.
+const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 50);
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i > 0 ? name.slice(i + 1).toLowerCase() : "";
@@ -131,6 +138,13 @@ export function UploadView({ personaId }: { personaId: string }) {
     }
     if (arr.length < all.length) {
       toast.warning(`${all.length - arr.length} file(s) skipped — not media`);
+    }
+    const tooBig = arr.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    if (tooBig.length > 0) {
+      toast.error(
+        `${tooBig.length} take(s) are over the ${MAX_UPLOAD_MB} MB limit and will fail — send those via Telegram`,
+        { duration: 8000 }
+      );
     }
     setFiles((prev) => [...prev, ...arr]);
   }, []);
@@ -388,7 +402,11 @@ export function UploadView({ personaId }: { personaId: string }) {
             {files.map((f, i) => (
               <li
                 key={i}
-                className="flex items-center gap-3 rounded-lg border border-border/40 bg-card px-3 py-2"
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                  f.size > MAX_UPLOAD_BYTES
+                    ? "border-red-500/50 bg-red-500/5"
+                    : "border-border/40 bg-card"
+                }`}
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted/50">
                   <Film className="h-4 w-4 text-muted-foreground" />
@@ -398,6 +416,11 @@ export function UploadView({ personaId }: { personaId: string }) {
                   <p className="truncate text-[10px] text-muted-foreground">
                     {f.name} · {(f.size / (1024 * 1024)).toFixed(1)} MB
                   </p>
+                  {f.size > MAX_UPLOAD_BYTES && (
+                    <p className="text-[10px] font-medium text-red-400">
+                      Too large — max {MAX_UPLOAD_MB} MB
+                    </p>
+                  )}
                 </div>
                 {!uploading && (
                   <button
