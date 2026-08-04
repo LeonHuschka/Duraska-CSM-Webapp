@@ -119,7 +119,11 @@
       "Bash(curl -s -o /dev/null -w '  -> %{http_code}\\\\n' -X POST https://duraska-csm-webapp.vercel.app/api/telegram/webhook -H 'content-type: application/json' -H 'x-telegram-bot-api-secret-token: wrong-on-purpose' -d '{}')",
       "Bash(curl -s -o /dev/null -w '  -> %{http_code}\\\\n' -X POST https://duraska-csm-webapp.vercel.app/api/telegram/webhook -H 'content-type: application/json' -d '{}')",
       "Bash(curl -s -o /dev/null -w '  content-check -> %{http_code}\\\\n' https://duraska-csm-webapp.vercel.app/api/cron/content-check)",
-      "Bash(curl -s -o /dev/null -w '  reports       -> %{http_code}\\\\n' https://duraska-csm-webapp.vercel.app/api/cron/reports)"
+      "Bash(curl -s -o /dev/null -w '  reports       -> %{http_code}\\\\n' https://duraska-csm-webapp.vercel.app/api/cron/reports)",
+      "mcp__claude-in-chrome__switch_browser",
+      "mcp__claude-in-chrome__browser_batch",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__tabs_create_mcp"
     ]
   }
 }
