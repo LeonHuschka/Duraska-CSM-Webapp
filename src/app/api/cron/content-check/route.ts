@@ -15,15 +15,21 @@ export const maxDuration = 60;
  * Scheduled job: verify inspo links are still live, and warn the group when
  * the content pipeline is about to run dry.
  *
- * On deleting dead links: Instagram blocks datacenter IPs and frequently
- * answers with a login wall or 429 instead of a real 404, so "looks dead"
- * is not proof. We therefore only auto-delete the Telegram message when the
- * check is *certain* (an explicit 404 / removed page) AND
- * TELEGRAM_DELETE_DEAD_LINKS is enabled. Otherwise the link is flagged in
- * the app for a human to judge.
+ * On deleting dead links: a link that is provably gone has its Telegram
+ * message deleted, so the topic only ever shows work that still exists.
+ * "Provably" is doing real work there — Instagram blocks datacenter IPs and
+ * frequently answers with a login wall or a 429 instead of a 404, and
+ * treating that as death would delete perfectly good links. So only an
+ * explicit 404 or a removed-post page counts; anything ambiguous leaves the
+ * link untouched to be re-checked on the next run.
  */
 
-const CHECK_BATCH = 25;
+// Every open link gets checked on every run, not a slice of them. Instagram
+// answers in about a second, so the run is bounded by fan-out plus a wall
+// clock the function can't outlive — whatever is left keeps its old
+// checked_at and therefore sorts to the front of the next run.
+const CHECK_CONCURRENCY = 8;
+const CHECK_BUDGET_MS = 40_000;
 
 export async function GET(req: Request) {
   // Vercel Cron sends this header; also allow a manual secret for testing.
@@ -36,6 +42,7 @@ export async function GET(req: Request) {
 
   const supabase = createAdminClient();
   const summary: Record<string, unknown> = {};
+  const deadline = Date.now() + CHECK_BUDGET_MS;
 
   const { data: configs } = await supabase
     .from("telegram_config")
@@ -44,7 +51,7 @@ export async function GET(req: Request) {
     );
 
   for (const cfg of configs ?? []) {
-    summary[cfg.persona_id] = await runForPersona(supabase, cfg);
+    summary[cfg.persona_id] = await runForPersona(supabase, cfg, deadline);
   }
 
   return NextResponse.json({ ok: true, summary });
@@ -66,52 +73,72 @@ type Cfg = {
 
 async function runForPersona(
   supabase: ReturnType<typeof createAdminClient>,
-  cfg: Cfg
+  cfg: Cfg,
+  deadline: number
 ) {
-  // ── 1. Availability check on the oldest unchecked open links ──
+  // ── 1. Availability check on every open link ──
   const { data: toCheck } = await supabase
     .from("content_links")
     .select("id, url, chat_id, message_id")
     .eq("persona_id", cfg.persona_id)
     .in("status", ["open", "shot"])
-    .order("checked_at", { ascending: true, nullsFirst: true })
-    .limit(CHECK_BATCH);
+    .order("checked_at", { ascending: true, nullsFirst: true });
 
+  const queue = [...(toCheck ?? [])];
   let dead = 0;
   let deleted = 0;
-  const allowDelete = process.env.TELEGRAM_DELETE_DEAD_LINKS === "true";
+  let checked = 0;
 
-  for (const link of toCheck ?? []) {
-    const { alive } = await checkInstagramAlive(link.url);
-    let nextStatus: string | undefined;
+  async function worker() {
+    for (;;) {
+      if (Date.now() > deadline) return;
+      const link = queue.shift();
+      if (!link) return;
 
-    // Only act when we're certain it's gone.
-    if (alive === false) {
-      nextStatus = "dead";
-      dead++;
-      if (allowDelete) {
+      const { alive } = await checkInstagramAlive(link.url);
+      checked++;
+      let nextStatus: string | undefined;
+
+      // `alive === null` means Instagram answered with a login wall, a 429
+      // or something else unreadable. That is not evidence, so the link is
+      // left exactly as it was and gets re-checked next run. Only a real
+      // 404 or a removed-post page counts as gone.
+      if (alive === false) {
+        nextStatus = "dead";
+        dead++;
         const res = await deleteMessage({
           chat_id: link.chat_id,
           message_id: Number(link.message_id),
         });
-        if (res.ok) deleted++;
-      } else {
-        await setMessageReaction({
-          chat_id: link.chat_id,
-          message_id: Number(link.message_id),
-          emoji: REACTION.dead,
-        });
+        if (res.ok) {
+          deleted++;
+        } else {
+          // Telegram refuses some deletions (too old, rights revoked).
+          // Mark it instead of letting it vanish from view silently.
+          await setMessageReaction({
+            chat_id: link.chat_id,
+            message_id: Number(link.message_id),
+            emoji: REACTION.dead,
+          });
+        }
       }
+
+      await supabase
+        .from("content_links")
+        .update({
+          checked_at: new Date().toISOString(),
+          link_ok: alive,
+          ...(nextStatus ? { status: nextStatus } : {}),
+        })
+        .eq("id", link.id);
     }
-    await supabase
-      .from("content_links")
-      .update({
-        checked_at: new Date().toISOString(),
-        link_ok: alive,
-        ...(nextStatus ? { status: nextStatus } : {}),
-      })
-      .eq("id", link.id);
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CHECK_CONCURRENCY, queue.length) }, worker)
+  );
+  // Say what was left rather than reporting a clean sweep that wasn't.
+  const unchecked = queue.length;
 
   // ── 2. Pipeline health ──
   const { data: links } = await supabase
@@ -159,7 +186,8 @@ async function runForPersona(
   }
 
   return {
-    checked: toCheck?.length ?? 0,
+    checked,
+    unchecked,
     dead,
     deleted,
     openLinks,
