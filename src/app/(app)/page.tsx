@@ -11,10 +11,13 @@ import {
   PlatformBadges,
 } from "@/components/dashboard/pipeline-donut";
 
+// One colour per pipeline stage, used by the stat boxes and the donut alike
+// so a number and its slice always read as the same thing.
 const TONES: Record<string, string> = {
   purple: "text-purple-400",
   emerald: "text-emerald-400",
   amber: "text-amber-400",
+  blue: "text-blue-400",
 };
 
 function StatBox({
@@ -170,8 +173,8 @@ export default async function DashboardPage({
 
     // Only the three stages she has any feel for.
     const pipeline = [
-      { label: "Open inspo", value: openLinks, color: "stroke-purple-400" },
-      { label: "Shot", value: toEdit, color: "stroke-blue-400" },
+      { label: "Open inspo", value: openLinks, color: "stroke-amber-400" },
+      { label: "Shot", value: toEdit, color: "stroke-purple-400" },
       { label: "Edited", value: readyToPost, color: "stroke-emerald-400" },
     ];
     const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
@@ -216,7 +219,7 @@ export default async function DashboardPage({
           <StatBox
             value={openLinks}
             label="To shoot"
-            tone="purple"
+            tone="amber"
             hint={
               newLinksThisWeek > 0 ? `${newLinksThisWeek} new this week` : "no new links"
             }
@@ -224,7 +227,7 @@ export default async function DashboardPage({
           <StatBox
             value={thisWeek}
             label="Shot this week"
-            tone="emerald"
+            tone="purple"
             hint={
               lastWeek === 0 && thisWeek === 0
                 ? "let's go 💪"
@@ -237,7 +240,7 @@ export default async function DashboardPage({
           />
           <div className="rounded-xl border border-border/50 bg-card p-3">
             <div className="flex items-start justify-between gap-1">
-              <p className="text-2xl font-semibold tabular-nums text-amber-400">
+              <p className="text-2xl font-semibold tabular-nums text-blue-400">
                 {liveAccounts}
               </p>
               <PlatformBadges counts={platformCounts} />
