@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
-import { setWebhook, getWebhookInfo } from "@/lib/telegram";
+import { setWebhook, getWebhookInfo, getMe } from "@/lib/telegram";
 
 export async function saveTelegramConfig(data: {
   chat_id: string;
@@ -82,6 +82,28 @@ export async function registerWebhook(baseUrl: string) {
     return { error: res.error ?? "setWebhook failed" };
   }
   return { error: null, url };
+}
+
+/**
+ * Ask Telegram who the configured token belongs to. Answers the one
+ * question that "Not Found" leaves open — is the token in the environment
+ * wrong, or is something else broken — without anyone having to read the
+ * secret out of the hosting dashboard.
+ */
+export async function testBotToken() {
+  await requireActivePersonaId();
+  const res = await getMe();
+  if (!res.ok) {
+    if (/not found/i.test(res.error ?? "")) {
+      return {
+        error:
+          "Telegram doesn't recognise this token. The value in TELEGRAM_BOT_TOKEN isn't a valid bot token — re-paste it and redeploy.",
+      };
+    }
+    return { error: res.error ?? "getMe failed" };
+  }
+  const me = res.result as { username?: string; first_name?: string };
+  return { error: null, username: me.username ?? me.first_name ?? "unknown" };
 }
 
 export async function webhookStatus() {

@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Activity,
+  KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import {
   saveTelegramConfig,
   registerWebhook,
   webhookStatus,
+  testBotToken,
 } from "@/app/(app)/settings/telegram/actions";
 import type { TelegramConfigRow } from "@/app/(app)/settings/telegram/page";
 
@@ -36,6 +38,7 @@ export function TelegramSettings({
   const [saving, setSaving] = useState(false);
   const [hooking, setHooking] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [f, setF] = useState({
     chat_id: config?.chat_id?.toString() ?? "",
@@ -71,6 +74,17 @@ export function TelegramSettings({
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestToken() {
+    setTesting(true);
+    try {
+      const res = await testBotToken();
+      if (res.error) toast.error(res.error, { duration: 10000 });
+      else toast.success(`Token OK — connected as @${res.username}`);
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -135,6 +149,20 @@ export function TelegramSettings({
               <Link2 className="h-3.5 w-3.5" />
             )}
             Register webhook
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleTestToken}
+            disabled={testing || !botConfigured}
+            className="gap-1.5"
+          >
+            {testing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <KeyRound className="h-3.5 w-3.5" />
+            )}
+            Test token
           </Button>
           <Button
             size="sm"

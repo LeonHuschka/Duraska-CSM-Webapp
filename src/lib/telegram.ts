@@ -116,6 +116,11 @@ export async function getWebhookInfo() {
   return call("getWebhookInfo", {});
 }
 
+/** Verify the configured token actually belongs to a live bot. */
+export async function getMe() {
+  return call<{ id: number; username?: string; first_name?: string }>("getMe", {});
+}
+
 // ─── Instagram link handling ────────────────────────────────────────────
 
 const IG_URL_RE =
