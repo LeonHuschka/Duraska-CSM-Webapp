@@ -2,8 +2,40 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
-import { Scissors, Archive, Upload, Send, Film, Eye, ArrowLeft } from "lucide-react";
+import { Scissors, Archive, Upload, Send, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import {
+  PipelineDonut,
+  WeekBars,
+} from "@/components/dashboard/pipeline-donut";
+
+const TONES: Record<string, string> = {
+  purple: "text-purple-400",
+  emerald: "text-emerald-400",
+  amber: "text-amber-400",
+};
+
+function StatBox({
+  value,
+  label,
+  hint,
+  tone,
+}: {
+  value: number;
+  label: string;
+  hint: string;
+  tone: keyof typeof TONES | string;
+}) {
+  return (
+    <div className="rounded-xl border border-border/50 bg-card p-3">
+      <p className={`text-2xl font-semibold tabular-nums ${TONES[tone] ?? ""}`}>
+        {value}
+      </p>
+      <p className="mt-0.5 text-[11px] font-medium leading-tight">{label}</p>
+      <p className="mt-1 text-[10px] leading-tight text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
 
 export default async function DashboardPage({
   searchParams,
@@ -66,24 +98,56 @@ export default async function DashboardPage({
   const isModel = active.role === "model";
   const previewingModel = !isModel && sp.view === "model";
   if (isModel || previewingModel) {
-    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const thisWeek =
-      requests?.filter((r) => new Date(r.created_at).getTime() >= weekAgo).length ?? 0;
-    const totalUploaded = requests?.length ?? 0;
+    const DAY = 24 * 60 * 60 * 1000;
+    const weekAgo = Date.now() - 7 * DAY;
+    const twoWeeksAgo = Date.now() - 14 * DAY;
+
+    const uploadTimes = (requests ?? []).map((r) =>
+      new Date(r.created_at).getTime()
+    );
+    const thisWeek = uploadTimes.filter((t) => t >= weekAgo).length;
+    const lastWeek = uploadTimes.filter(
+      (t) => t >= twoWeeksAgo && t < weekAgo
+    ).length;
+    const totalUploaded = uploadTimes.length;
+
+    // Uploads per day for the last 7 days (oldest → today).
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const weekDays = Array.from({ length: 7 }, (_, i) => {
+      const day = new Date();
+      day.setHours(0, 0, 0, 0);
+      day.setDate(day.getDate() - (6 - i));
+      const start = day.getTime();
+      const end = start + DAY;
+      return {
+        label: dayNames[day.getDay()],
+        value: uploadTimes.filter((t) => t >= start && t < end).length,
+      };
+    });
 
     // Inspo links from Telegram that still need her.
     const { data: links } = await supabase
       .from("content_links")
-      .select("status")
+      .select("status, posted_at")
       .eq("persona_id", personaId);
     const openLinks = (links ?? []).filter((l) => l.status === "open").length;
     const shotNotUploaded = (links ?? []).filter((l) => l.status === "shot").length;
-    const doneLinks = (links ?? []).filter((l) =>
-      ["uploaded", "edited"].includes(l.status)
+    const newLinksThisWeek = (links ?? []).filter(
+      (l) => new Date(l.posted_at).getTime() >= weekAgo
     ).length;
-    const totalLinks = openLinks + shotNotUploaded + doneLinks;
-    const donePct =
-      totalLinks > 0 ? Math.round((doneLinks / totalLinks) * 100) : 0;
+
+    const finished = readyToPost + posted;
+
+    // The full journey of a reel, from her point of view.
+    const pipeline = [
+      { label: "To shoot", value: openLinks, color: "stroke-purple-400" },
+      { label: "With the editor", value: toEdit, color: "stroke-blue-400" },
+      { label: "Ready to post", value: readyToPost, color: "stroke-emerald-400" },
+      { label: "Posted", value: posted, color: "stroke-amber-400" },
+    ];
+    const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
+
+    const trend = thisWeek - lastWeek;
 
     return (
       <div className="mx-auto max-w-md space-y-6">
@@ -110,73 +174,66 @@ export default async function DashboardPage({
           </p>
         </div>
 
-        {/* To-do — the number she can actually act on */}
-        <div className="rounded-2xl border border-border/50 bg-card p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Reels to shoot</span>
-            <div className="rounded-lg bg-purple-400/10 p-2">
-              <Film className="h-4 w-4 text-purple-400" />
-            </div>
-          </div>
-          <p className="mt-2 text-4xl font-semibold tracking-tight">{openLinks}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {openLinks === 0
-              ? "All caught up — amazing work 🎉"
-              : "Inspo links waiting in Telegram."}
-          </p>
-
-          {totalLinks > 0 && (
-            <div className="mt-4 space-y-1.5">
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-purple-400 to-emerald-400 transition-all"
-                  style={{ width: `${donePct}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {doneLinks} of {totalLinks} done ({donePct}%)
-              </p>
-            </div>
-          )}
-
-          {shotNotUploaded > 0 && (
-            <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-              📤 {shotNotUploaded} shot but not uploaded yet — send them over!
-            </p>
-          )}
+        {/* Three numbers she can act on, each with context */}
+        <div className="grid grid-cols-3 gap-2.5">
+          <StatBox
+            value={openLinks}
+            label="To shoot"
+            tone="purple"
+            hint={
+              newLinksThisWeek > 0 ? `${newLinksThisWeek} new this week` : "no new links"
+            }
+          />
+          <StatBox
+            value={thisWeek}
+            label="Shot this week"
+            tone="emerald"
+            hint={
+              lastWeek === 0 && thisWeek === 0
+                ? "let's go 💪"
+                : trend > 0
+                  ? `▲ ${trend} vs last week`
+                  : trend < 0
+                    ? `▼ ${Math.abs(trend)} vs last week`
+                    : "same as last week"
+            }
+          />
+          <StatBox
+            value={finished}
+            label="Finished"
+            tone="amber"
+            hint={`${totalUploaded} all time`}
+          />
         </div>
 
-        {/* Buffer at the editor */}
-        <div className="rounded-2xl border border-border/50 bg-card p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Waiting to be cut</span>
-            <div className="rounded-lg bg-blue-400/10 p-2">
-              <Scissors className="h-4 w-4 text-blue-400" />
-            </div>
-          </div>
-          <p className="mt-2 text-4xl font-semibold tracking-tight">{toEdit}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {toEdit === 0
-              ? "Nothing in the queue right now."
-              : "Your editor is working through these."}
+        {openLinks === 0 && (
+          <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-300">
+            🎉 No open links — you&apos;re fully caught up!
           </p>
-        </div>
+        )}
+        {shotNotUploaded > 0 && (
+          <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+            📤 {shotNotUploaded} reel{shotNotUploaded === 1 ? "" : "s"} marked as shot
+            but not uploaded yet — send them over!
+          </p>
+        )}
 
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <p className="text-2xl font-semibold tracking-tight">{thisWeek}</p>
-            <span className="text-xs text-muted-foreground">This week</span>
+        {/* Where everything sits right now */}
+        {pipelineTotal > 0 && (
+          <div className="rounded-2xl border border-border/50 bg-card p-5">
+            <h2 className="mb-4 text-sm font-medium">Your pipeline</h2>
+            <PipelineDonut
+              segments={pipeline}
+              centerLabel="reels"
+              centerValue={pipelineTotal}
+            />
           </div>
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <p className="text-2xl font-semibold tracking-tight">
-              {readyToPost + posted}
-            </p>
-            <span className="text-xs text-muted-foreground">Finished</span>
-          </div>
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <p className="text-2xl font-semibold tracking-tight">{totalUploaded}</p>
-            <span className="text-xs text-muted-foreground">All time</span>
-          </div>
+        )}
+
+        {/* Consistency beats bursts — show the rhythm */}
+        <div className="rounded-2xl border border-border/50 bg-card p-5">
+          <h2 className="mb-4 text-sm font-medium">Last 7 days</h2>
+          <WeekBars days={weekDays} />
         </div>
 
         <Link href="/upload" className="block">
