@@ -48,10 +48,22 @@ export default async function TelegramSettingsPage() {
     .eq("persona_id", personaId)
     .eq("status", "open");
 
+  // Links nobody has touched in a fortnight are usually dead or forgotten.
+  // Nothing else surfaces them, so they quietly inflate the backlog and the
+  // model's "to shoot" number along with it.
+  const staleBefore = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const { count: staleLinks } = await supabase
+    .from("content_links")
+    .select("id", { count: "exact", head: true })
+    .eq("persona_id", personaId)
+    .eq("status", "open")
+    .lt("posted_at", staleBefore.toISOString());
+
   return (
     <TelegramSettings
       config={(data as TelegramConfigRow) ?? null}
       openLinks={openLinks ?? 0}
+      staleLinks={staleLinks ?? 0}
       botConfigured={!!process.env.TELEGRAM_BOT_TOKEN}
       isOwner={isOwner}
     />

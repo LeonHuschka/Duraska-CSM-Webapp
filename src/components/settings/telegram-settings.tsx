@@ -30,11 +30,13 @@ import type { TelegramConfigRow } from "@/app/(app)/settings/telegram/page";
 export function TelegramSettings({
   config,
   openLinks,
+  staleLinks,
   botConfigured,
   isOwner,
 }: {
   config: TelegramConfigRow | null;
   openLinks: number;
+  staleLinks: number;
   botConfigured: boolean;
   isOwner: boolean;
 }) {
@@ -251,6 +253,11 @@ export function TelegramSettings({
           </Button>
           <span className="text-xs text-muted-foreground">
             {openLinks} open inspo links tracked
+            {staleLinks > 0 && (
+              <span className="text-amber-400">
+                {" "}· {staleLinks} untouched for 2+ weeks
+              </span>
+            )}
           </span>
         </div>
 
@@ -342,6 +349,18 @@ export function TelegramSettings({
             the bot replies with the chat and topic ID.</li>
           <li>Do the same inside <b>TALK / INSTRUCTIONS</b> for that topic ID.</li>
           <li>Paste them below and save.</li>
+        </ol>
+        <p className="mt-3 text-[11px] font-medium">In the group</p>
+        <ol className="mt-1 space-y-1 text-[11px] text-muted-foreground [&>li]:list-decimal [&>li]:ml-4">
+          <li>
+            Any reaction on an inspo link = <b>filmed</b>.
+          </li>
+          <li>
+            💔 = <b>the post is gone</b>. The bot deletes the message and drops
+            the link. Instagram shows this server the same login wall whether a
+            reel exists or not, so a person who opened it is the only reliable
+            judge.
+          </li>
         </ol>
         <p className="mt-2 text-[11px] text-muted-foreground/70">
           If <code>/id</code> stays silent, hit <b>Check status</b> above — it

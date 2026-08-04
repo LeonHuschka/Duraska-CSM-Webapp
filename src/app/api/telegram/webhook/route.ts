@@ -6,6 +6,8 @@ import {
   sendMessage,
   downloadFile,
   setMessageReaction,
+  deleteMessage,
+  REACTION,
 } from "@/lib/telegram";
 import { extractMetricsFromImage } from "@/lib/vision";
 
@@ -316,6 +318,39 @@ async function handleReaction(r: TgReactionUpdate) {
     .maybeSingle();
   if (!link) return;
 
+  // 💔 means "I opened this and the post is gone".
+  //
+  // The automated check can't establish that: Instagram shows a datacenter
+  // IP the same login wall whether a reel exists or not, so a removed post
+  // and a live one are indistinguishable from the server. A person who
+  // clicked the link knows for certain, and this turns that knowledge into
+  // the cleanup — no dashboard, no ticket, one reaction.
+  if (r.new_reaction.some((x) => x.emoji === REACTION.dead)) {
+    // Only while nothing has been produced from it. Once takes exist the
+    // message is the trail back to them and must stay.
+    if (link.status !== "open" && link.status !== "shot") return;
+
+    await supabase
+      .from("content_links")
+      .update({
+        status: "dead",
+        link_ok: false,
+        checked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", link.id);
+
+    const res = await deleteMessage({
+      chat_id: r.chat.id,
+      message_id: r.message_id,
+    });
+    if (!res.ok) {
+      console.log("[telegram] could not delete dead link message", res.error);
+    }
+    return;
+  }
+
+  // Any other reaction means the model has filmed it.
   // Don't walk the status backwards once it's further along.
   if (link.status !== "open") return;
 
