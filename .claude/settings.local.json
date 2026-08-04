@@ -105,7 +105,12 @@
       "mcp__claude-in-chrome__select_browser",
       "mcp__claude-in-chrome__tabs_context_mcp",
       "mcp__claude-in-chrome__navigate",
-      "Bash(awk '/^      accounts: \\\\{/,/^      warmup_slots: \\\\{/' src/lib/types/database.ts)"
+      "Bash(awk '/^      accounts: \\\\{/,/^      warmup_slots: \\\\{/' src/lib/types/database.ts)",
+      "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/login\" -o /tmp/dep.html -w \"%{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"page-203c90f526a9134f.js -> %{http_code}\\\\n\" \"https://duraska-csm-webapp.vercel.app/_next/static/chunks/app/\\(app\\)/page-203c90f526a9134f.js\")",
+      "Bash(node -e \"try{require.resolve\\('server-only'\\);console.log\\('resolves OK'\\)}catch\\(e\\){console.log\\('❌ '+e.code\\)}\")",
+      "Bash(node -e \"const p=require\\('./node_modules/next/package.json'\\); console.log\\('next deps incl server-only?', Object.keys\\(p.dependencies||{}\\).filter\\(d=>/server-only|client-only/.test\\(d\\)\\)\\)\")"
     ]
   }
 }
