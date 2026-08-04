@@ -173,6 +173,10 @@ export async function checkInstagramAlive(
       `https://www.instagram.com/p/${code}/embed/captioned/`,
       {
         redirect: "follow",
+        // Instagram tarpits datacenter IPs: it accepts the connection and
+        // then simply never answers. Without this the cron's workers all
+        // sit waiting until the function is killed.
+        signal: AbortSignal.timeout(8000),
         headers: {
           "user-agent":
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
@@ -198,9 +202,14 @@ export async function checkInstagramAlive(
     }
     return { alive: null, reason: "unrecognised embed response" };
   } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
     return {
       alive: null,
-      reason: err instanceof Error ? err.message : "fetch failed",
+      reason: timedOut
+        ? "no answer within 8s"
+        : err instanceof Error
+          ? err.message
+          : "fetch failed",
     };
   }
 }
