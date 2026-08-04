@@ -13,6 +13,7 @@ export interface TelegramConfigRow {
   min_ready_to_post: number;
   min_open_links: number;
   max_unedited: number;
+  weekly_reel_target: number | null;
 }
 
 export default async function TelegramSettingsPage() {
@@ -25,10 +26,21 @@ export default async function TelegramSettingsPage() {
   const { data } = await supabase
     .from("telegram_config")
     .select(
-      "chat_id, requests_thread_id, talk_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited"
+      "chat_id, requests_thread_id, talk_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, weekly_reel_target"
     )
     .eq("persona_id", personaId)
     .maybeSingle();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: membership } = await supabase
+    .from("persona_members")
+    .select("role")
+    .eq("persona_id", personaId)
+    .eq("user_id", user?.id ?? "")
+    .maybeSingle();
+  const isOwner = membership?.role === "owner";
 
   const { count: openLinks } = await supabase
     .from("content_links")
@@ -41,6 +53,7 @@ export default async function TelegramSettingsPage() {
       config={(data as TelegramConfigRow) ?? null}
       openLinks={openLinks ?? 0}
       botConfigured={!!process.env.TELEGRAM_BOT_TOKEN}
+      isOwner={isOwner}
     />
   );
 }

@@ -622,6 +622,7 @@ export type Database = {
           min_open_links: number;
           max_unedited: number;
           last_alert_at: string | null;
+          weekly_reel_target: number | null;
           reports_thread_id: number | null;
           last_daily_report_at: string | null;
           last_weekly_report_at: string | null;
@@ -641,6 +642,7 @@ export type Database = {
           min_open_links?: number;
           max_unedited?: number;
           last_alert_at?: string | null;
+          weekly_reel_target?: number | null;
           reports_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
@@ -660,6 +662,7 @@ export type Database = {
           min_open_links?: number;
           max_unedited?: number;
           last_alert_at?: string | null;
+          weekly_reel_target?: number | null;
           reports_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;

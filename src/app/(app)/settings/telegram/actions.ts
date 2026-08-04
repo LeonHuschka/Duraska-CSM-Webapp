@@ -16,6 +16,7 @@ export async function saveTelegramConfig(data: {
   min_ready_to_post: number;
   min_open_links: number;
   max_unedited: number;
+  weekly_reel_target: string;
 }) {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
@@ -25,6 +26,17 @@ export async function saveTelegramConfig(data: {
     return v.trim() === "" || Number.isNaN(n) ? null : n;
   };
   const str = (v: string) => (v.trim() === "" ? null : v.trim().replace(/^@/, ""));
+
+  // The weekly goal drives what the model is measured against — owners only.
+  const { data: membership } = await supabase
+    .from("persona_members")
+    .select("role")
+    .eq("persona_id", personaId)
+    .eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "")
+    .maybeSingle();
+  if (data.weekly_reel_target.trim() !== "" && membership?.role !== "owner") {
+    return { error: "Only the owner can set the weekly goal" };
+  }
 
   const { error } = await supabase.from("telegram_config").upsert(
     {
@@ -39,6 +51,8 @@ export async function saveTelegramConfig(data: {
       min_ready_to_post: data.min_ready_to_post,
       min_open_links: data.min_open_links,
       max_unedited: data.max_unedited,
+      // Empty clears the override and falls back to the derived target.
+      weekly_reel_target: num(data.weekly_reel_target),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "persona_id" }

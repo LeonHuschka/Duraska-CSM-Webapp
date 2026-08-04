@@ -17,10 +17,12 @@ export function TelegramSettings({
   config,
   openLinks,
   botConfigured,
+  isOwner,
 }: {
   config: TelegramConfigRow | null;
   openLinks: number;
   botConfigured: boolean;
+  isOwner: boolean;
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -36,6 +38,7 @@ export function TelegramSettings({
     min_ready_to_post: config?.min_ready_to_post ?? 6,
     min_open_links: config?.min_open_links ?? 10,
     max_unedited: config?.max_unedited ?? 15,
+    weekly_reel_target: config?.weekly_reel_target?.toString() ?? "",
   });
 
   const set = (k: keyof typeof f, v: string | number) =>
@@ -143,6 +146,28 @@ export function TelegramSettings({
           <Field label="Manager @" value={f.manager_username} onChange={(v) => set("manager_username", v)} placeholder="username" />
         </div>
       </div>
+
+      {/* Weekly goal — owner only, it's what the model is measured against */}
+      {isOwner && (
+        <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4">
+          <div>
+            <h2 className="text-sm font-medium">Model&apos;s weekly goal</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              How many reels she should shoot per week. Leave empty to derive it
+              automatically from live accounts × posts per day × 7.
+            </p>
+          </div>
+          <div className="sm:max-w-[200px]">
+            <Field
+              label="Reels per week"
+              type="number"
+              value={f.weekly_reel_target}
+              onChange={(v) => set("weekly_reel_target", v)}
+              placeholder="auto"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Thresholds */}
       <div className="space-y-4 rounded-xl border border-border/50 bg-card p-4">

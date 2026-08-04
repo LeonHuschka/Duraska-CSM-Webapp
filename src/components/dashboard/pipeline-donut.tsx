@@ -89,6 +89,81 @@ export function PipelineDonut({
 }
 
 /**
+ * Overlapping platform badges with the live-account count hanging off the
+ * edge of each — so "how many accounts am I feeding" is readable without
+ * counting rows in settings.
+ */
+export function PlatformBadges({
+  counts,
+}: {
+  counts: { platform: string; count: number }[];
+}) {
+  const shown = counts.filter((c) => c.count > 0);
+  if (shown.length === 0) return null;
+
+  return (
+    <div className="flex items-center pl-1">
+      {shown.map((c, i) => (
+        <div
+          key={c.platform}
+          className={`relative ${i > 0 ? "-ml-2" : ""}`}
+          style={{ zIndex: shown.length - i }}
+          title={`${c.count} ${c.platform} account${c.count === 1 ? "" : "s"}`}
+        >
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-card ${
+              PLATFORM_STYLE[c.platform]?.bg ?? "bg-gray-500"
+            }`}
+          >
+            <PlatformGlyph platform={c.platform} />
+          </span>
+          <span className="absolute -bottom-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-background px-[3px] text-[8px] font-bold leading-none tabular-nums text-foreground ring-1 ring-border">
+            {c.count}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const PLATFORM_STYLE: Record<string, { bg: string }> = {
+  instagram: { bg: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400" },
+  facebook: { bg: "bg-[#1877F2]" },
+  tiktok: { bg: "bg-black" },
+  x: { bg: "bg-neutral-800" },
+};
+
+function PlatformGlyph({ platform }: { platform: string }) {
+  const cls = "h-3.5 w-3.5 fill-white";
+  if (platform === "instagram") {
+    return (
+      <svg viewBox="0 0 24 24" className={cls} aria-label="Instagram">
+        <path d="M12 2.2c3.2 0 3.6 0 4.9.1 1.2.1 1.8.3 2.2.4.6.2 1 .5 1.4.9.4.4.7.8.9 1.4.2.4.4 1 .4 2.2.1 1.3.1 1.7.1 4.9s0 3.6-.1 4.9c-.1 1.2-.3 1.8-.4 2.2-.2.6-.5 1-.9 1.4-.4.4-.8.7-1.4.9-.4.2-1 .4-2.2.4-1.3.1-1.7.1-4.9.1s-3.6 0-4.9-.1c-1.2-.1-1.8-.3-2.2-.4-.6-.2-1-.5-1.4-.9-.4-.4-.7-.8-.9-1.4-.2-.4-.4-1-.4-2.2C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.9c.1-1.2.3-1.8.4-2.2.2-.6.5-1 .9-1.4.4-.4.8-.7 1.4-.9.4-.2 1-.4 2.2-.4C8.4 2.2 8.8 2.2 12 2.2m0 6a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6m0 6.3a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5m4-6.5a.9.9 0 1 0 0-1.8.9.9 0 0 0 0 1.8" />
+      </svg>
+    );
+  }
+  if (platform === "facebook") {
+    return (
+      <svg viewBox="0 0 24 24" className={cls} aria-label="Facebook">
+        <path d="M13.5 21v-8h2.7l.4-3.1h-3.1V7.9c0-.9.25-1.5 1.55-1.5h1.65V3.6c-.3 0-1.28-.1-2.42-.1-2.4 0-4.05 1.47-4.05 4.16V9.9H7.5V13h2.73v8z" />
+      </svg>
+    );
+  }
+  if (platform === "tiktok") {
+    return (
+      <svg viewBox="0 0 24 24" className={cls} aria-label="TikTok">
+        <path d="M16.6 5.8a4.3 4.3 0 0 1-1-2.8h-3v12.1a2.4 2.4 0 1 1-1.7-2.3V9.7a5.4 5.4 0 1 0 4.7 5.4V9.4a7.2 7.2 0 0 0 4.2 1.3V7.7a4.3 4.3 0 0 1-3.2-1.9" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className={cls} aria-label="X">
+      <path d="M17.5 3h3l-6.6 7.5L21.7 21h-6l-4.7-6.1L5.6 21h-3l7-8L2.6 3h6.2l4.2 5.6zm-1.1 16.2h1.7L8.1 4.7H6.3z" />
+    </svg>
+  );
+}
+
+/**
  * Weekly goal ring — how much of the week's minimum she has shot already.
  * The minimum is driven by how many accounts are live, since a reel can
  * only be posted once.
@@ -97,10 +172,13 @@ export function WeeklyGoal({
   done,
   target,
   liveAccounts,
+  manual = false,
 }: {
   done: number;
   target: number;
   liveAccounts: number;
+  /** true when an owner set the target by hand rather than deriving it */
+  manual?: boolean;
 }) {
   const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
   const R = 46;
@@ -158,7 +236,9 @@ export function WeeklyGoal({
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{message}</p>
           <p className="mt-2 text-[10px] text-muted-foreground/70">
-            Based on {liveAccounts} live account{liveAccounts === 1 ? "" : "s"}
+            {manual
+              ? "Weekly goal set by your manager"
+              : `Based on ${liveAccounts} live account${liveAccounts === 1 ? "" : "s"}`}
           </p>
         </div>
       </div>

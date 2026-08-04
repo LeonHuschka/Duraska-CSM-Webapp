@@ -8,6 +8,7 @@ import {
   PipelineDonut,
   WeekBars,
   WeeklyGoal,
+  PlatformBadges,
 } from "@/components/dashboard/pipeline-donut";
 
 const TONES: Record<string, string> = {
@@ -140,18 +141,32 @@ export default async function DashboardPage({
     // only be posted once, so every live account raises what she has to shoot.
     const { data: liveAccountRows } = await supabase
       .from("accounts")
-      .select("id")
+      .select("id, platform")
       .eq("persona_id", personaId)
       .not("status", "in", '("dead","paused")');
     const liveAccounts = liveAccountRows?.length ?? 0;
 
+    // Per-platform counts for the little overlapping badges.
+    const platformOrder = ["instagram", "facebook", "tiktok", "x"];
+    const platformCounts = platformOrder
+      .map((p) => ({
+        platform: p,
+        count: (liveAccountRows ?? []).filter((a) => a.platform === p).length,
+      }))
+      .filter((p) => p.count > 0);
+
     const { data: tgCfg } = await supabase
       .from("telegram_config")
-      .select("posts_per_day")
+      .select("posts_per_day, weekly_reel_target")
       .eq("persona_id", personaId)
       .maybeSingle();
     const postsPerDay = tgCfg?.posts_per_day ?? 2;
-    const weeklyTarget = Math.max(1, liveAccounts * postsPerDay * 7);
+    // A manually set target wins over the account-derived one.
+    const manualTarget = tgCfg?.weekly_reel_target ?? null;
+    const weeklyTarget =
+      manualTarget && manualTarget > 0
+        ? manualTarget
+        : Math.max(1, liveAccounts * postsPerDay * 7);
 
     // Only the three stages she has any feel for.
     const pipeline = [
@@ -193,6 +208,7 @@ export default async function DashboardPage({
           done={thisWeek}
           target={weeklyTarget}
           liveAccounts={liveAccounts}
+          manual={!!manualTarget && manualTarget > 0}
         />
 
         {/* Three numbers she can act on, each with context */}
@@ -219,12 +235,20 @@ export default async function DashboardPage({
                     : "same as last week"
             }
           />
-          <StatBox
-            value={liveAccounts}
-            label="Live accounts"
-            tone="amber"
-            hint={`${postsPerDay}× a day each`}
-          />
+          <div className="rounded-xl border border-border/50 bg-card p-3">
+            <div className="flex items-start justify-between gap-1">
+              <p className="text-2xl font-semibold tabular-nums text-amber-400">
+                {liveAccounts}
+              </p>
+              <PlatformBadges counts={platformCounts} />
+            </div>
+            <p className="mt-0.5 text-[11px] font-medium leading-tight">
+              Live accounts
+            </p>
+            <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
+              {postsPerDay}× a day each
+            </p>
+          </div>
         </div>
 
         {openLinks === 0 && (
