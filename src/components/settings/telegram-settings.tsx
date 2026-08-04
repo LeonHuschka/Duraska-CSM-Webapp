@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Activity,
   KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import {
   registerWebhook,
   webhookStatus,
   testBotToken,
+  auditEnv,
 } from "@/app/(app)/settings/telegram/actions";
 import type { TelegramConfigRow } from "@/app/(app)/settings/telegram/page";
 
@@ -40,6 +42,10 @@ export function TelegramSettings({
   const [checking, setChecking] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [env, setEnv] = useState<
+    { name: string; ok: boolean; detail: string }[] | null
+  >(null);
   const [f, setF] = useState({
     chat_id: config?.chat_id?.toString() ?? "",
     requests_thread_id: config?.requests_thread_id?.toString() ?? "",
@@ -100,6 +106,19 @@ export function TelegramSettings({
       }
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function handleAudit() {
+    setAuditing(true);
+    try {
+      const res = await auditEnv();
+      setEnv(res.checks ?? null);
+      const broken = (res.checks ?? []).filter((c) => !c.ok).length;
+      if (broken === 0) toast.success("All secrets check out");
+      else toast.error(`${broken} of ${res.checks?.length} secrets are wrong`);
+    } finally {
+      setAuditing(false);
     }
   }
 
@@ -178,10 +197,44 @@ export function TelegramSettings({
             )}
             Check status
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAudit}
+            disabled={auditing}
+            className="gap-1.5"
+          >
+            {auditing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            )}
+            Check secrets
+          </Button>
           <span className="text-xs text-muted-foreground">
             {openLinks} open inspo links tracked
           </span>
         </div>
+
+        {/* Every secret here is write-only once it's in the host. Without
+            this, a pasted instruction line is indistinguishable from a key. */}
+        {env && (
+          <dl className="mt-3 space-y-1 rounded-lg bg-muted/30 p-3 text-[11px]">
+            {env.map((c) => (
+              <div key={c.name} className="flex items-start gap-2">
+                {c.ok ? (
+                  <CheckCircle2 className="mt-px h-3 w-3 shrink-0 text-green-400" />
+                ) : (
+                  <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-amber-400" />
+                )}
+                <code className="shrink-0 text-muted-foreground">{c.name}</code>
+                <span className={c.ok ? "text-muted-foreground" : "text-amber-300"}>
+                  {c.detail}
+                </span>
+              </div>
+            ))}
+          </dl>
+        )}
 
         {/* Telegram's own view of the webhook — the fastest way to see why
             nothing is arriving (wrong URL, no webhook, delivery errors). */}

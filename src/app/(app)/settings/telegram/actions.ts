@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { setWebhook, getWebhookInfo, getMe } from "@/lib/telegram";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function saveTelegramConfig(data: {
   chat_id: string;
@@ -111,4 +112,112 @@ export async function webhookStatus() {
   const res = await getWebhookInfo();
   if (!res.ok) return { error: res.error ?? "failed" };
   return { error: null, info: res.result as Record<string, unknown> };
+}
+
+/**
+ * Are the deployment's secrets real, or is a setup instruction sitting in
+ * the field?
+ *
+ * Two of these were pasted from a table where the value column read
+ * "Supabase → Settings → API" — which looks configured from every angle:
+ * the variable exists, the dashboard shows it as set, and the failure is a
+ * silent early return three layers down. So check the shape, and where a
+ * cheap call exists, ask the provider directly.
+ *
+ * Reports verdicts only. No value, or part of one, is ever returned.
+ */
+export async function auditEnv() {
+  await requireActivePersonaId();
+
+  const checks: { name: string; ok: boolean; detail: string }[] = [];
+
+  const inspect = (
+    name: string,
+    shape: RegExp,
+    expected: string
+  ): string | null => {
+    const raw = process.env[name];
+    if (!raw) {
+      checks.push({ name, ok: false, detail: "not set" });
+      return null;
+    }
+    // A header value has to be Latin-1. Anything else throws inside fetch
+    // long before a request goes out, which is what made this invisible.
+    let bad = -1;
+    for (let i = 0; i < raw.length; i++) {
+      if (raw.charCodeAt(i) > 255) {
+        bad = i;
+        break;
+      }
+    }
+    if (bad !== -1) {
+      checks.push({
+        name,
+        ok: false,
+        detail: `contains a non-ASCII character at position ${bad + 1} — this is prose, not a key`,
+      });
+      return null;
+    }
+    if (raw !== raw.trim()) {
+      checks.push({ name, ok: false, detail: "has leading or trailing whitespace" });
+      return null;
+    }
+    if (/\s/.test(raw)) {
+      checks.push({ name, ok: false, detail: "contains spaces — looks like a sentence" });
+      return null;
+    }
+    if (!shape.test(raw)) {
+      checks.push({ name, ok: false, detail: `wrong format — expected ${expected}` });
+      return null;
+    }
+    checks.push({ name, ok: true, detail: "looks right" });
+    return raw;
+  };
+
+  inspect("TELEGRAM_BOT_TOKEN", /^\d{6,}:[A-Za-z0-9_-]{30,}$/, "123456:AA…");
+  // Telegram rejects a secret_token outside this alphabet at setWebhook.
+  inspect("TELEGRAM_WEBHOOK_SECRET", /^[A-Za-z0-9_-]{8,256}$/, "8–256 chars of A–Z a–z 0–9 _ -");
+  inspect("CRON_SECRET", /^\S{8,}$/, "at least 8 non-space characters");
+  const supabaseKey = inspect(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    /^(sb_secret_[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_.-]{20,})$/,
+    "sb_secret_… or a service_role JWT"
+  );
+  const anthropicKey = inspect("ANTHROPIC_API_KEY", /^sk-ant-[A-Za-z0-9_-]{20,}$/, "sk-ant-…");
+
+  // Shape is necessary but not sufficient — a revoked or mistyped key has
+  // the right shape. Ask the two providers that answer cheaply.
+  if (supabaseKey) {
+    try {
+      const supabase = createAdminClient();
+      const { error } = await supabase.from("telegram_config").select("persona_id").limit(1);
+      const i = checks.findIndex((c) => c.name === "SUPABASE_SERVICE_ROLE_KEY");
+      checks[i] = error
+        ? { name: checks[i].name, ok: false, detail: `rejected by Supabase: ${error.message}` }
+        : { name: checks[i].name, ok: true, detail: "verified — read the database" };
+    } catch (err) {
+      const i = checks.findIndex((c) => c.name === "SUPABASE_SERVICE_ROLE_KEY");
+      checks[i] = {
+        name: checks[i].name,
+        ok: false,
+        detail: err instanceof Error ? err.message : "client failed",
+      };
+    }
+  }
+
+  if (anthropicKey) {
+    const i = checks.findIndex((c) => c.name === "ANTHROPIC_API_KEY");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+        headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+      });
+      checks[i] = res.ok
+        ? { name: checks[i].name, ok: true, detail: "verified — Anthropic accepted it" }
+        : { name: checks[i].name, ok: false, detail: `Anthropic answered ${res.status}` };
+    } catch {
+      checks[i] = { name: checks[i].name, ok: false, detail: "could not reach Anthropic" };
+    }
+  }
+
+  return { error: null, checks };
 }
