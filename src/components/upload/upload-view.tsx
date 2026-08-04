@@ -51,8 +51,15 @@ const MEDIA_EXT_MIME: Record<string, string> = {
 // setting (50 MB on the free plan). Anything above it fails with "exceeded
 // the maximum allowed size" — after the whole file has been sent. Flag it up
 // front instead so she doesn't waste minutes on a doomed upload.
-const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 200);
+// Must match the Supabase bucket / project Storage limit (currently 2 GB).
+// If this is lower than the server's limit we reject files the server would
+// happily accept; if it's higher she waits out a doomed upload.
+const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 2048);
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+// Not a limit — just the point where a single-request upload gets slow
+// enough on a phone that she deserves a heads-up.
+const SLOW_UPLOAD_BYTES = 300 * 1024 * 1024;
 
 type FileState = {
   status: "pending" | "uploading" | "done" | "error";
@@ -180,6 +187,15 @@ export function UploadView({ personaId }: { personaId: string }) {
       toast.error(
         `${tooBig.length} take(s) are over the ${MAX_UPLOAD_MB} MB limit and will fail — send those via Telegram`,
         { duration: 8000 }
+      );
+    }
+    const slow = arr.filter(
+      (f) => f.size <= MAX_UPLOAD_BYTES && f.size > SLOW_UPLOAD_BYTES
+    );
+    if (slow.length > 0) {
+      toast.warning(
+        `${slow.length} big take(s) — keep this page open while they upload`,
+        { duration: 6000 }
       );
     }
     setFiles((prev) => [...prev, ...arr]);
@@ -498,11 +514,15 @@ export function UploadView({ personaId }: { personaId: string }) {
                   <p className="truncate text-[10px] text-muted-foreground">
                     {f.name} · {(f.size / (1024 * 1024)).toFixed(1)} MB
                   </p>
-                  {f.size > MAX_UPLOAD_BYTES && (
+                  {f.size > MAX_UPLOAD_BYTES ? (
                     <p className="text-[10px] font-medium text-red-400">
                       Too large — max {MAX_UPLOAD_MB} MB
                     </p>
-                  )}
+                  ) : f.size > SLOW_UPLOAD_BYTES ? (
+                    <p className="text-[10px] font-medium text-amber-400">
+                      Big file — this one takes a while
+                    </p>
+                  ) : null}
                 </div>
                 {!uploading && (
                   <button
