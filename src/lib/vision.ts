@@ -1,0 +1,178 @@
+import "server-only";
+
+/**
+ * Read the numbers off an account screenshot with Claude's vision model.
+ *
+ * The model is forced through a tool schema so we get typed JSON back
+ * rather than prose we'd have to parse. Every numeric field is optional —
+ * a screenshot only shows some of them, and inventing the rest would be
+ * worse than leaving them null.
+ */
+
+export interface ExtractedMetrics {
+  handle: string | null;
+  platform: string | null;
+  metric_kind: "profile" | "post" | "story" | "reel" | "unknown";
+  period: string | null;
+  followers: number | null;
+  follows: number | null;
+  posts_count: number | null;
+  views: number | null;
+  reach: number | null;
+  impressions: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  profile_visits: number | null;
+  confidence: number;
+  notes: string | null;
+}
+
+const TOOL = {
+  name: "record_metrics",
+  description:
+    "Record the account statistics visible in the screenshot. Only fill a field if the number is actually visible; leave it null otherwise.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      handle: {
+        type: ["string", "null"],
+        description: "Account handle without the @, if visible",
+      },
+      platform: {
+        type: ["string", "null"],
+        description: "instagram, facebook, tiktok or x, if identifiable",
+      },
+      metric_kind: {
+        type: "string",
+        enum: ["profile", "post", "story", "reel", "unknown"],
+        description:
+          "profile = account overview/insights, post/reel/story = stats of a single piece of content",
+      },
+      period: {
+        type: ["string", "null"],
+        description: "Time range shown, e.g. 'last 7 days', 'last 30 days', 'lifetime'",
+      },
+      followers: { type: ["integer", "null"] },
+      follows: { type: ["integer", "null"] },
+      posts_count: { type: ["integer", "null"] },
+      views: { type: ["integer", "null"] },
+      reach: { type: ["integer", "null"] },
+      impressions: { type: ["integer", "null"] },
+      likes: { type: ["integer", "null"] },
+      comments: { type: ["integer", "null"] },
+      shares: { type: ["integer", "null"] },
+      saves: { type: ["integer", "null"] },
+      profile_visits: { type: ["integer", "null"] },
+      confidence: {
+        type: "number",
+        description:
+          "0..1 — how sure you are the numbers were read correctly. Use <0.6 if the image is blurry, cropped or ambiguous.",
+      },
+      notes: {
+        type: ["string", "null"],
+        description: "Anything odd worth a human glance",
+      },
+    },
+    required: ["metric_kind", "confidence"],
+  },
+};
+
+const SYSTEM = `You read social-media analytics screenshots and extract the numbers.
+
+Rules:
+- Only report numbers that are actually visible. Never estimate or infer.
+- Expand abbreviated counts: "12.4K" -> 12400, "1.2M" -> 1200000, "1,234" -> 1234.
+- German UI is common: Follower=followers, Gefolgt=follows, Beiträge=posts_count,
+  Aufrufe/Wiedergaben=views, Reichweite=reach, Impressionen=impressions,
+  "Gefällt mir"=likes, Kommentare=comments, Geteilt=shares, Gespeichert=saves,
+  Profilaufrufe=profile_visits.
+- If the image is not an analytics screenshot at all, set metric_kind="unknown"
+  and confidence=0.`;
+
+export async function extractMetricsFromImage(
+  imageBase64: string,
+  mediaType: string
+): Promise<{ data: ExtractedMetrics | null; error?: string }> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { data: null, error: "ANTHROPIC_API_KEY not set" };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_VISION_MODEL ?? "claude-sonnet-5",
+        max_tokens: 1024,
+        system: SYSTEM,
+        tools: [TOOL],
+        tool_choice: { type: "tool", name: "record_metrics" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mediaType,
+                  data: imageBase64,
+                },
+              },
+              {
+                type: "text",
+                text: "Extract the account statistics from this screenshot.",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { data: null, error: `anthropic ${res.status}: ${body.slice(0, 200)}` };
+    }
+
+    const json = (await res.json()) as {
+      content: { type: string; name?: string; input?: unknown }[];
+    };
+    const toolUse = json.content?.find(
+      (c) => c.type === "tool_use" && c.name === "record_metrics"
+    );
+    if (!toolUse?.input) return { data: null, error: "no structured output" };
+
+    const raw = toolUse.input as Partial<ExtractedMetrics>;
+    return {
+      data: {
+        handle: raw.handle ?? null,
+        platform: raw.platform ?? null,
+        metric_kind: raw.metric_kind ?? "unknown",
+        period: raw.period ?? null,
+        followers: raw.followers ?? null,
+        follows: raw.follows ?? null,
+        posts_count: raw.posts_count ?? null,
+        views: raw.views ?? null,
+        reach: raw.reach ?? null,
+        impressions: raw.impressions ?? null,
+        likes: raw.likes ?? null,
+        comments: raw.comments ?? null,
+        shares: raw.shares ?? null,
+        saves: raw.saves ?? null,
+        profile_visits: raw.profile_visits ?? null,
+        confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
+        notes: raw.notes ?? null,
+      },
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "vision call failed",
+    };
+  }
+}

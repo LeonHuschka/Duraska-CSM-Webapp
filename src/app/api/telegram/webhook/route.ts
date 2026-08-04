@@ -4,7 +4,10 @@ import {
   extractInstagramLinks,
   instagramKey,
   sendMessage,
+  downloadFile,
+  setMessageReaction,
 } from "@/lib/telegram";
+import { extractMetricsFromImage } from "@/lib/vision";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,7 @@ const IGNORE_BEFORE = new Date("2026-05-30T00:00:00Z");
 
 type TgUser = { id: number; username?: string; first_name?: string };
 type TgChat = { id: number; title?: string; type: string };
+type TgPhoto = { file_id: string; file_size?: number; width: number };
 type TgMessage = {
   message_id: number;
   message_thread_id?: number;
@@ -34,6 +38,7 @@ type TgMessage = {
   from?: TgUser;
   text?: string;
   caption?: string;
+  photo?: TgPhoto[];
 };
 type TgReactionUpdate = {
   chat: TgChat;
@@ -77,6 +82,12 @@ export async function POST(req: Request) {
 }
 
 async function handleMessage(msg: TgMessage) {
+  // A screenshot in an account group → read the stats off it.
+  if (msg.photo && msg.photo.length > 0) {
+    await handleScreenshot(msg);
+    return;
+  }
+
   const text = msg.text ?? msg.caption ?? "";
   if (!text) return;
 
@@ -139,6 +150,86 @@ async function handleMessage(msg: TgMessage) {
       { onConflict: "chat_id,message_id", ignoreDuplicates: true }
     );
   }
+}
+
+/**
+ * Screenshot posted in a group that's mapped to an account → run it through
+ * the vision model and store whatever numbers it could read.
+ *
+ * Reacts 👀 while working and 📊 on success so the VA sees it landed;
+ * low-confidence reads are stored but flagged for review rather than
+ * silently trusted.
+ */
+async function handleScreenshot(msg: TgMessage) {
+  const supabase = createAdminClient();
+
+  // Which account does this chat belong to?
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("id, persona_id, handle, platform")
+    .eq("telegram_chat_id", msg.chat.id)
+    .maybeSingle();
+  if (!account) return; // chat not mapped to an account — ignore
+
+  // Already processed? (Telegram can redeliver.)
+  const { data: existing } = await supabase
+    .from("account_metrics")
+    .select("id")
+    .eq("source_chat_id", msg.chat.id)
+    .eq("source_message_id", msg.message_id)
+    .maybeSingle();
+  if (existing) return;
+
+  // Largest rendition = most legible for the model.
+  const photo = [...(msg.photo ?? [])].sort((a, b) => b.width - a.width)[0];
+  if (!photo) return;
+
+  const file = await downloadFile(photo.file_id);
+  if (!file) return;
+
+  const { data: metrics, error } = await extractMetricsFromImage(
+    file.base64,
+    file.mime
+  );
+  if (!metrics || error) {
+    console.warn("[telegram] vision failed", error);
+    return;
+  }
+  if (metrics.metric_kind === "unknown" && metrics.confidence === 0) {
+    return; // not an analytics screenshot — say nothing
+  }
+
+  await supabase.from("account_metrics").insert({
+    persona_id: account.persona_id,
+    account_id: account.id,
+    source_chat_id: msg.chat.id,
+    source_message_id: msg.message_id,
+    captured_at: new Date(msg.date * 1000).toISOString(),
+    handle: metrics.handle ?? account.handle,
+    platform: metrics.platform ?? account.platform,
+    metric_kind: metrics.metric_kind,
+    period: metrics.period,
+    followers: metrics.followers,
+    follows: metrics.follows,
+    posts_count: metrics.posts_count,
+    views: metrics.views,
+    reach: metrics.reach,
+    impressions: metrics.impressions,
+    likes: metrics.likes,
+    comments: metrics.comments,
+    shares: metrics.shares,
+    saves: metrics.saves,
+    profile_visits: metrics.profile_visits,
+    raw: JSON.parse(JSON.stringify(metrics)),
+    confidence: metrics.confidence,
+    needs_review: metrics.confidence < 0.6,
+  });
+
+  await setMessageReaction({
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+    emoji: metrics.confidence < 0.6 ? "🤔" : "📊",
+  });
 }
 
 /**

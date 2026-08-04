@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import {
   createPostingAccount,
   deletePostingAccount,
+  setAccountTelegramChat,
 } from "@/app/(app)/settings/accounts/actions";
 import type { RegisteredAccount } from "@/app/(app)/settings/accounts/page";
 
@@ -45,6 +46,20 @@ export function AccountsManager({ accounts }: { accounts: RegisteredAccount[] })
       toast.error(err instanceof Error ? err.message : "Failed to add account");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleChatId(
+    id: string,
+    value: string,
+    current: number | null
+  ) {
+    if (value.trim() === (current?.toString() ?? "")) return; // unchanged
+    const res = await setAccountTelegramChat(id, value);
+    if (res.error) toast.error(res.error);
+    else {
+      toast.success(value.trim() ? "Telegram group linked" : "Group unlinked");
+      router.refresh();
     }
   }
 
@@ -151,12 +166,21 @@ export function AccountsManager({ accounts }: { accounts: RegisteredAccount[] })
               </div>
               <div className="divide-y divide-border/40 overflow-hidden rounded-xl border border-border/40 bg-card">
                 {g.accounts.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between px-3 py-2.5">
-                    <span className="text-sm font-medium">@{a.handle}</span>
+                  <div key={a.id} className="flex items-center gap-2 px-3 py-2.5">
+                    <span className="w-28 shrink-0 truncate text-sm font-medium">
+                      @{a.handle}
+                    </span>
+                    {/* Telegram group whose screenshots belong to this account */}
+                    <Input
+                      defaultValue={a.telegram_chat_id?.toString() ?? ""}
+                      placeholder="Telegram chat ID"
+                      className="h-8 flex-1 text-xs"
+                      onBlur={(e) => handleChatId(a.id, e.target.value, a.telegram_chat_id)}
+                    />
                     <button
                       onClick={() => handleDelete(a.id, a.handle)}
                       disabled={deletingId === a.id}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
                       title="Remove account"
                     >
                       {deletingId === a.id ? (

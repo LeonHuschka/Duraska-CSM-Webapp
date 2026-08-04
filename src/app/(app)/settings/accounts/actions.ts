@@ -38,6 +38,29 @@ export async function createPostingAccount(data: {
   return { error: null };
 }
 
+/**
+ * Map an account to the Telegram group its screenshots get posted in, so
+ * the bot can attribute stats without anyone typing the handle.
+ */
+export async function setAccountTelegramChat(
+  accountId: string,
+  chatId: string
+) {
+  const supabase = await createClient();
+  await getPersonaId();
+  const parsed = chatId.trim() === "" ? null : Number(chatId.trim());
+  if (parsed !== null && Number.isNaN(parsed)) {
+    return { error: "Chat ID must be a number" };
+  }
+  const { error } = await supabase
+    .from("accounts")
+    .update({ telegram_chat_id: parsed, updated_at: new Date().toISOString() })
+    .eq("id", accountId);
+  if (error) return { error: error.message };
+  revalidatePath("/settings/accounts");
+  return { error: null };
+}
+
 export async function deletePostingAccount(accountId: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("accounts").delete().eq("id", accountId);

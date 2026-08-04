@@ -75,6 +75,30 @@ export async function deleteMessage(opts: {
   return call("deleteMessage", opts);
 }
 
+/** Download a Telegram-hosted file (photo/document) as base64. */
+export async function downloadFile(
+  fileId: string
+): Promise<{ base64: string; mime: string } | null> {
+  const t = token();
+  if (!t) return null;
+  const meta = await call<{ file_path?: string }>("getFile", { file_id: fileId });
+  const path = meta.result?.file_path;
+  if (!meta.ok || !path) return null;
+  try {
+    const res = await fetch(`${API}/file/bot${t}/${path}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = path.endsWith(".png")
+      ? "image/png"
+      : path.endsWith(".webp")
+        ? "image/webp"
+        : "image/jpeg";
+    return { base64: buf.toString("base64"), mime };
+  } catch {
+    return null;
+  }
+}
+
 export async function setWebhook(url: string, secret: string) {
   return call("setWebhook", {
     url,

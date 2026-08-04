@@ -100,7 +100,12 @@
       "Bash(dig +short A db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(dig +short AAAA db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(ping6 -c 1 -W 3000 2a05:d018:135e:16e0:387a:259e:a50f:2047)",
-      "Bash(grep -n \"stage: data.stage\\\\|revalidatePath\\(\\\\`/requests/\\\\${data.request_id}\\\\`\\)\" -B 4 -A 4 \"src/app/\\(app\\)/requests/[id]/actions.ts\")"
+      "Bash(grep -n \"stage: data.stage\\\\|revalidatePath\\(\\\\`/requests/\\\\${data.request_id}\\\\`\\)\" -B 4 -A 4 \"src/app/\\(app\\)/requests/[id]/actions.ts\")",
+      "mcp__claude-in-chrome__list_connected_browsers",
+      "mcp__claude-in-chrome__select_browser",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__navigate",
+      "Bash(awk '/^      accounts: \\\\{/,/^      warmup_slots: \\\\{/' src/lib/types/database.ts)"
     ]
   }
 }
