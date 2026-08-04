@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   Scissors,
   ExternalLink,
@@ -11,9 +13,20 @@ import {
   Send,
   Film,
   ChevronRight,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TrialBadge } from "@/components/ui/trial-badge";
+import { usePersona } from "@/hooks/use-persona";
+import { deleteEditJob } from "@/app/(app)/editing/actions";
 import type { EditJob } from "@/app/(app)/editing/page";
 
 const TABS = [
@@ -34,6 +47,33 @@ function timeAgo(iso: string): string {
 export function EditingView({ jobs }: { jobs: EditJob[] }) {
   const [tab, setTab] = useState<string>("shooted");
   const [search, setSearch] = useState("");
+  const router = useRouter();
+  const { activePersona } = usePersona();
+  // Deleting wipes the model's footage — owners/managers only. (RLS blocks
+  // VAs server-side too, this just keeps the button out of their way.)
+  const canDelete =
+    activePersona.role === "owner" || activePersona.role === "manager";
+  const [confirmJob, setConfirmJob] = useState<EditJob | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!confirmJob) return;
+    setDeleting(true);
+    try {
+      const res = await deleteEditJob(confirmJob.id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Deleted ${confirmJob.title}`);
+      setConfirmJob(null);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { shooted: 0, edited: 0, posted: 0 };
@@ -180,11 +220,83 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
                 </a>
               )}
 
+              {canDelete && (
+                <button
+                  onClick={(e) => {
+                    // The row is a Link — don't navigate when deleting.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setConfirmJob(job);
+                  }}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                  title="Delete job and its files"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+
               <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
             </Link>
           ))}
         </div>
       )}
+
+      {/* Delete confirmation — this removes the model's footage for good. */}
+      <Dialog
+        open={!!confirmJob}
+        onOpenChange={(o) => {
+          if (!deleting && !o) setConfirmJob(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete {confirmJob?.title}?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <p className="text-sm text-muted-foreground">
+              This permanently removes{" "}
+              <span className="font-medium text-foreground">
+                {confirmJob?.rawCount ?? 0} take
+                {confirmJob?.rawCount === 1 ? "" : "s"}
+              </span>
+              {(confirmJob?.editedCount ?? 0) > 0 && (
+                <>
+                  {" "}
+                  and{" "}
+                  <span className="font-medium text-foreground">
+                    {confirmJob?.editedCount} cut
+                    {confirmJob?.editedCount === 1 ? "" : "s"}
+                  </span>
+                </>
+              )}{" "}
+              from the app and from storage. It can&apos;t be undone.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setConfirmJob(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-red-600 text-white hover:bg-red-600/90"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting…
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
