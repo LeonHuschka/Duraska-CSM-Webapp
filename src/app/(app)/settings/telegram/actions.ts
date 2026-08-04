@@ -369,7 +369,41 @@ export async function simulatePipeline() {
       `status "${afterEdit?.status}", bot would react 🔥`
     );
 
-    // 5 — what the dead-link check would conclude, on a real removed reel
+    // 5 — a 💔 from whoever opened the link and found it gone
+    const deadMsgId = messageId + 1;
+    const deadCode = `${shortcode}D`;
+    await deliver({
+      message: {
+        message_id: deadMsgId,
+        message_thread_id: cfg.requests_thread_id,
+        date: now,
+        chat: { id: cfg.chat_id, type: "supergroup" },
+        from: { id: 1, is_bot: false, first_name: "Simulation" },
+        text: `Simulation https://www.instagram.com/reel/${deadCode}/`,
+      },
+    });
+    await deliver({
+      message_reaction: {
+        chat: { id: cfg.chat_id, type: "supergroup" },
+        message_id: deadMsgId,
+        date: now,
+        user: { id: 3, is_bot: false, first_name: "VA" },
+        new_reaction: [{ type: "emoji", emoji: "💔" }],
+      },
+    });
+    const { data: afterBroken } = await supabase
+      .from("content_links")
+      .select("status")
+      .eq("url_key", deadCode)
+      .maybeSingle();
+    await supabase.from("content_links").delete().eq("url_key", deadCode);
+    say(
+      "💔 on a link whose post is gone",
+      afterBroken?.status === "dead",
+      `status "${afterBroken?.status}" — the real message would be deleted from the topic`
+    );
+
+    // 6 — what the dead-link check would conclude, on a real removed reel
     const dead = await checkInstagramAlive(
       "https://www.instagram.com/reel/CzzzzzzzzzZ/"
     );
