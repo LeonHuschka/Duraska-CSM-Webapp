@@ -70,7 +70,17 @@ export async function registerWebhook(baseUrl: string) {
   if (!secret) return { error: "TELEGRAM_WEBHOOK_SECRET is not set" };
   const url = `${baseUrl.replace(/\/$/, "")}/api/telegram/webhook`;
   const res = await setWebhook(url, secret);
-  if (!res.ok) return { error: res.error ?? "setWebhook failed" };
+  if (!res.ok) {
+    // Telegram answers a bad token with a bare "Not Found", which reads like
+    // the app is broken rather than the credential being wrong.
+    if (/not found/i.test(res.error ?? "")) {
+      return {
+        error:
+          "Telegram rejected the bot token (Not Found). It's invalid — most likely the old token is still in Vercel after revoking it, or it got mangled on paste.",
+      };
+    }
+    return { error: res.error ?? "setWebhook failed" };
+  }
   return { error: null, url };
 }
 

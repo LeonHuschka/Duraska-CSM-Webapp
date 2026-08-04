@@ -7,7 +7,11 @@
 const API = "https://api.telegram.org";
 
 function token(): string | null {
-  return process.env.TELEGRAM_BOT_TOKEN ?? null;
+  const raw = process.env.TELEGRAM_BOT_TOKEN;
+  if (!raw) return null;
+  // Tolerate paste artefacts: stray whitespace/newlines, quotes, or the
+  // "bot" prefix people copy along with the URL from the docs.
+  return raw.trim().replace(/^["']|["']$/g, "").replace(/^bot/, "") || null;
 }
 
 async function call<T = unknown>(
