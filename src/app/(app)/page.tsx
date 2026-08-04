@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
-import { Scissors, Archive, Upload, Send } from "lucide-react";
+import { Scissors, Archive, Upload, Send, Film } from "lucide-react";
 import Link from "next/link";
 
 export default async function DashboardPage() {
@@ -62,6 +62,20 @@ export default async function DashboardPage() {
       requests?.filter((r) => new Date(r.created_at).getTime() >= weekAgo).length ?? 0;
     const totalUploaded = requests?.length ?? 0;
 
+    // Inspo links from Telegram that still need her.
+    const { data: links } = await supabase
+      .from("content_links")
+      .select("status")
+      .eq("persona_id", personaId);
+    const openLinks = (links ?? []).filter((l) => l.status === "open").length;
+    const shotNotUploaded = (links ?? []).filter((l) => l.status === "shot").length;
+    const doneLinks = (links ?? []).filter((l) =>
+      ["uploaded", "edited"].includes(l.status)
+    ).length;
+    const totalLinks = openLinks + shotNotUploaded + doneLinks;
+    const donePct =
+      totalLinks > 0 ? Math.round((doneLinks / totalLinks) * 100) : 0;
+
     return (
       <div className="mx-auto max-w-md space-y-6">
         <div>
@@ -73,7 +87,43 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        {/* Buffer — the number that matters most to her */}
+        {/* To-do — the number she can actually act on */}
+        <div className="rounded-2xl border border-border/50 bg-card p-5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Reels to shoot</span>
+            <div className="rounded-lg bg-purple-400/10 p-2">
+              <Film className="h-4 w-4 text-purple-400" />
+            </div>
+          </div>
+          <p className="mt-2 text-4xl font-semibold tracking-tight">{openLinks}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {openLinks === 0
+              ? "All caught up — amazing work 🎉"
+              : "Inspo links waiting in Telegram."}
+          </p>
+
+          {totalLinks > 0 && (
+            <div className="mt-4 space-y-1.5">
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-purple-400 to-emerald-400 transition-all"
+                  style={{ width: `${donePct}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {doneLinks} of {totalLinks} done ({donePct}%)
+              </p>
+            </div>
+          )}
+
+          {shotNotUploaded > 0 && (
+            <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              📤 {shotNotUploaded} shot but not uploaded yet — send them over!
+            </p>
+          )}
+        </div>
+
+        {/* Buffer at the editor */}
         <div className="rounded-2xl border border-border/50 bg-card p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Waiting to be cut</span>
@@ -84,7 +134,7 @@ export default async function DashboardPage() {
           <p className="mt-2 text-4xl font-semibold tracking-tight">{toEdit}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {toEdit === 0
-              ? "Nothing in the queue — time to shoot 🎬"
+              ? "Nothing in the queue right now."
               : "Your editor is working through these."}
           </p>
         </div>

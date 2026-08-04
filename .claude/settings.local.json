@@ -99,7 +99,8 @@
       "Bash(grep -n \"Uploading…\\\\|setPct\\(0\\)\\\\|setProgress\\({ done: 0, total: files.length }\\)\" src/components/upload/upload-view.tsx)",
       "Bash(dig +short A db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(dig +short AAAA db.nlwkpkhtevgcdpqbksed.supabase.co)",
-      "Bash(ping6 -c 1 -W 3000 2a05:d018:135e:16e0:387a:259e:a50f:2047)"
+      "Bash(ping6 -c 1 -W 3000 2a05:d018:135e:16e0:387a:259e:a50f:2047)",
+      "Bash(grep -n \"stage: data.stage\\\\|revalidatePath\\(\\\\`/requests/\\\\${data.request_id}\\\\`\\)\" -B 4 -A 4 \"src/app/\\(app\\)/requests/[id]/actions.ts\")"
     ]
   }
 }

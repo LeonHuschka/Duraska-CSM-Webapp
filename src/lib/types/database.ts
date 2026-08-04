@@ -461,6 +461,114 @@ export type Database = {
         };
         Relationships: [];
       };
+      content_links: {
+        Row: {
+          id: string;
+          persona_id: string;
+          chat_id: number;
+          message_thread_id: number | null;
+          message_id: number;
+          sender_name: string | null;
+          url: string;
+          url_key: string;
+          posted_at: string;
+          status: string;
+          shot_at: string | null;
+          request_id: string | null;
+          link_ok: boolean | null;
+          checked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          chat_id: number;
+          message_thread_id?: number | null;
+          message_id: number;
+          sender_name?: string | null;
+          url: string;
+          url_key: string;
+          posted_at: string;
+          status?: string;
+          shot_at?: string | null;
+          request_id?: string | null;
+          link_ok?: boolean | null;
+          checked_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          chat_id?: number;
+          message_thread_id?: number | null;
+          message_id?: number;
+          sender_name?: string | null;
+          url?: string;
+          url_key?: string;
+          posted_at?: string;
+          status?: string;
+          shot_at?: string | null;
+          request_id?: string | null;
+          link_ok?: boolean | null;
+          checked_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      telegram_config: {
+        Row: {
+          persona_id: string;
+          chat_id: number | null;
+          requests_thread_id: number | null;
+          talk_thread_id: number | null;
+          model_username: string | null;
+          va_username: string | null;
+          manager_username: string | null;
+          posts_per_day: number;
+          min_ready_to_post: number;
+          min_open_links: number;
+          max_unedited: number;
+          last_alert_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          persona_id: string;
+          chat_id?: number | null;
+          requests_thread_id?: number | null;
+          talk_thread_id?: number | null;
+          model_username?: string | null;
+          va_username?: string | null;
+          manager_username?: string | null;
+          posts_per_day?: number;
+          min_ready_to_post?: number;
+          min_open_links?: number;
+          max_unedited?: number;
+          last_alert_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          persona_id?: string;
+          chat_id?: number | null;
+          requests_thread_id?: number | null;
+          talk_thread_id?: number | null;
+          model_username?: string | null;
+          va_username?: string | null;
+          manager_username?: string | null;
+          posts_per_day?: number;
+          min_ready_to_post?: number;
+          min_open_links?: number;
+          max_unedited?: number;
+          last_alert_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       warmup_slots: {
         Row: {
           id: string;

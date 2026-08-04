@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { markInspoEdited } from "@/lib/content-links";
 
 export async function createAssetRecord(data: {
   request_id: string;
@@ -32,8 +33,14 @@ export async function createAssetRecord(data: {
 
   if (error) throw new Error(error.message);
 
+  // A final cut landing means the job is edited — tell the Telegram group.
+  if (data.stage === "edited" || data.stage === "final") {
+    await markInspoEdited(data.request_id);
+  }
+
   revalidatePath(`/requests/${data.request_id}`);
   revalidatePath("/requests");
+  revalidatePath("/editing");
 }
 
 export async function deleteAsset(assetId: string, requestId: string) {

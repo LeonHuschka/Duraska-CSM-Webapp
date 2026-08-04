@@ -2,5 +2,11 @@
   "framework": "nextjs",
   "installCommand": "bun install",
   "buildCommand": "bun run build",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/content-check",
+      "schedule": "17 7,15 * * *"
+    }
+  ]
 }

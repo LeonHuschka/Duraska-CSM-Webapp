@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
+import { linkInspoToRequest } from "@/lib/content-links";
 
 // Cookie when valid, otherwise the user's first membership. Mobile users
 // never get the cookie set (no persona switcher on phones), so relying on
@@ -111,6 +112,14 @@ export async function createSelfProducedRequest(data: {
   if (error || !inserted) {
     return { error: error?.message ?? "Insert failed", request_id: null, title: null };
   }
+
+  // Match it back to the Telegram inspo link and react there. Never let this
+  // break the upload.
+  await linkInspoToRequest({
+    personaId,
+    requestId: inserted.id,
+    inspoUrl: data.inspo_link ?? null,
+  });
 
   return {
     error: null,
