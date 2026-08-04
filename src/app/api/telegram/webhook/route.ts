@@ -70,8 +70,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // One line per delivery, so "the bot did nothing" can be told apart from
+  // "the bot was never called" without guessing. Keys and ids only — the
+  // message text stays out of the logs.
+  const msg = update.message ?? update.edited_message;
+  console.log(
+    "[telegram] update",
+    JSON.stringify({
+      keys: Object.keys(update),
+      chat: msg?.chat?.id ?? update.message_reaction?.chat?.id ?? null,
+      thread: msg?.message_thread_id ?? null,
+      has_text: !!(msg?.text ?? msg?.caption),
+      photos: msg?.photo?.length ?? 0,
+    })
+  );
+
   try {
-    if (update.message) await handleMessage(update.message);
+    // An edited message carries the same payload as a fresh one. Telegram
+    // sends it whenever the sender fixes a typo — or when a client rewrites
+    // the message after posting — and dropping it silently loses the link.
+    if (msg) await handleMessage(msg);
     else if (update.message_reaction) await handleReaction(update.message_reaction);
   } catch (err) {
     // Always 200 — a non-2xx makes Telegram retry the same update forever.
@@ -108,24 +126,45 @@ async function handleMessage(msg: TgMessage) {
   }
 
   const links = extractInstagramLinks(text);
-  if (links.length === 0) return;
+  if (links.length === 0) {
+    console.log("[telegram] no instagram link in message");
+    return;
+  }
 
   const postedAt = new Date(msg.date * 1000);
-  if (postedAt < IGNORE_BEFORE) return;
+  if (postedAt < IGNORE_BEFORE) {
+    console.log("[telegram] link older than cutoff", postedAt.toISOString());
+    return;
+  }
 
   // Which persona does this chat belong to, and is this the requests topic?
-  const { data: config } = await supabase
+  const { data: config, error: configErr } = await supabase
     .from("telegram_config")
     .select("persona_id, requests_thread_id")
     .eq("chat_id", msg.chat.id)
     .maybeSingle();
-  if (!config) return; // chat not wired up yet
+  if (!config) {
+    // No row and a DB error are very different problems — a bad service-role
+    // key looks exactly like "chat not wired up" unless we say so.
+    console.log(
+      "[telegram] no config for chat",
+      msg.chat.id,
+      configErr?.message ?? "(no row)"
+    );
+    return;
+  }
 
   if (
     config.requests_thread_id != null &&
     msg.message_thread_id != null &&
     Number(config.requests_thread_id) !== Number(msg.message_thread_id)
   ) {
+    console.log(
+      "[telegram] wrong topic",
+      msg.message_thread_id,
+      "expected",
+      config.requests_thread_id
+    );
     return; // link posted in a different topic — not an inspo request
   }
 
