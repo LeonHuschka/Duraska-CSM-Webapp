@@ -51,8 +51,35 @@ const MEDIA_EXT_MIME: Record<string, string> = {
 // setting (50 MB on the free plan). Anything above it fails with "exceeded
 // the maximum allowed size" — after the whole file has been sent. Flag it up
 // front instead so she doesn't waste minutes on a doomed upload.
-const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 50);
+const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 200);
 const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+type FileState = {
+  status: "pending" | "uploading" | "done" | "error";
+  pct: number;
+};
+
+/** Small circular progress ring shown per take while it uploads. */
+function ProgressRing({ pct }: { pct: number }) {
+  const r = 13;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg viewBox="0 0 32 32" className="h-9 w-9 -rotate-90">
+      <circle cx="16" cy="16" r={r} fill="none" strokeWidth="3" className="stroke-muted" />
+      <circle
+        cx="16"
+        cy="16"
+        r={r}
+        fill="none"
+        strokeWidth="3"
+        strokeLinecap="round"
+        className="stroke-primary transition-all duration-300"
+        strokeDasharray={c}
+        strokeDashoffset={c - (Math.min(100, Math.max(0, pct)) / 100) * c}
+      />
+    </svg>
+  );
+}
 
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
@@ -112,6 +139,15 @@ export function UploadView({ personaId }: { personaId: string }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [pct, setPct] = useState(0);
+  const [fileStates, setFileStates] = useState<FileState[]>([]);
+
+  function setFileState(index: number, patch: Partial<FileState>) {
+    setFileStates((prev) => {
+      const next = [...prev];
+      next[index] = { ...(next[index] ?? { status: "pending", pct: 0 }), ...patch };
+      return next;
+    });
+  }
   const [previewTitle, setPreviewTitle] = useState("…");
   const [doneInfo, setDoneInfo] = useState<{ title: string; count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +195,7 @@ export function UploadView({ personaId }: { personaId: string }) {
     setFiles([]);
     setProgress({ done: 0, total: 0 });
     setPct(0);
+    setFileStates([]);
   }
 
   async function handleSubmit() {
@@ -169,6 +206,7 @@ export function UploadView({ personaId }: { personaId: string }) {
     setUploading(true);
     setProgress({ done: 0, total: files.length });
     setPct(0);
+    setFileStates(files.map(() => ({ status: "pending", pct: 0 })));
     try {
       await runUpload();
     } catch (err) {
@@ -206,6 +244,7 @@ export function UploadView({ personaId }: { personaId: string }) {
       const uuid = crypto.randomUUID();
       const mime = resolveMime(file);
       const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${safeStorageName(file.name)}`;
+      setFileState(index, { status: "uploading", pct: 0 });
 
       try {
         // Signed upload URL + XHR so we get real byte progress. Falls back
@@ -217,6 +256,9 @@ export function UploadView({ personaId }: { personaId: string }) {
         if (signed?.signedUrl) {
           await putWithProgress(signed.signedUrl, file, mime, (loaded) => {
             sent[index] = loaded;
+            setFileState(index, {
+              pct: Math.round((loaded / (file.size || 1)) * 100),
+            });
             pushPct();
           });
         } else {
@@ -225,9 +267,11 @@ export function UploadView({ personaId }: { personaId: string }) {
             .upload(filePath, file, { contentType: mime, upsert: true });
           if (error) throw new Error(error.message);
           sent[index] = file.size;
+          setFileState(index, { pct: 100 });
           pushPct();
         }
       } catch (err) {
+        setFileState(index, { status: "error" });
         toast.error(
           `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`
         );
@@ -248,8 +292,10 @@ export function UploadView({ personaId }: { personaId: string }) {
           thumbnail_path: null,
         });
         completed++;
+        setFileState(index, { status: "done", pct: 100 });
         setProgress({ done: completed, total: files.length });
       } catch (err) {
+        setFileState(index, { status: "error" });
         await supabase.storage.from("content-assets").remove([filePath]);
         toast.error(
           `${file.name}: ${err instanceof Error ? err.message : "could not be saved"}`
@@ -399,7 +445,9 @@ export function UploadView({ personaId }: { personaId: string }) {
 
         {files.length > 0 && (
           <ul className="space-y-1.5 pt-1">
-            {files.map((f, i) => (
+            {files.map((f, i) => {
+              const st = fileStates[i];
+              return (
               <li
                 key={i}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
@@ -408,11 +456,45 @@ export function UploadView({ personaId }: { personaId: string }) {
                     : "border-border/40 bg-card"
                 }`}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted/50">
-                  <Film className="h-4 w-4 text-muted-foreground" />
+                {/* Per-take status: ring with % while uploading, check when
+                    done — a single global spinner left her guessing. */}
+                <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+                  {st?.status === "uploading" ? (
+                    <>
+                      <ProgressRing pct={st.pct} />
+                      <span className="absolute text-[9px] font-semibold tabular-nums">
+                        {st.pct}
+                      </span>
+                    </>
+                  ) : st?.status === "done" ? (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-green-500/15">
+                      <CheckCircle2 className="h-4 w-4 text-green-400" />
+                    </div>
+                  ) : st?.status === "error" ? (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-red-500/15">
+                      <X className="h-4 w-4 text-red-400" />
+                    </div>
+                  ) : (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted/50">
+                      <Film className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">Take {i + 1}</p>
+                  <p className="truncate text-xs font-medium">
+                    Take {i + 1}
+                    {st?.status === "uploading" && (
+                      <span className="ml-1.5 font-normal text-muted-foreground">
+                        uploading…
+                      </span>
+                    )}
+                    {st?.status === "done" && (
+                      <span className="ml-1.5 font-normal text-green-400">sent</span>
+                    )}
+                    {st?.status === "error" && (
+                      <span className="ml-1.5 font-normal text-red-400">failed</span>
+                    )}
+                  </p>
                   <p className="truncate text-[10px] text-muted-foreground">
                     {f.name} · {(f.size / (1024 * 1024)).toFixed(1)} MB
                   </p>
@@ -431,7 +513,8 @@ export function UploadView({ personaId }: { personaId: string }) {
                   </button>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
