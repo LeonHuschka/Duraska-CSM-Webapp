@@ -7,6 +7,7 @@ import Link from "next/link";
 import {
   PipelineDonut,
   WeekBars,
+  WeeklyGoal,
 } from "@/components/dashboard/pipeline-donut";
 
 const TONES: Record<string, string> = {
@@ -109,7 +110,6 @@ export default async function DashboardPage({
     const lastWeek = uploadTimes.filter(
       (t) => t >= twoWeeksAgo && t < weekAgo
     ).length;
-    const totalUploaded = uploadTimes.length;
 
     // Uploads per day for the last 7 days (oldest → today).
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -136,14 +136,28 @@ export default async function DashboardPage({
       (l) => new Date(l.posted_at).getTime() >= weekAgo
     ).length;
 
-    const finished = readyToPost + posted;
+    // How many accounts are actually consuming content right now. A reel can
+    // only be posted once, so every live account raises what she has to shoot.
+    const { data: liveAccountRows } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("persona_id", personaId)
+      .not("status", "in", '("dead","paused")');
+    const liveAccounts = liveAccountRows?.length ?? 0;
 
-    // The full journey of a reel, from her point of view.
+    const { data: tgCfg } = await supabase
+      .from("telegram_config")
+      .select("posts_per_day")
+      .eq("persona_id", personaId)
+      .maybeSingle();
+    const postsPerDay = tgCfg?.posts_per_day ?? 2;
+    const weeklyTarget = Math.max(1, liveAccounts * postsPerDay * 7);
+
+    // Only the three stages she has any feel for.
     const pipeline = [
-      { label: "To shoot", value: openLinks, color: "stroke-purple-400" },
-      { label: "With the editor", value: toEdit, color: "stroke-blue-400" },
-      { label: "Ready to post", value: readyToPost, color: "stroke-emerald-400" },
-      { label: "Posted", value: posted, color: "stroke-amber-400" },
+      { label: "Open inspo", value: openLinks, color: "stroke-purple-400" },
+      { label: "Shot", value: toEdit, color: "stroke-blue-400" },
+      { label: "Edited", value: readyToPost, color: "stroke-emerald-400" },
     ];
     const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
 
@@ -174,6 +188,13 @@ export default async function DashboardPage({
           </p>
         </div>
 
+        {/* Hero: how far into this week's minimum she is */}
+        <WeeklyGoal
+          done={thisWeek}
+          target={weeklyTarget}
+          liveAccounts={liveAccounts}
+        />
+
         {/* Three numbers she can act on, each with context */}
         <div className="grid grid-cols-3 gap-2.5">
           <StatBox
@@ -199,10 +220,10 @@ export default async function DashboardPage({
             }
           />
           <StatBox
-            value={finished}
-            label="Finished"
+            value={liveAccounts}
+            label="Live accounts"
             tone="amber"
-            hint={`${totalUploaded} all time`}
+            hint={`${postsPerDay}× a day each`}
           />
         </div>
 
@@ -232,7 +253,7 @@ export default async function DashboardPage({
 
         {/* Consistency beats bursts — show the rhythm */}
         <div className="rounded-2xl border border-border/50 bg-card p-5">
-          <h2 className="mb-4 text-sm font-medium">Last 7 days</h2>
+          <h2 className="mb-4 text-sm font-medium">Last 7 days shot</h2>
           <WeekBars days={weekDays} />
         </div>
 

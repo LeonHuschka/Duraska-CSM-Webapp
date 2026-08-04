@@ -88,6 +88,84 @@ export function PipelineDonut({
   );
 }
 
+/**
+ * Weekly goal ring — how much of the week's minimum she has shot already.
+ * The minimum is driven by how many accounts are live, since a reel can
+ * only be posted once.
+ */
+export function WeeklyGoal({
+  done,
+  target,
+  liveAccounts,
+}: {
+  done: number;
+  target: number;
+  liveAccounts: number;
+}) {
+  const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
+  const R = 46;
+  const C = 2 * Math.PI * R;
+  const filled = (pct / 100) * C;
+
+  const tone =
+    pct >= 100
+      ? "stroke-emerald-400"
+      : pct >= 60
+        ? "stroke-primary"
+        : pct >= 30
+          ? "stroke-amber-400"
+          : "stroke-rose-400";
+
+  const message =
+    pct >= 100
+      ? "Week complete — you crushed it 🎉"
+      : `${Math.max(0, target - done)} more to hit this week's minimum`;
+
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card p-5">
+      <div className="flex items-center gap-5">
+        <div className="relative shrink-0">
+          <svg viewBox="0 0 110 110" className="h-28 w-28 -rotate-90">
+            <circle
+              cx="55"
+              cy="55"
+              r={R}
+              fill="none"
+              strokeWidth="10"
+              className="stroke-muted"
+            />
+            <circle
+              cx="55"
+              cy="55"
+              r={R}
+              fill="none"
+              strokeWidth="10"
+              strokeLinecap="round"
+              className={`${tone} transition-all`}
+              strokeDasharray={`${filled} ${C - filled}`}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-2xl font-semibold tabular-nums">{pct}%</span>
+            <span className="text-[10px] text-muted-foreground">this week</span>
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">
+            <span className="text-xl font-semibold tabular-nums">{done}</span>
+            <span className="text-muted-foreground"> / {target} reels</span>
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{message}</p>
+          <p className="mt-2 text-[10px] text-muted-foreground/70">
+            Based on {liveAccounts} live account{liveAccounts === 1 ? "" : "s"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Tiny bar chart for "what did I do the last 7 days". */
 export function WeekBars({
   days,
