@@ -2,10 +2,15 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
-import { Scissors, Archive, Upload, Send, Film } from "lucide-react";
+import { Scissors, Archive, Upload, Send, Film, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ view?: string }>;
+}) {
+  const sp = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -55,8 +60,12 @@ export default async function DashboardPage() {
   const readyToPost = count("edited");
   const posted = count("posted");
 
-  // ── Model dashboard: her own upload overview ──
-  if (active.role === "model") {
+  // ── Model dashboard ──
+  // The model always lands here; owners/managers can preview it via
+  // ?view=model to see exactly what she sees.
+  const isModel = active.role === "model";
+  const previewingModel = !isModel && sp.view === "model";
+  if (isModel || previewingModel) {
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const thisWeek =
       requests?.filter((r) => new Date(r.created_at).getTime() >= weekAgo).length ?? 0;
@@ -78,6 +87,20 @@ export default async function DashboardPage() {
 
     return (
       <div className="mx-auto max-w-md space-y-6">
+        {previewingModel && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
+              <Eye className="h-3.5 w-3.5" />
+              Model view
+            </span>
+            <Link
+              href="/"
+              className="flex items-center gap-1 text-xs text-amber-300/80 hover:text-amber-200"
+            >
+              <ArrowLeft className="h-3 w-3" /> Back to yours
+            </Link>
+          </div>
+        )}
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             Hey{persona?.name ? ` ${persona.name}` : ""} 👋
@@ -206,6 +229,13 @@ export default async function DashboardPage() {
           </h1>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">Your content pipeline</p>
+        <Link
+          href="/?view=model"
+          className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          See the model&apos;s dashboard
+        </Link>
       </div>
 
       {/* Stats */}
