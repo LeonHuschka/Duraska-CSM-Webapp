@@ -12,8 +12,10 @@ import {
 import { cn } from "@/lib/utils";
 import { usePersona } from "@/hooks/use-persona";
 
+// The model only gets Home + Upload — but she MUST get both: with a single
+// item she had no way to navigate anywhere and the app felt frozen.
 const allNavItems = [
-  { href: "/", label: "Home", icon: LayoutDashboard, roles: ["owner", "manager", "va"] },
+  { href: "/", label: "Home", icon: LayoutDashboard, roles: ["owner", "manager", "va", "model"] },
   { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
   { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
   { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },

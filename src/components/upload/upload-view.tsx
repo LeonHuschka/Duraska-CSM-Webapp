@@ -30,6 +30,45 @@ import { Label } from "@/components/ui/label";
  * Mobile-first: big touch targets, single column, minimal typing (title
  * is auto-generated from content type + counter).
  */
+// iOS hands us files with an EMPTY type for a lot of camera-roll videos
+// (.MOV / HEVC especially), and some Android pickers do the same. Filtering
+// on file.type alone silently discarded everything the model picked, which
+// made the upload page look frozen. Fall back to the extension, and when in
+// doubt keep the file — the picker's `accept` already constrains it.
+const MEDIA_EXT_MIME: Record<string, string> = {
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  heic: "image/heic",
+  heif: "image/heif",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+function extOf(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(i + 1).toLowerCase() : "";
+}
+
+function isMediaFile(f: File): boolean {
+  if (f.type.startsWith("video/") || f.type.startsWith("image/")) return true;
+  // Unknown/empty type → trust the extension, and accept if we can't tell.
+  if (!f.type) return true;
+  return !!MEDIA_EXT_MIME[extOf(f.name)];
+}
+
+/** Best-effort MIME so the vault/editing views can tell video from image. */
+function resolveMime(f: File): string {
+  if (f.type) return f.type;
+  return MEDIA_EXT_MIME[extOf(f.name)] ?? "application/octet-stream";
+}
+
 export function UploadView({ personaId }: { personaId: string }) {
   const [inspoLink, setInspoLink] = useState("");
   const [isNsfw, setIsNsfw] = useState(false);
@@ -53,12 +92,15 @@ export function UploadView({ personaId }: { personaId: string }) {
   }, [doneInfo]);
 
   const handleFiles = useCallback((picked: FileList | File[]) => {
-    const arr = Array.from(picked).filter(
-      (f) => f.type.startsWith("video/") || f.type.startsWith("image/")
-    );
+    const all = Array.from(picked);
+    if (all.length === 0) return;
+    const arr = all.filter(isMediaFile);
     if (arr.length === 0) {
-      toast.error("Only videos and photos");
+      toast.error("Those files aren't photos or videos");
       return;
+    }
+    if (arr.length < all.length) {
+      toast.warning(`${all.length - arr.length} file(s) skipped — not media`);
     }
     setFiles((prev) => [...prev, ...arr]);
   }, []);
@@ -79,17 +121,27 @@ export function UploadView({ personaId }: { personaId: string }) {
       toast.error("Add at least one take");
       return;
     }
-
     setUploading(true);
     setProgress({ done: 0, total: files.length });
+    try {
+      await runUpload();
+    } catch (err) {
+      console.error("[upload] failed", err);
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      // Never leave the button spinning — a stuck spinner is what made the
+      // page look frozen with no way to retry.
+      setUploading(false);
+    }
+  }
 
+  async function runUpload() {
     const created = await createSelfProducedRequest({
       inspo_link: inspoLink.trim() || null,
       is_nsfw: isNsfw,
     });
     if (created.error || !created.request_id) {
       toast.error(created.error ?? "Failed to create job");
-      setUploading(false);
       return;
     }
     const requestId = created.request_id;
@@ -99,19 +151,21 @@ export function UploadView({ personaId }: { personaId: string }) {
 
     for (const file of files) {
       const uuid = crypto.randomUUID();
+      const mime = resolveMime(file);
       const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${safeStorageName(file.name)}`;
 
       const { error: upErr } = await supabase.storage
         .from("content-assets")
-        .upload(filePath, file);
+        .upload(filePath, file, { contentType: mime, upsert: true });
       if (upErr) {
-        toast.error(`Failed: ${file.name}`);
+        // Show the real reason — a silent skip is what made this look frozen.
+        toast.error(`${file.name}: ${upErr.message}`);
         continue;
       }
 
       let thumbnailPath: string | null = null;
       try {
-        const thumb = await generateThumbnail(file);
+        const thumb = await generateThumbnail(file, mime);
         if (thumb) {
           const tPath = thumbnailPathFor(filePath);
           const { error: tErr } = await supabase.storage
@@ -129,24 +183,27 @@ export function UploadView({ personaId }: { personaId: string }) {
           stage: "raw",
           file_path: filePath,
           file_name: file.name,
-          mime_type: file.type,
+          mime_type: mime,
           size_bytes: file.size,
           thumbnail_path: thumbnailPath,
         });
         completed++;
-      } catch {
+      } catch (err) {
         await supabase.storage.from("content-assets").remove([filePath]);
         if (thumbnailPath) await supabase.storage.from("content-assets").remove([thumbnailPath]);
-        toast.error(`Record failed: ${file.name}`);
+        toast.error(
+          `${file.name}: ${err instanceof Error ? err.message : "could not be saved"}`
+        );
       }
       setProgress({ done: completed, total: files.length });
     }
 
-    setUploading(false);
-    if (completed > 0) {
-      setDoneInfo({ title: finalTitle, count: completed });
-      reset();
+    if (completed === 0) {
+      toast.error("Nothing was uploaded — see the errors above");
+      return;
     }
+    setDoneInfo({ title: finalTitle, count: completed });
+    reset();
   }
 
   // ── Success state ──

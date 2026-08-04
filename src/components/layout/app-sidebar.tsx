@@ -17,7 +17,7 @@ import { usePersona } from "@/hooks/use-persona";
 // Slimmed nav. Legacy routes (/requests, /schedule, /warmup, /produce)
 // still work by URL but are intentionally not surfaced here.
 const allNavItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["owner", "manager", "va"] },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["owner", "manager", "va", "model"] },
   { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
   { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
   { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },

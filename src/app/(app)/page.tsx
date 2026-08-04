@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
@@ -24,15 +23,14 @@ export default async function DashboardPage() {
     }> | null;
   };
 
+  // A model is pinned to her own persona; staff use the cookie.
+  const modelMembership = memberships?.find((m) => m.role === "model");
   const cookieStore = await cookies();
   const activePersonaId = cookieStore.get(ACTIVE_PERSONA_COOKIE)?.value;
   const activeMembership =
-    memberships?.find((m) => m.persona_id === activePersonaId) ?? memberships?.[0];
-
-  // The model's whole app is the Upload page.
-  if (activeMembership?.role === "model") {
-    redirect("/upload");
-  }
+    modelMembership ??
+    memberships?.find((m) => m.persona_id === activePersonaId) ??
+    memberships?.[0];
 
   const hasPersonas = memberships && memberships.length > 0;
   if (!hasPersonas) {
@@ -49,13 +47,74 @@ export default async function DashboardPage() {
 
   const { data: requests } = await supabase
     .from("content_requests")
-    .select("status")
+    .select("status, created_at")
     .eq("persona_id", personaId);
 
   const count = (s: string) => requests?.filter((r) => r.status === s).length ?? 0;
   const toEdit = count("shooted");
   const readyToPost = count("edited");
   const posted = count("posted");
+
+  // ── Model dashboard: her own upload overview ──
+  if (active.role === "model") {
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const thisWeek =
+      requests?.filter((r) => new Date(r.created_at).getTime() >= weekAgo).length ?? 0;
+    const totalUploaded = requests?.length ?? 0;
+
+    return (
+      <div className="mx-auto max-w-md space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Hey{persona?.name ? ` ${persona.name}` : ""} 👋
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Here&apos;s where your reels stand.
+          </p>
+        </div>
+
+        {/* Buffer — the number that matters most to her */}
+        <div className="rounded-2xl border border-border/50 bg-card p-5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Waiting to be cut</span>
+            <div className="rounded-lg bg-blue-400/10 p-2">
+              <Scissors className="h-4 w-4 text-blue-400" />
+            </div>
+          </div>
+          <p className="mt-2 text-4xl font-semibold tracking-tight">{toEdit}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {toEdit === 0
+              ? "Nothing in the queue — time to shoot 🎬"
+              : "Your editor is working through these."}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-border/50 bg-card p-4">
+            <p className="text-2xl font-semibold tracking-tight">{thisWeek}</p>
+            <span className="text-xs text-muted-foreground">This week</span>
+          </div>
+          <div className="rounded-xl border border-border/50 bg-card p-4">
+            <p className="text-2xl font-semibold tracking-tight">
+              {readyToPost + posted}
+            </p>
+            <span className="text-xs text-muted-foreground">Finished</span>
+          </div>
+          <div className="rounded-xl border border-border/50 bg-card p-4">
+            <p className="text-2xl font-semibold tracking-tight">{totalUploaded}</p>
+            <span className="text-xs text-muted-foreground">All time</span>
+          </div>
+        </div>
+
+        <Link href="/upload" className="block">
+          <div className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-4 text-base font-semibold text-primary-foreground">
+            <Upload className="h-5 w-5" />
+            Upload a new reel
+          </div>
+        </Link>
+      </div>
+    );
+  }
 
   const stats = [
     {
