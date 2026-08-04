@@ -12,6 +12,7 @@ import {
   Activity,
   KeyRound,
   ShieldCheck,
+  FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ import {
   webhookStatus,
   testBotToken,
   auditEnv,
+  simulatePipeline,
 } from "@/app/(app)/settings/telegram/actions";
 import type { TelegramConfigRow } from "@/app/(app)/settings/telegram/page";
 
@@ -43,6 +45,10 @@ export function TelegramSettings({
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const [auditing, setAuditing] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+  const [sim, setSim] = useState<
+    { step: string; ok: boolean; detail: string }[] | null
+  >(null);
   const [env, setEnv] = useState<
     { name: string; ok: boolean; detail: string }[] | null
   >(null);
@@ -119,6 +125,24 @@ export function TelegramSettings({
       else toast.error(`${broken} of ${res.checks?.length} secrets are wrong`);
     } finally {
       setAuditing(false);
+    }
+  }
+
+  async function handleSimulate() {
+    setSimulating(true);
+    try {
+      const res = await simulatePipeline();
+      if (res.error) {
+        toast.error(res.error, { duration: 10000 });
+        setSim(null);
+        return;
+      }
+      setSim(res.steps ?? null);
+      const broken = (res.steps ?? []).filter((s) => !s.ok).length;
+      if (broken === 0) toast.success("Pipeline works end to end");
+      else toast.error(`${broken} step(s) failed`);
+    } finally {
+      setSimulating(false);
     }
   }
 
@@ -211,6 +235,20 @@ export function TelegramSettings({
             )}
             Check secrets
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSimulate}
+            disabled={simulating}
+            className="gap-1.5"
+          >
+            {simulating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FlaskConical className="h-3.5 w-3.5" />
+            )}
+            Simulate
+          </Button>
           <span className="text-xs text-muted-foreground">
             {openLinks} open inspo links tracked
           </span>
@@ -234,6 +272,29 @@ export function TelegramSettings({
               </div>
             ))}
           </dl>
+        )}
+
+        {/* A dry run through the real webhook. Nothing reaches the group:
+            the synthetic message id matches no real message, so the
+            reactions simply fail, and every row is deleted afterwards. */}
+        {sim && (
+          <ol className="mt-3 space-y-2 rounded-lg bg-muted/30 p-3 text-[11px]">
+            {sim.map((s, i) => (
+              <li key={i} className="flex items-start gap-2">
+                {s.ok ? (
+                  <CheckCircle2 className="mt-px h-3 w-3 shrink-0 text-green-400" />
+                ) : (
+                  <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-amber-400" />
+                )}
+                <div>
+                  <div className="font-medium">{s.step}</div>
+                  <div className="whitespace-pre-wrap text-muted-foreground">
+                    {s.detail}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
         )}
 
         {/* Telegram's own view of the webhook — the fastest way to see why

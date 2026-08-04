@@ -3,8 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
-import { setWebhook, getWebhookInfo, getMe } from "@/lib/telegram";
+import {
+  setWebhook,
+  getWebhookInfo,
+  getMe,
+  checkInstagramAlive,
+} from "@/lib/telegram";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { headers } from "next/headers";
+import { buildAlert } from "@/lib/pipeline-alert";
+import { linkInspoToRequest, markInspoEdited } from "@/lib/content-links";
 
 export async function saveTelegramConfig(data: {
   chat_id: string;
@@ -220,4 +228,193 @@ export async function auditEnv() {
   }
 
   return { error: null, checks };
+}
+
+/**
+ * Walk the whole inspo pipeline once, end to end, and report each step.
+ *
+ * This drives the real webhook over HTTP — same route, same secret check,
+ * same handlers — rather than re-implementing the flow, because a
+ * simulation that runs different code proves nothing about the code that
+ * runs. The synthetic message id belongs to no real message, so the
+ * reactions Telegram is asked for simply fail and the group sees nothing.
+ * Everything written is deleted again in a finally block.
+ */
+export async function simulatePipeline() {
+  const personaId = await requireActivePersonaId();
+  const supabase = createAdminClient();
+  const steps: { step: string; ok: boolean; detail: string }[] = [];
+  const say = (step: string, ok: boolean, detail: string) =>
+    steps.push({ step, ok, detail });
+
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select(
+      "persona_id, chat_id, talk_thread_id, requests_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
+    )
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!cfg?.chat_id) {
+    return { error: "No Telegram config for this persona" };
+  }
+
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret) return { error: "TELEGRAM_WEBHOOK_SECRET is not set" };
+
+  const h = await headers();
+  const host = h.get("host");
+  const origin = `https://${host}`;
+  const messageId = 900_000_000 + Math.floor(Math.random() * 1_000_000);
+  const shortcode = `SIM${messageId}`;
+  const url = `https://www.instagram.com/reel/${shortcode}/`;
+  const now = Math.floor(Date.now() / 1000);
+
+  const deliver = (body: unknown) =>
+    fetch(`${origin}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": secret,
+      },
+      body: JSON.stringify(body),
+    });
+
+  let requestId: string | null = null;
+
+  try {
+    // 1 — a manager drops an inspo link in the requests topic
+    const res1 = await deliver({
+      message: {
+        message_id: messageId,
+        message_thread_id: cfg.requests_thread_id,
+        date: now,
+        chat: { id: cfg.chat_id, type: "supergroup" },
+        from: { id: 1, is_bot: false, first_name: "Simulation" },
+        text: `Simulation ${url}`,
+      },
+    });
+    const { data: link } = await supabase
+      .from("content_links")
+      .select("id, status")
+      .eq("url_key", shortcode)
+      .maybeSingle();
+    say(
+      "Link posted in the requests topic",
+      link?.status === "open",
+      link
+        ? `webhook ${res1.status} → content_links row, status "${link.status}"`
+        : `webhook ${res1.status} → no row was written`
+    );
+    if (!link) return { error: null, steps };
+
+    // 2 — the model reacts, meaning she has filmed it
+    const res2 = await deliver({
+      message_reaction: {
+        chat: { id: cfg.chat_id, type: "supergroup" },
+        message_id: messageId,
+        date: now,
+        user: { id: 2, is_bot: false, first_name: "Model" },
+        new_reaction: [{ type: "emoji", emoji: "👍" }],
+      },
+    });
+    const { data: afterReaction } = await supabase
+      .from("content_links")
+      .select("status")
+      .eq("id", link.id)
+      .maybeSingle();
+    say(
+      "Model reacts to the message",
+      afterReaction?.status === "shot",
+      `webhook ${res2.status} → status "${afterReaction?.status}"`
+    );
+
+    // 3 — she uploads her takes with that link as the inspo
+    const { data: req, error: reqErr } = await supabase
+      .from("content_requests")
+      .insert({
+        persona_id: personaId,
+        title: "SIMULATION",
+        status: "shooted",
+        inspo_link: url,
+      })
+      .select("id")
+      .single();
+    if (reqErr || !req) {
+      say("Model uploads her takes", false, reqErr?.message ?? "insert failed");
+      return { error: null, steps };
+    }
+    requestId = req.id;
+    await linkInspoToRequest({ personaId, requestId: req.id, inspoUrl: url });
+    const { data: afterUpload } = await supabase
+      .from("content_links")
+      .select("status, request_id")
+      .eq("id", link.id)
+      .maybeSingle();
+    say(
+      "Model uploads her takes",
+      afterUpload?.status === "uploaded" && afterUpload.request_id === req.id,
+      `status "${afterUpload?.status}", linked to the request, bot would react 👍`
+    );
+
+    // 4 — the VA delivers the final cut
+    await markInspoEdited(req.id);
+    const { data: afterEdit } = await supabase
+      .from("content_links")
+      .select("status")
+      .eq("id", link.id)
+      .maybeSingle();
+    say(
+      "VA uploads the final cut",
+      afterEdit?.status === "edited",
+      `status "${afterEdit?.status}", bot would react 🔥`
+    );
+
+    // 5 — what the dead-link check would conclude, on a real removed reel
+    const dead = await checkInstagramAlive(
+      "https://www.instagram.com/reel/CzzzzzzzzzZ/"
+    );
+    say(
+      "Dead-link detection",
+      true,
+      dead.alive === false
+        ? `verdict "gone" (${dead.reason}) → message would be deleted`
+        : `verdict "unclear" (${dead.reason}) → nothing is deleted, re-checked next run`
+    );
+
+    // 6 — the alert the cron would post, without posting it
+    const { data: allLinks } = await supabase
+      .from("content_links")
+      .select("status")
+      .eq("persona_id", personaId);
+    const { data: reqs } = await supabase
+      .from("content_requests")
+      .select("status")
+      .eq("persona_id", personaId);
+    const openLinks = (allLinks ?? []).filter((l) => l.status === "open").length;
+    const shotNotUploaded = (allLinks ?? []).filter((l) => l.status === "shot").length;
+    const unedited = (reqs ?? []).filter((r) => r.status === "shooted").length;
+    const readyToPost = (reqs ?? []).filter((r) => r.status === "edited").length;
+    const alert = buildAlert({
+      cfg,
+      openLinks,
+      shotNotUploaded,
+      unedited,
+      readyToPost,
+      runwayDays: Math.floor(readyToPost / Math.max(1, cfg.posts_per_day)),
+    });
+    say(
+      "Pipeline alert (not sent)",
+      true,
+      alert
+        ? alert.replace(/<[^>]+>/g, "")
+        : "nothing to report — the pipeline is healthy right now"
+    );
+
+    return { error: null, steps };
+  } finally {
+    await supabase.from("content_links").delete().eq("url_key", shortcode);
+    if (requestId) {
+      await supabase.from("content_requests").delete().eq("id", requestId);
+    }
+  }
 }
