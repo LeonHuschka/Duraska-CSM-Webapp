@@ -110,7 +110,12 @@
       "Read(//tmp/**)",
       "Bash(curl -s -o /dev/null -w \"page-203c90f526a9134f.js -> %{http_code}\\\\n\" \"https://duraska-csm-webapp.vercel.app/_next/static/chunks/app/\\(app\\)/page-203c90f526a9134f.js\")",
       "Bash(node -e \"try{require.resolve\\('server-only'\\);console.log\\('resolves OK'\\)}catch\\(e\\){console.log\\('❌ '+e.code\\)}\")",
-      "Bash(node -e \"const p=require\\('./node_modules/next/package.json'\\); console.log\\('next deps incl server-only?', Object.keys\\(p.dependencies||{}\\).filter\\(d=>/server-only|client-only/.test\\(d\\)\\)\\)\")"
+      "Bash(node -e \"const p=require\\('./node_modules/next/package.json'\\); console.log\\('next deps incl server-only?', Object.keys\\(p.dependencies||{}\\).filter\\(d=>/server-only|client-only/.test\\(d\\)\\)\\)\")",
+      "Bash(cat supabase/migrations/00023_content_links.sql supabase/migrations/00024_account_metrics.sql supabase/migrations/00025_weekly_reel_target.sql > /tmp/combined.sql; wc -l /tmp/combined.sql; echo \"--- sanity: order of object creation ---\"; grep -nE \"create table|alter table public\\\\.\\(accounts|content_requests|telegram_config\\)\" /tmp/combined.sql)",
+      "Bash(openssl rand *)",
+      "Bash(echo \"TELEGRAM_WEBHOOK_SECRET=$\\(openssl rand -hex 32\\)\")",
+      "Bash(echo \"CRON_SECRET=$\\(openssl rand -hex 32\\)\")",
+      "Bash(curl -s \"https://api.github.com/repos/LeonHuschka/Duraska-CSM-Webapp/commits/ad135e7/status\")"
     ]
   }
 }
