@@ -152,82 +152,96 @@ export function instagramKey(url: string): string | null {
 /**
  * Is this reel still on Instagram?
  *
- * Asking for the reel page is useless from a server: Instagram answers a
- * datacenter IP with the same login wall whether the post exists or not,
- * which is why this used to return "unclear" for everything and nothing was
- * ever cleaned up. The embed endpoint is built for third-party sites, so it
- * answers without a session — and it only carries `shortcode_media` when
- * there is media to show.
+ * A browser user-agent gets a datacenter IP nothing but the login wall —
+ * byte for byte the same page whether the post exists or not, which is why
+ * this used to answer "unclear" for everything. Crawlers are treated
+ * differently: Instagram hands them the Open Graph tags so link previews
+ * work, and a removed post has none. So ask as a crawler first, and only
+ * fall back to the embed endpoint.
  *
- * A verdict of `false` is therefore evidence, not a guess. `null` still
- * means "could not tell" and callers must not act on it.
+ * `false` is evidence. `null` means "could not tell" and callers must not
+ * act on it.
  */
+const CRAWLER_UA =
+  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36";
+
+type Probe = { alive: boolean | null; reason: string };
+
+async function probe(
+  url: string,
+  ua: string,
+  present: string[],
+  label: string
+): Promise<Probe> {
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      // Instagram tarpits datacenter IPs: it accepts the connection and
+      // then simply never answers. Without this the cron's workers all
+      // sit waiting until the function is killed.
+      signal: AbortSignal.timeout(8000),
+      headers: { "user-agent": ua, accept: "text/html", "accept-language": "en-US,en;q=0.9" },
+    });
+    if (res.status === 404) return { alive: false, reason: `${label}: 404` };
+    if ([401, 403, 429].includes(res.status)) {
+      return { alive: null, reason: `${label}: blocked (${res.status})` };
+    }
+    if (!res.ok) return { alive: null, reason: `${label}: http ${res.status}` };
+
+    const html = await res.text();
+    if (present.some((m) => html.includes(m))) {
+      return { alive: true, reason: `${label}: media present` };
+    }
+    // Served the wall rather than the post — that tells us nothing about
+    // whether the post exists.
+    if (/loginForm|"challenge"|accounts\/login/i.test(html)) {
+      return { alive: null, reason: `${label}: login wall` };
+    }
+    return { alive: false, reason: `${label}: no media in a real response` };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    return {
+      alive: null,
+      reason: `${label}: ${timedOut ? "no answer within 8s" : err instanceof Error ? err.message : "fetch failed"}`,
+    };
+  }
+}
+
 export async function checkInstagramAlive(
   url: string
 ): Promise<{ alive: boolean | null; reason: string }> {
   const code = instagramKey(url);
   if (!code) return { alive: null, reason: "no shortcode in url" };
 
-  try {
-    const res = await fetch(
-      `https://www.instagram.com/p/${code}/embed/captioned/`,
-      {
-        redirect: "follow",
-        // Instagram tarpits datacenter IPs: it accepts the connection and
-        // then simply never answers. Without this the cron's workers all
-        // sit waiting until the function is killed.
-        signal: AbortSignal.timeout(8000),
-        headers: {
-          "user-agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
-          accept: "text/html",
-          "accept-language": "en-US,en;q=0.9",
-        },
-      }
-    );
-    if (res.status === 404) return { alive: false, reason: "404" };
-    if (res.status === 429 || res.status === 401 || res.status === 403) {
-      return { alive: null, reason: `blocked (${res.status})` };
-    }
-    if (!res.ok) return { alive: null, reason: `http ${res.status}` };
+  const attempts: Probe[] = [];
 
-    const html = await res.text();
-    if (html.includes("shortcode_media")) {
-      return { alive: true, reason: "embed carries media" };
-    }
-    // The embed for a removed post renders an empty shell — same status,
-    // no media payload.
-    if (html.includes("contextJSON") || html.includes("EmbedIsBroken")) {
-      return { alive: false, reason: "embed has no media" };
-    }
-    // Neither marker present: Instagram served this server something other
-    // than an embed. Fingerprint it — without knowing what comes back there
-    // is no way to tell whether a usable signal exists at all.
-    const marks = [
-      "login",
-      "consent",
-      "challenge",
-      "Something went wrong",
-      "not-logged-in",
-      "Page Not Found",
-      "og:title",
-    ].filter((m) => html.toLowerCase().includes(m.toLowerCase()));
-    const title = /<title[^>]*>([^<]{0,60})/i.exec(html)?.[1]?.trim();
-    return {
-      alive: null,
-      reason: `unrecognised embed (${html.length}b, title "${title ?? "—"}", markers: ${marks.join("/") || "none"})`,
-    };
-  } catch (err) {
-    const timedOut = err instanceof Error && err.name === "TimeoutError";
-    return {
-      alive: null,
-      reason: timedOut
-        ? "no answer within 8s"
-        : err instanceof Error
-          ? err.message
-          : "fetch failed",
-    };
-  }
+  // 1. As a crawler, against the post page — this is the path that serves
+  //    Open Graph tags to Telegram and Facebook.
+  attempts.push(
+    await probe(
+      `https://www.instagram.com/p/${code}/`,
+      CRAWLER_UA,
+      ['property="og:video"', 'property="og:image"', 'property="og:title"'],
+      "crawler"
+    )
+  );
+  if (attempts[0].alive !== null) return attempts[0];
+
+  // 2. The embed endpoint, which carries shortcode_media only when there is
+  //    media to embed.
+  attempts.push(
+    await probe(
+      `https://www.instagram.com/p/${code}/embed/captioned/`,
+      BROWSER_UA,
+      ["shortcode_media"],
+      "embed"
+    )
+  );
+  if (attempts[1].alive !== null) return attempts[1];
+
+  return { alive: null, reason: attempts.map((a) => a.reason).join(" · ") };
 }
 
 /** Emoji vocabulary for the pipeline steps. */
