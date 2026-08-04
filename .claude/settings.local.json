@@ -95,7 +95,8 @@
       "Bash(grep -rn '${uuid}_${file.name}\\\\|_${file.name}' /Users/leon/Desktop/fansly_CSM/src --include=\"*.tsx\" --include=\"*.ts\")",
       "Bash(grep -n 'href=\"/requests\"\\\\|ArrowLeft\\\\|Back\\\\|Zurück\\\\|href={`/requests' /Users/leon/Desktop/fansly_CSM/src/components/requests/request-detail.tsx)",
       "Bash(python3 -)",
-      "Bash(git commit -q -m ' *)"
+      "Bash(git commit -q -m ' *)",
+      "Bash(grep -n \"Uploading…\\\\|setPct\\(0\\)\\\\|setProgress\\({ done: 0, total: files.length }\\)\" src/components/upload/upload-view.tsx)"
     ]
   }
 }

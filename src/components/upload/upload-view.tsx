@@ -10,11 +10,7 @@ import {
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import {
-  generateThumbnail,
-  thumbnailPathFor,
-  safeStorageName,
-} from "@/lib/thumbnails";
+import { safeStorageName } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,12 +65,46 @@ function resolveMime(f: File): string {
   return MEDIA_EXT_MIME[extOf(f.name)] ?? "application/octet-stream";
 }
 
+/**
+ * PUT a file to a Supabase signed upload URL via XHR so we get real byte
+ * progress — the SDK's upload() gives us nothing to show, which is what made
+ * a multi-minute upload look like a frozen spinner.
+ */
+function putWithProgress(
+  signedUrl: string,
+  file: File,
+  mime: string,
+  onProgress: (loadedBytes: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", signedUrl, true);
+    xhr.setRequestHeader("content-type", mime);
+    xhr.setRequestHeader("x-upsert", "true");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(file.size);
+        resolve();
+      } else {
+        reject(new Error(`upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.ontimeout = () => reject(new Error("upload timed out"));
+    xhr.send(file);
+  });
+}
+
 export function UploadView({ personaId }: { personaId: string }) {
   const [inspoLink, setInspoLink] = useState("");
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [pct, setPct] = useState(0);
   const [previewTitle, setPreviewTitle] = useState("…");
   const [doneInfo, setDoneInfo] = useState<{ title: string; count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +144,7 @@ export function UploadView({ personaId }: { personaId: string }) {
     setIsNsfw(false);
     setFiles([]);
     setProgress({ done: 0, total: 0 });
+    setPct(0);
   }
 
   async function handleSubmit() {
@@ -123,6 +154,7 @@ export function UploadView({ personaId }: { personaId: string }) {
     }
     setUploading(true);
     setProgress({ done: 0, total: files.length });
+    setPct(0);
     try {
       await runUpload();
     } catch (err) {
@@ -149,35 +181,49 @@ export function UploadView({ personaId }: { personaId: string }) {
     const supabase = createClient();
     let completed = 0;
 
-    for (const file of files) {
+    const sent = new Array<number>(files.length).fill(0);
+    const pushPct = () => {
+      const total = files.reduce((a, f) => a + f.size, 0) || 1;
+      const done = sent.reduce((a, b) => a + b, 0);
+      setPct(Math.min(99, Math.round((done / total) * 100)));
+    };
+
+    async function uploadOne(file: File, index: number) {
       const uuid = crypto.randomUUID();
       const mime = resolveMime(file);
       const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${safeStorageName(file.name)}`;
 
-      const { error: upErr } = await supabase.storage
-        .from("content-assets")
-        .upload(filePath, file, { contentType: mime, upsert: true });
-      if (upErr) {
-        // Show the real reason — a silent skip is what made this look frozen.
-        toast.error(`${file.name}: ${upErr.message}`);
-        continue;
-      }
-
-      let thumbnailPath: string | null = null;
       try {
-        const thumb = await generateThumbnail(file, mime);
-        if (thumb) {
-          const tPath = thumbnailPathFor(filePath);
-          const { error: tErr } = await supabase.storage
+        // Signed upload URL + XHR so we get real byte progress. Falls back
+        // to the SDK upload if anything about the signed path misbehaves.
+        const { data: signed } = await supabase.storage
+          .from("content-assets")
+          .createSignedUploadUrl(filePath);
+
+        if (signed?.signedUrl) {
+          await putWithProgress(signed.signedUrl, file, mime, (loaded) => {
+            sent[index] = loaded;
+            pushPct();
+          });
+        } else {
+          const { error } = await supabase.storage
             .from("content-assets")
-            .upload(tPath, thumb, { contentType: "image/jpeg", upsert: true });
-          if (!tErr) thumbnailPath = tPath;
+            .upload(filePath, file, { contentType: mime, upsert: true });
+          if (error) throw new Error(error.message);
+          sent[index] = file.size;
+          pushPct();
         }
       } catch (err) {
-        console.warn("[upload] thumbnail failed", err);
+        toast.error(
+          `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`
+        );
+        return;
       }
 
       try {
+        // No thumbnail here on purpose. Generating one means decoding the
+        // whole video on her phone (tens of seconds per take) — the Vault
+        // backfills thumbnails later instead, so she never waits for it.
         await createAssetRecord({
           request_id: requestId,
           stage: "raw",
@@ -185,18 +231,31 @@ export function UploadView({ personaId }: { personaId: string }) {
           file_name: file.name,
           mime_type: mime,
           size_bytes: file.size,
-          thumbnail_path: thumbnailPath,
+          thumbnail_path: null,
         });
         completed++;
+        setProgress({ done: completed, total: files.length });
       } catch (err) {
         await supabase.storage.from("content-assets").remove([filePath]);
-        if (thumbnailPath) await supabase.storage.from("content-assets").remove([thumbnailPath]);
         toast.error(
           `${file.name}: ${err instanceof Error ? err.message : "could not be saved"}`
         );
       }
-      setProgress({ done: completed, total: files.length });
     }
+
+    // Upload several takes at once instead of one after another.
+    const queue = files.map((f, i) => ({ f, i }));
+    const CONCURRENCY = 3;
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+        for (;;) {
+          const next = queue.shift();
+          if (!next) return;
+          await uploadOne(next.f, next.i);
+        }
+      })
+    );
+    setPct(100);
 
     if (completed === 0) {
       toast.error("Nothing was uploaded — see the errors above");
@@ -356,7 +415,21 @@ export function UploadView({ personaId }: { personaId: string }) {
 
       {/* Sticky submit on mobile */}
       <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border/50 bg-background/95 p-3 backdrop-blur-md md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-        <div className="mx-auto max-w-md">
+        <div className="mx-auto max-w-md space-y-2">
+          {uploading && (
+            <div className="space-y-1">
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <p className="text-center text-[11px] text-muted-foreground">
+                {pct}% · {progress.done}/{progress.total} takes done — keep this
+                page open
+              </p>
+            </div>
+          )}
           <Button
             onClick={handleSubmit}
             disabled={uploading || files.length === 0}
@@ -364,8 +437,7 @@ export function UploadView({ personaId }: { personaId: string }) {
           >
             {uploading ? (
               <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Uploading…{" "}
-                {progress.done}/{progress.total}
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Uploading… {pct}%
               </>
             ) : (
               `Send ${files.length || ""} take${files.length === 1 ? "" : "s"} to editing`
