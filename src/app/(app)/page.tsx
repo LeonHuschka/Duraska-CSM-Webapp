@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
-import { Scissors, Archive, Upload, Send, Eye, ArrowLeft } from "lucide-react";
+import { Scissors, Archive, Upload, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import {
   PipelineDonut,
@@ -10,6 +10,8 @@ import {
   WeeklyGoal,
   PlatformBadges,
 } from "@/components/dashboard/pipeline-donut";
+import { PipelineTab } from "@/components/pipeline/pipeline-tab";
+import { AccountsTab } from "@/components/pipeline/accounts-tab";
 
 // One colour per pipeline stage, used by the stat boxes and the donut alike
 // so a number and its slice always read as the same thing.
@@ -45,9 +47,10 @@ function StatBox({
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ view?: string }>;
+  searchParams?: Promise<{ view?: string; tab?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
+  const tab = sp.tab === "accounts" ? "accounts" : "pipeline";
   const supabase = await createClient();
   const {
     data: { user },
@@ -95,7 +98,6 @@ export default async function DashboardPage({
   const count = (s: string) => requests?.filter((r) => r.status === s).length ?? 0;
   const toEdit = count("shooted");
   const readyToPost = count("edited");
-  const posted = count("posted");
 
   // ── Model dashboard ──
   // The model always lands here; owners/managers can preview it via
@@ -330,33 +332,6 @@ export default async function DashboardPage({
     );
   }
 
-  const stats = [
-    {
-      label: "To edit",
-      value: toEdit,
-      icon: Scissors,
-      href: "/editing",
-      color: "text-blue-400",
-      bg: "bg-blue-400/10",
-    },
-    {
-      label: "Ready to post",
-      value: readyToPost,
-      icon: Archive,
-      href: "/vault",
-      color: "text-emerald-400",
-      bg: "bg-emerald-400/10",
-    },
-    {
-      label: "Posted",
-      value: posted,
-      icon: Send,
-      href: "/vault",
-      color: "text-amber-400",
-      bg: "bg-amber-400/10",
-    },
-  ];
-
   return (
     <div className="space-y-8">
       <div>
@@ -379,23 +354,38 @@ export default async function DashboardPage({
         </Link>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {stats.map((stat) => (
-          <Link
-            key={stat.label}
-            href={stat.href}
-            className="group rounded-xl border border-border/50 bg-card p-4 transition-all duration-200 hover:border-border hover:bg-accent/50"
-          >
-            <div className={`inline-flex rounded-lg p-2 ${stat.bg}`}>
-              <stat.icon className={`h-4 w-4 ${stat.color}`} />
-            </div>
-            <p className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-              {stat.value}
-            </p>
-            <span className="text-xs text-muted-foreground">{stat.label}</span>
-          </Link>
-        ))}
+      {/* Two views of the same operation: the content moving through, and
+          the accounts it goes out on. */}
+      <div>
+        <div className="flex gap-1 rounded-xl border border-border/50 bg-card p-1">
+          {(
+            [
+              { key: "pipeline", label: "Pipeline" },
+              { key: "accounts", label: "Accounts" },
+            ] as const
+          ).map((t) => (
+            <Link
+              key={t.key}
+              href={t.key === "pipeline" ? "/" : `/?tab=${t.key}`}
+              scroll={false}
+              className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? "bg-primary/10 text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </div>
+
+        <div className="mt-5">
+          {tab === "accounts" ? (
+            <AccountsTab personaId={personaId} />
+          ) : (
+            <PipelineTab personaId={personaId} />
+          )}
+        </div>
       </div>
 
       {/* Quick actions */}

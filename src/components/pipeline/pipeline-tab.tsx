@@ -1,14 +1,10 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getActivePersonaId } from "@/lib/persona";
 import {
   StageFunnel,
   ThroughputChart,
   StageDurations,
   OldestWaiting,
 } from "@/components/pipeline/pipeline-view";
-
-export const dynamic = "force-dynamic";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -21,22 +17,9 @@ function median(values: number[]): number | null {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-export default async function PipelinePage() {
+/** The Pipeline tab of the manager dashboard. */
+export async function PipelineTab({ personaId }: { personaId: string }) {
   const supabase = await createClient();
-  const personaId = await getActivePersonaId();
-  if (!personaId) redirect("/settings/personas");
-
-  // Only staff should see throughput and who is holding things up.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: membership } = await supabase
-    .from("persona_members")
-    .select("role")
-    .eq("persona_id", personaId)
-    .eq("user_id", user?.id ?? "")
-    .maybeSingle();
-  if (membership?.role === "model") redirect("/");
 
   const [{ data: requests }, { data: links }] = await Promise.all([
     supabase
@@ -200,14 +183,7 @@ export default async function PipelinePage() {
     .slice(0, 6);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Where content is, how fast it moves, and what is stuck
-        </p>
-      </div>
-
+    <div className="space-y-5">
       <StageFunnel stages={stages} />
       <ThroughputChart weeks={weeks} />
       <StageDurations durations={durations} />
