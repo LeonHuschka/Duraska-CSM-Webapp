@@ -181,7 +181,10 @@ export default async function DashboardPage({
 
     // What she has delivered that nobody has posted yet — the shelf.
     const inStock = toEdit + readyToPost;
-    const dailyOut = Math.max(1, Math.round(weeklyTarget / 7));
+    // What the accounts actually consume — not what she is asked to shoot.
+    // Those are different numbers whenever the weekly goal is set by hand,
+    // and using the goal would report a healthy buffer while it drains.
+    const dailyOut = Math.max(1, liveAccounts * postsPerDay);
 
     // Deep link into the requests topic, so "to shoot" is one tap from the
     // list it comes from. Supergroup ids carry a -100 prefix t.me won't take.
