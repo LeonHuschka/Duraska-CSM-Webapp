@@ -166,9 +166,29 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       .sort((a, b) => a.t - b.t);
   };
 
+  // Two grids for the same account on one day describe the same reels
+  // twice — summing both would double the day's views. Only the newest
+  // capture of that day counts, and its tiles are summed.
+  const newestPerAccountPerDay = new Map<string, string>();
+  for (const r of reels ?? []) {
+    if (!r.account_id || r.needs_review || r.views == null) continue;
+    const key = `${r.account_id}|${dayKey(r.captured_at)}`;
+    const seen = newestPerAccountPerDay.get(key);
+    if (!seen || r.captured_at > seen) {
+      newestPerAccountPerDay.set(key, r.captured_at);
+    }
+  }
   const viewSeries = seriesFrom(
     (reels ?? [])
-      .filter((r) => !r.needs_review && r.views != null)
+      .filter(
+        (r) =>
+          !r.needs_review &&
+          r.views != null &&
+          r.account_id &&
+          newestPerAccountPerDay.get(
+            `${r.account_id}|${dayKey(r.captured_at)}`
+          ) === r.captured_at
+      )
       .map((r) => ({
         captured_at: r.captured_at,
         account_id: r.account_id,
