@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { Upload, Loader2, X, Link as LinkIcon, Film, CheckCircle2, Plus } from "lucide-react";
+import { Upload, Loader2, X, Link as LinkIcon, Film, CheckCircle2, Plus, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -14,6 +14,7 @@ import { safeStorageName } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Upload page — the model's entry point.
@@ -140,7 +141,11 @@ function putWithProgress(
 }
 
 export function UploadView({ personaId }: { personaId: string }) {
+  // Not every reel comes from a link — some she just has in her head, and
+  // then the editor has nothing to look at unless she writes it down.
+  const [source, setSource] = useState<"inspo" | "own">("inspo");
   const [inspoLink, setInspoLink] = useState("");
+  const [notes, setNotes] = useState("");
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -238,6 +243,7 @@ export function UploadView({ personaId }: { personaId: string }) {
   async function runUpload() {
     const created = await createSelfProducedRequest({
       inspo_link: inspoLink.trim() || null,
+      notes: source === "own" ? notes.trim() || null : null,
       is_nsfw: isNsfw,
     });
     if (created.error || !created.request_id) {
@@ -386,11 +392,37 @@ export function UploadView({ personaId }: { personaId: string }) {
         <p className="mt-0.5 text-base font-semibold">{previewTitle}</p>
       </div>
 
+      {/* Where the idea came from */}
+      <div className="grid grid-cols-2 gap-2">
+        {(
+          [
+            { key: "inspo", label: "Copied a reel" },
+            { key: "own", label: "My own idea" },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => setSource(opt.key)}
+            disabled={uploading}
+            className={`rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
+              source === opt.key
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 bg-card text-muted-foreground"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       {/* Inspo link */}
       <div className="space-y-1.5">
         <Label className="flex items-center gap-1.5">
           <LinkIcon className="h-3.5 w-3.5" /> Inspo Link{" "}
-          <span className="text-muted-foreground">(the reel you copied)</span>
+          <span className="text-muted-foreground">
+            {source === "inspo" ? "(the reel you copied)" : "(optional)"}
+          </span>
         </Label>
         <Input
           value={inspoLink}
@@ -401,6 +433,26 @@ export function UploadView({ personaId }: { personaId: string }) {
           inputMode="url"
         />
       </div>
+
+      {/* Her brief — only for own ideas, where nothing else explains the reel */}
+      {source === "own" && (
+        <div className="space-y-1.5">
+          <Label className="flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" /> Notes for the editor
+          </Label>
+          <Textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="What should this reel be? Music, text on screen, the vibe, where to cut…"
+            disabled={uploading}
+            rows={4}
+            className="text-sm"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Without a link this is all the editor has to go on.
+          </p>
+        </div>
+      )}
 
       {/* NSFW */}
       <button

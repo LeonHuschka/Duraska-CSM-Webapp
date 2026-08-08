@@ -64,6 +64,8 @@ export async function getNextReelTitle() {
  */
 export async function createSelfProducedRequest(data: {
   inspo_link?: string | null;
+  /** What the reel is meant to be, in her words — only for own ideas. */
+  notes?: string | null;
   is_nsfw: boolean;
   is_trial?: boolean;
   is_warmup?: boolean;
@@ -95,7 +97,11 @@ export async function createSelfProducedRequest(data: {
     .insert({
       persona_id: personaId,
       title,
-      description: "Self-produced based on inspo",
+      // Her own brief when there is one — the editor has nothing else to
+      // go on for a reel that exists only in her head.
+      description:
+        data.notes?.trim() ||
+        (data.inspo_link ? "Self-produced based on inspo" : "Own idea"),
       inspo_link: data.inspo_link ?? null,
       content_type_id: null,
       is_nsfw: data.is_nsfw,

@@ -89,7 +89,8 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
         (j) =>
           j.title.toLowerCase().includes(q) ||
           j.content_type_name?.toLowerCase().includes(q) ||
-          j.inspo_link?.toLowerCase().includes(q)
+          j.inspo_link?.toLowerCase().includes(q) ||
+          j.description?.toLowerCase().includes(q)
       );
     }
     return items;
@@ -204,6 +205,18 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
                   <span>·</span>
                   <span>{timeAgo(job.created_at)}</span>
                 </div>
+
+                {/* Her brief. For a reel she made up there is no inspo reel
+                    to watch, so this is the only thing telling the editor
+                    what it is supposed to be. */}
+                {job.description &&
+                  !/^(Self-produced based on inspo|Own idea)$/.test(
+                    job.description
+                  ) && (
+                    <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
+                      {job.description}
+                    </p>
+                  )}
               </div>
 
               {/* inspo quick-open */}

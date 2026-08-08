@@ -9,6 +9,7 @@ export interface EditJob {
   is_nsfw: boolean;
   is_trial: boolean;
   inspo_link: string | null;
+  description: string | null;
   created_at: string;
   content_type_name: string | null;
   rawCount: number;
@@ -31,7 +32,7 @@ export default async function EditingPage() {
   // posted (archive-ish). We show shooted + edited primarily.
   const { data: requests } = await supabase
     .from("content_requests")
-    .select("id, title, status, is_nsfw, is_trial, inspo_link, created_at, content_type_id")
+    .select("id, title, status, is_nsfw, is_trial, inspo_link, description, created_at, content_type_id")
     .eq("persona_id", personaId)
     .in("status", ["shooted", "edited", "posted"])
     .order("created_at", { ascending: false })
@@ -71,6 +72,7 @@ export default async function EditingPage() {
         is_nsfw: r.is_nsfw,
         is_trial: r.is_trial,
         inspo_link: r.inspo_link,
+        description: r.description,
         created_at: r.created_at,
         content_type_name: r.content_type_id ? typeName[r.content_type_id] ?? null : null,
         rawCount: counts.raw,
