@@ -268,6 +268,34 @@ async function handleScreenshot(msg: TgMessage) {
     return; // not an analytics screenshot — say nothing
   }
 
+  // A grid is a list, not a measurement: one row per tile, keyed on the
+  // message so Telegram redelivering the same photo changes nothing.
+  if (metrics.reels.length > 0) {
+    await supabase.from("reel_metrics").upsert(
+      metrics.reels.map((r) => ({
+        persona_id: account.persona_id,
+        account_id: account.id,
+        captured_at: new Date(msg.date * 1000).toISOString(),
+        position: r.position,
+        views: r.views,
+        likes: r.likes,
+        caption: r.caption,
+        source_chat_id: msg.chat.id,
+        source_message_id: msg.message_id,
+        confidence: metrics.confidence,
+        needs_review: metrics.confidence < 0.6,
+      })),
+      { onConflict: "source_chat_id,source_message_id,position" }
+    );
+
+    await setMessageReaction({
+      chat_id: msg.chat.id,
+      message_id: msg.message_id,
+      emoji: metrics.confidence < 0.6 ? "🤔" : "📊",
+    });
+    return;
+  }
+
   await supabase.from("account_metrics").insert({
     persona_id: account.persona_id,
     account_id: account.id,

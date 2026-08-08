@@ -9,10 +9,17 @@ import "server-only";
  * worse than leaving them null.
  */
 
+export interface ExtractedReel {
+  position: number;
+  views: number | null;
+  likes: number | null;
+  caption: string | null;
+}
+
 export interface ExtractedMetrics {
   handle: string | null;
   platform: string | null;
-  metric_kind: "profile" | "post" | "story" | "reel" | "unknown";
+  metric_kind: "profile" | "post" | "story" | "reel" | "reel_grid" | "unknown";
   period: string | null;
   followers: number | null;
   follows: number | null;
@@ -25,6 +32,8 @@ export interface ExtractedMetrics {
   shares: number | null;
   saves: number | null;
   profile_visits: number | null;
+  /** One entry per tile when the screenshot is a grid of reels. */
+  reels: ExtractedReel[];
   confidence: number;
   notes: string | null;
 }
@@ -46,9 +55,9 @@ const TOOL = {
       },
       metric_kind: {
         type: "string",
-        enum: ["profile", "post", "story", "reel", "unknown"],
+        enum: ["profile", "post", "story", "reel", "reel_grid", "unknown"],
         description:
-          "profile = account overview/insights, post/reel/story = stats of a single piece of content",
+          "profile = account overview/insights, post/reel/story = stats of a single piece of content, reel_grid = a grid or row of several reel thumbnails each with its own view count",
       },
       period: {
         type: ["string", "null"],
@@ -65,6 +74,24 @@ const TOOL = {
       shares: { type: ["integer", "null"] },
       saves: { type: ["integer", "null"] },
       profile_visits: { type: ["integer", "null"] },
+      reels: {
+        type: "array",
+        description:
+          "For metric_kind=reel_grid only: one entry per visible thumbnail, in reading order (newest first, left to right, then next row). Skip tiles that carry no number, and skip the 'create reel' tile.",
+        items: {
+          type: "object",
+          properties: {
+            position: {
+              type: "integer",
+              description: "1 for the first tile in reading order, then 2, 3, …",
+            },
+            views: { type: ["integer", "null"], description: "The play/view count on the tile" },
+            likes: { type: ["integer", "null"] },
+            caption: { type: ["string", "null"], description: "Caption text on the tile, if any" },
+          },
+          required: ["position"],
+        },
+      },
       confidence: {
         type: "number",
         description:
@@ -88,8 +115,16 @@ Rules:
   Aufrufe/Wiedergaben=views, Reichweite=reach, Impressionen=impressions,
   "Gefällt mir"=likes, Kommentare=comments, Geteilt=shares, Gespeichert=saves,
   Profilaufrufe=profile_visits.
+- A grid or horizontal row of reel thumbnails, each with a small play/eye
+  count on it, is metric_kind="reel_grid". Fill the "reels" array with one
+  entry per tile in reading order and leave the single-value fields null.
+  The tile order is what the app relies on, so do not reorder or sort them.
+- If a tile's number is unreadable, still emit the tile with views=null
+  rather than shifting the positions of the tiles after it.
 - If the image is not an analytics screenshot at all, set metric_kind="unknown"
-  and confidence=0.`;
+  and confidence=0.
+- A photograph of a screen (visible glare, tilt, moiré) is not a screenshot:
+  read what is legible, and lower confidence below 0.6.`;
 
 export async function extractMetricsFromImage(
   imageBase64: string,
@@ -165,6 +200,16 @@ export async function extractMetricsFromImage(
         shares: raw.shares ?? null,
         saves: raw.saves ?? null,
         profile_visits: raw.profile_visits ?? null,
+        reels: Array.isArray(raw.reels)
+          ? raw.reels
+              .filter((r) => r && typeof r.position === "number")
+              .map((r) => ({
+                position: r.position,
+                views: r.views ?? null,
+                likes: r.likes ?? null,
+                caption: r.caption ?? null,
+              }))
+          : [],
         confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
         notes: raw.notes ?? null,
       },

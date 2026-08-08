@@ -467,6 +467,54 @@ export type Database = {
         };
         Relationships: [];
       };
+      reel_metrics: {
+        Row: {
+          id: string;
+          persona_id: string;
+          account_id: string | null;
+          captured_at: string;
+          position: number;
+          views: number | null;
+          likes: number | null;
+          caption: string | null;
+          source_chat_id: number | null;
+          source_message_id: number | null;
+          confidence: number | null;
+          needs_review: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          account_id?: string | null;
+          captured_at?: string;
+          position: number;
+          views?: number | null;
+          likes?: number | null;
+          caption?: string | null;
+          source_chat_id?: number | null;
+          source_message_id?: number | null;
+          confidence?: number | null;
+          needs_review?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          account_id?: string | null;
+          captured_at?: string;
+          position?: number;
+          views?: number | null;
+          likes?: number | null;
+          caption?: string | null;
+          source_chat_id?: number | null;
+          source_message_id?: number | null;
+          confidence?: number | null;
+          needs_review?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       account_metrics: {
         Row: {
           id: string;
