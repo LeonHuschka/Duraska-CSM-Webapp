@@ -304,54 +304,95 @@ async function handleScreenshot(msg: TgMessage) {
   // A grid is a list, not a measurement: one row per tile, keyed on the
   // message so Telegram redelivering the same photo changes nothing.
   if (metrics.reels.length > 0) {
-    // Which of our reels is on each tile. Candidates are the most recently
-    // finished cuts — deliberately not "what we think was posted here",
-    // since a posting nobody marked is exactly the case that breaks
-    // position-based guessing.
+    // Which of our reels is on each tile.
+    //
+    // Candidates are anchored on when the screenshot was taken, not on
+    // today: a grid from three weeks ago can only contain cuts that existed
+    // by then, and the twenty newest cuts as of now wouldn't include any of
+    // them. For a live screenshot this is the same set as before.
+    //
+    // Deliberately not "what we think was posted on this account" — an
+    // unmarked posting is exactly the case that broke position-based
+    // guessing.
     const { data: recent } = await supabase
       .from("content_assets")
       .select("request_id, thumbnail_path, uploaded_at")
       .eq("stage", "edited")
       .not("thumbnail_path", "is", null)
+      .lte("uploaded_at", capturedAt)
       .order("uploaded_at", { ascending: false })
-      .limit(60);
+      .limit(200);
 
-    const candidates: { requestId: string; base64: string; mime: string }[] = [];
+    const pool: { requestId: string; path: string }[] = [];
     const seenRequest = new Set<string>();
     for (const c of recent ?? []) {
-      if (candidates.length >= 20) break;
       if (!c.request_id || !c.thumbnail_path) continue;
       if (seenRequest.has(c.request_id)) continue;
       seenRequest.add(c.request_id);
-      const { data: signed } = await supabase.storage
-        .from("content-assets")
-        .createSignedUrl(c.thumbnail_path, 600);
-      if (!signed?.signedUrl) continue;
-      try {
-        const res = await fetch(signed.signedUrl);
-        if (!res.ok) continue;
-        const buf = Buffer.from(await res.arrayBuffer());
-        candidates.push({
-          requestId: c.request_id,
-          base64: buf.toString("base64"),
-          mime: "image/jpeg",
-        });
-      } catch {
-        // A thumbnail that won't load just isn't a candidate.
-      }
+      pool.push({ requestId: c.request_id, path: c.thumbnail_path });
     }
 
-    const { data: matches, error: matchErr } = await matchGridToReels(
-      { base64: file.base64, mime: file.mime },
-      candidates.map((c) => ({ base64: c.base64, mime: c.mime }))
-    );
-    if (matchErr) console.warn("[telegram] tile matching failed", matchErr);
+    const loadThumb = async (path: string) => {
+      const { data: url } = await supabase.storage
+        .from("content-assets")
+        .createSignedUrl(path, 600);
+      if (!url?.signedUrl) return null;
+      try {
+        const res = await fetch(url.signedUrl);
+        if (!res.ok) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        return buf.toString("base64");
+      } catch {
+        return null; // a thumbnail that won't load just isn't a candidate
+      }
+    };
+
+    // Work through the pool in batches, oldest rounds only for the tiles
+    // still unidentified. Sending sixty thumbnails in one call would be
+    // slower and less accurate than three focused ones.
+    const BATCH = 20;
+    const MAX_ROUNDS = 3;
     const requestForPosition = new Map<number, string>();
-    for (const m of matches ?? []) {
-      if (m.candidate === null) continue;
-      const c = candidates[m.candidate - 1];
-      if (c) requestForPosition.set(m.position, c.requestId);
+    const takenRequests = new Set<string>();
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const open = metrics.reels
+        .map((r) => r.position)
+        .filter((p) => !requestForPosition.has(p));
+      if (open.length === 0) break;
+
+      const slice = pool
+        .filter((c) => !takenRequests.has(c.requestId))
+        .slice(round * BATCH, round * BATCH + BATCH);
+      if (slice.length === 0) break;
+
+      const batch: { requestId: string; base64: string; mime: string }[] = [];
+      for (const c of slice) {
+        const base64 = await loadThumb(c.path);
+        if (base64) batch.push({ requestId: c.requestId, base64, mime: "image/jpeg" });
+      }
+      if (batch.length === 0) continue;
+
+      const { data: matches, error: matchErr } = await matchGridToReels(
+        { base64: file.base64, mime: file.mime },
+        batch.map((c) => ({ base64: c.base64, mime: c.mime }))
+      );
+      if (matchErr) {
+        console.warn("[telegram] tile matching failed", matchErr);
+        break;
+      }
+      for (const m of matches ?? []) {
+        if (m.candidate === null) continue;
+        if (requestForPosition.has(m.position)) continue;
+        const c = batch[m.candidate - 1];
+        if (!c || takenRequests.has(c.requestId)) continue;
+        requestForPosition.set(m.position, c.requestId);
+        takenRequests.add(c.requestId);
+      }
     }
+    console.log(
+      `[telegram] matched ${requestForPosition.size}/${metrics.reels.length} tiles from ${pool.length} candidates`
+    );
 
     const { error: gridErr } = await supabase.from("reel_metrics").upsert(
       metrics.reels.map((r) => ({
