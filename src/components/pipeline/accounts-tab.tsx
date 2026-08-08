@@ -70,6 +70,12 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
   postedByAccount.forEach((list) => list.sort((a, b) => b.at - a.at));
 
   const titles = new Map<string, string>();
+  // The finished cut per request, so a tile can show the actual reel rather
+  // than just its name.
+  const clips = new Map<
+    string,
+    { path: string; thumb: string | null; mime: string | null }
+  >();
   const allPosted: { requestId: string; at: number }[] = [];
   postedByAccount.forEach((list) => allPosted.push(...list));
   const requestIds = Array.from(new Set(allPosted.map((p) => p.requestId)));
@@ -79,6 +85,40 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       .select("id, title")
       .in("id", requestIds);
     for (const r of reqs ?? []) titles.set(r.id, r.title);
+
+    const { data: cuts } = await supabase
+      .from("content_assets")
+      .select("request_id, file_path, thumbnail_path, mime_type, uploaded_at")
+      .in("request_id", requestIds)
+      .eq("stage", "edited")
+      .order("uploaded_at", { ascending: false });
+    for (const c of cuts ?? []) {
+      if (!c.request_id || !c.file_path) continue;
+      if (clips.has(c.request_id)) continue; // newest wins
+      clips.set(c.request_id, {
+        path: c.file_path,
+        thumb: c.thumbnail_path,
+        mime: c.mime_type,
+      });
+    }
+  }
+
+  // Signing is metadata only and costs no egress — the bytes are only
+  // fetched if someone presses play, which is why the poster carries the
+  // thumbnail and the video preloads nothing.
+  const signed = new Map<string, string>();
+  const toSign = new Set<string>();
+  clips.forEach((c) => {
+    toSign.add(c.path);
+    if (c.thumb) toSign.add(c.thumb);
+  });
+  if (toSign.size > 0) {
+    const { data: urls } = await supabase.storage
+      .from("content-assets")
+      .createSignedUrls(Array.from(toSign), 3600);
+    for (const u of urls ?? []) {
+      if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+    }
   }
 
   const rows = (accounts ?? []).map((a, i) => {
@@ -100,16 +140,21 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
     const tiles = mine
       .filter((r) => r.captured_at === newestCapture)
       .sort((x, y) => x.position - y.position)
-      .map((r) => ({
-        position: r.position,
-        views: r.views,
-        likes: r.likes,
-        caption: r.caption,
-        title:
-          titles.get(
-            postedByAccount.get(a.id)?.[r.position - 1]?.requestId ?? ""
-          ) ?? null,
-      }));
+      .map((r) => {
+        const requestId =
+          postedByAccount.get(a.id)?.[r.position - 1]?.requestId ?? "";
+        const clip = clips.get(requestId);
+        return {
+          position: r.position,
+          views: r.views,
+          likes: r.likes,
+          caption: r.caption,
+          title: titles.get(requestId) ?? null,
+          src: clip ? (signed.get(clip.path) ?? null) : null,
+          poster: clip?.thumb ? (signed.get(clip.thumb) ?? null) : null,
+          mime: clip?.mime ?? null,
+        };
+      });
 
     return {
       ...a,
@@ -338,17 +383,33 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
           ) : (
             <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1">
               {r.tiles.map((t) => (
-                <div
-                  key={t.position}
-                  className="flex w-28 shrink-0 flex-col justify-between rounded-xl border border-border/40 bg-muted/30 p-2"
-                >
-                  <p className="text-[10px] text-muted-foreground">
-                    #{t.position}
-                  </p>
-                  <p className="mt-3 truncate text-xs font-medium">
+                <div key={t.position} className="w-32 shrink-0">
+                  <div className="relative aspect-[9/16] overflow-hidden rounded-xl border border-border/40 bg-muted/30">
+                    {t.src ? (
+                      <video
+                        src={t.src}
+                        poster={t.poster ?? undefined}
+                        controls
+                        playsInline
+                        // Nothing is fetched until play — a row of reels
+                        // would otherwise cost hundreds of megabytes of
+                        // egress just by being on screen.
+                        preload="none"
+                        className="h-full w-full bg-black object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-muted-foreground">
+                        no cut in the vault
+                      </div>
+                    )}
+                    <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
+                      #{t.position}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 truncate text-xs font-medium">
                     {t.title ?? t.caption ?? "unmatched"}
                   </p>
-                  <div className="mt-2 flex items-center justify-between text-[11px]">
+                  <div className="flex items-center justify-between text-[11px]">
                     <span className="tabular-nums">
                       ▶ {t.views != null ? nf.format(t.views) : "—"}
                     </span>
