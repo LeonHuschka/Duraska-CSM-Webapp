@@ -197,12 +197,24 @@ async function handleMessage(msg: TgMessage) {
  * Screenshot posted in a group that's mapped to an account → run it through
  * the vision model and store whatever numbers it could read.
  *
- * Reacts 👀 while working and 📊 on success so the VA sees it landed;
- * low-confidence reads are stored but flagged for review rather than
- * silently trusted.
+ * Every outcome answers with a reaction, because the VA has no other way
+ * to know: 👀 picked up, 💯 numbers stored, 🤔 stored but flagged for
+ * review, 🤨 nothing readable, 🤷‍♂️ this topic isn't tied to an account.
  */
 async function handleScreenshot(msg: TgMessage) {
   const supabase = createAdminClient();
+
+  // Say "got it" before the slow part. Vision takes seconds and every exit
+  // below used to be silent, so a VA could not tell a processed screenshot
+  // from an ignored one — and the emoji that was meant to confirm it was
+  // rejected by Telegram anyway.
+  const react = (emoji: string) =>
+    setMessageReaction({
+      chat_id: msg.chat.id,
+      message_id: msg.message_id,
+      emoji,
+    });
+  await react(REACTION.seen);
 
   // Which account does this screenshot belong to? The accounts sit in
   // topics of one forum group, so the chat id is the same for all of them
@@ -237,6 +249,7 @@ async function handleScreenshot(msg: TgMessage) {
   }
   if (!account) {
     console.log("[telegram] screenshot from unmapped chat", msg.chat.id, "topic", thread);
+    await react(REACTION.unmapped);
     return;
   }
 
@@ -251,10 +264,16 @@ async function handleScreenshot(msg: TgMessage) {
 
   // Largest rendition = most legible for the model.
   const photo = [...(msg.photo ?? [])].sort((a, b) => b.width - a.width)[0];
-  if (!photo) return;
+  if (!photo) {
+    await react(REACTION.unreadable);
+    return;
+  }
 
   const file = await downloadFile(photo.file_id);
-  if (!file) return;
+  if (!file) {
+    await react(REACTION.unreadable);
+    return;
+  }
 
   const { data: metrics, error } = await extractMetricsFromImage(
     file.base64,
@@ -262,10 +281,13 @@ async function handleScreenshot(msg: TgMessage) {
   );
   if (!metrics || error) {
     console.warn("[telegram] vision failed", error);
+    await react(REACTION.unreadable);
     return;
   }
   if (metrics.metric_kind === "unknown" && metrics.confidence === 0) {
-    return; // not an analytics screenshot — say nothing
+    // Not an analytics screenshot. Still answer — silence reads as a bug.
+    await react(REACTION.unreadable);
+    return;
   }
 
   // A grid is a list, not a measurement: one row per tile, keyed on the
@@ -289,11 +311,9 @@ async function handleScreenshot(msg: TgMessage) {
       { onConflict: "source_chat_id,source_message_id,position" }
     );
 
-    await setMessageReaction({
-      chat_id: msg.chat.id,
-      message_id: msg.message_id,
-      emoji: metrics.confidence < 0.6 ? "🤔" : "📊",
-    });
+    await react(
+      metrics.confidence < 0.6 ? REACTION.unsure : REACTION.read
+    );
     return;
   }
 
@@ -328,11 +348,7 @@ async function handleScreenshot(msg: TgMessage) {
     needs_review: metrics.confidence < 0.6,
   });
 
-  await setMessageReaction({
-    chat_id: msg.chat.id,
-    message_id: msg.message_id,
-    emoji: metrics.confidence < 0.6 ? "🤔" : "📊",
-  });
+  await react(metrics.confidence < 0.6 ? REACTION.unsure : REACTION.read);
 }
 
 /**

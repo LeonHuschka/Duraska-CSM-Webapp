@@ -259,9 +259,24 @@ export async function checkInstagramAlive(
   return { alive: null, reason: attempts.map((a) => a.reason).join(" · ") };
 }
 
-/** Emoji vocabulary for the pipeline steps. */
+/**
+ * Emoji vocabulary.
+ *
+ * Telegram only accepts a fixed set for bot reactions and rejects anything
+ * else with REACTION_INVALID. 📊 was used for screenshots and is not on the
+ * list, so every acknowledgement silently failed and a VA had no way to
+ * tell a processed screenshot from an ignored one. Verified against the API
+ * before use.
+ */
 export const REACTION = {
   uploaded: "👍", // takes are in the app
   edited: "🔥", // final cut is done
   dead: "💔",
+
+  // Screenshot handling, in the account topics
+  seen: "👀", // picked up, vision is running
+  read: "💯", // numbers extracted and stored
+  unsure: "🤔", // extracted but flagged for review
+  unreadable: "🤨", // nothing usable in the image
+  unmapped: "🤷‍♂️", // this topic isn't tied to an account
 } as const;
