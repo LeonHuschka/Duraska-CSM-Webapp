@@ -293,7 +293,7 @@ async function handleScreenshot(msg: TgMessage) {
   // A grid is a list, not a measurement: one row per tile, keyed on the
   // message so Telegram redelivering the same photo changes nothing.
   if (metrics.reels.length > 0) {
-    await supabase.from("reel_metrics").upsert(
+    const { error: gridErr } = await supabase.from("reel_metrics").upsert(
       metrics.reels.map((r) => ({
         persona_id: account.persona_id,
         account_id: account.id,
@@ -310,6 +310,13 @@ async function handleScreenshot(msg: TgMessage) {
       })),
       { onConflict: "source_chat_id,source_message_id,position" }
     );
+    // A rejected write used to look exactly like a successful one: the
+    // reaction went on either way and the row simply wasn't there.
+    if (gridErr) {
+      console.error("[telegram] reel grid not stored", gridErr.message);
+      await react(REACTION.unreadable);
+      return;
+    }
 
     await react(
       metrics.confidence < 0.6 ? REACTION.unsure : REACTION.read
@@ -317,7 +324,7 @@ async function handleScreenshot(msg: TgMessage) {
     return;
   }
 
-  await supabase.from("account_metrics").insert({
+  const { error: profileErr } = await supabase.from("account_metrics").insert({
     persona_id: account.persona_id,
     account_id: account.id,
     source_chat_id: msg.chat.id,
@@ -347,6 +354,11 @@ async function handleScreenshot(msg: TgMessage) {
     confidence: metrics.confidence,
     needs_review: metrics.confidence < 0.6,
   });
+  if (profileErr) {
+    console.error("[telegram] profile metrics not stored", profileErr.message);
+    await react(REACTION.unreadable);
+    return;
+  }
 
   await react(metrics.confidence < 0.6 ? REACTION.unsure : REACTION.read);
 }

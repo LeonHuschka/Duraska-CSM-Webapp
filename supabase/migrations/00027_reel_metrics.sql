@@ -28,9 +28,12 @@ create table if not exists public.reel_metrics (
   created_at timestamptz not null default now()
 );
 
+-- Not partial: ON CONFLICT cannot target a partial index, and PostgREST's
+-- upsert was rejected by Postgres because of it — silently, since the error
+-- was never read. Nulls are distinct in a unique index anyway, so the
+-- unconditional form does the same job.
 create unique index if not exists idx_reel_metrics_source
-  on public.reel_metrics(source_chat_id, source_message_id, position)
-  where source_chat_id is not null;
+  on public.reel_metrics(source_chat_id, source_message_id, position);
 
 create index if not exists idx_reel_metrics_account_time
   on public.reel_metrics(account_id, captured_at desc);
