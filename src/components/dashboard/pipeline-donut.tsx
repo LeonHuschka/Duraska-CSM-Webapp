@@ -406,80 +406,93 @@ export function ContentStock({
 }
 
 /**
- * Cumulative line over time. Plain SVG — a chart library would be more
- * kilobytes than this whole page.
+ * Two measures on one time axis.
+ *
+ * Views and followers live on completely different scales — tens of
+ * thousands against a few hundred — so a shared axis would flatten the
+ * follower line onto the floor and say nothing. Each series is scaled to
+ * its own maximum and its current value sits in the legend, which keeps
+ * both shapes readable; the note says so, because a reader is otherwise
+ * entitled to assume one axis.
  */
-export function LineChart({
-  points,
-  label,
+export function TrendChart({
+  series,
 }: {
-  points: { t: number; value: number }[];
-  label: string;
+  series: { key: string; label: string; color: string; points: { t: number; value: number }[] }[];
 }) {
-  if (points.length < 2) {
+  const drawable = series.filter((s) => s.points.length >= 2);
+  const nfmt = new Intl.NumberFormat("de-DE");
+
+  if (drawable.length === 0) {
     return (
-      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 text-center text-xs text-muted-foreground">
-        {points.length === 0
-          ? "No readings yet"
-          : "One reading so far — a line needs two"}
+      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 px-4 text-center text-xs text-muted-foreground">
+        Not enough readings yet — a line needs two screenshots on different
+        days.
       </div>
     );
   }
 
-  const W = 300;
-  const H = 140;
-  const PAD = 6;
-  const xs = points.map((p) => p.t);
-  const ys = points.map((p) => p.value);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const maxY = Math.max(...ys);
+  const W = 320;
+  const H = 150;
+  const PAD = 8;
+  const allT = drawable.flatMap((s) => s.points.map((p) => p.t));
+  const minX = Math.min(...allT);
+  const maxX = Math.max(...allT);
   const spanX = maxX - minX || 1;
-  const spanY = maxY || 1;
 
-  const coords = points.map((p) => ({
-    x: PAD + ((p.t - minX) / spanX) * (W - PAD * 2),
-    y: H - PAD - (p.value / spanY) * (H - PAD * 2),
-  }));
-  const line = coords.map((c, i) => `${i ? "L" : "M"}${c.x},${c.y}`).join(" ");
-  const area = `${line} L${coords[coords.length - 1].x},${H} L${coords[0].x},${H} Z`;
-  const last = points[points.length - 1];
-  const first = points[0];
-  const nfmt = new Intl.NumberFormat("de-DE");
+  const paths = drawable.map((s) => {
+    const maxY = Math.max(...s.points.map((p) => p.value)) || 1;
+    const coords = s.points.map((p) => ({
+      x: PAD + ((p.t - minX) / spanX) * (W - PAD * 2),
+      y: H - PAD - (p.value / maxY) * (H - PAD * 2),
+    }));
+    return {
+      ...s,
+      d: coords.map((c, i) => `${i ? "L" : "M"}${c.x},${c.y}`).join(" "),
+      coords,
+      latest: s.points[s.points.length - 1].value,
+    };
+  });
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="text-sm font-semibold tabular-nums">
-          {nfmt.format(last.value)}
-        </span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 h-36 w-full">
-        <defs>
-          <linearGradient id="lineFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <g className="text-primary">
-          <path d={area} fill="url(#lineFill)" />
-          <path
-            d={line}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {coords.map((c, i) => (
-            <circle key={i} cx={c.x} cy={c.y} r="2" fill="currentColor" />
-          ))}
-        </g>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-36 w-full">
+        {paths.map((p) => (
+          <g key={p.key} className={p.color}>
+            <path
+              d={p.d}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {p.coords.map((c, i) => (
+              <circle key={i} cx={c.x} cy={c.y} r="2" fill="currentColor" />
+            ))}
+          </g>
+        ))}
       </svg>
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{new Date(first.t).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}</span>
-        <span>{new Date(last.t).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}</span>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+        {paths.map((p) => (
+          <span key={p.key} className="flex items-center gap-1.5 text-[11px]">
+            <span className={`h-2 w-2 rounded-sm ${p.color.replace("text-", "bg-")}`} />
+            <span className="text-muted-foreground">{p.label}</span>
+            <span className="font-semibold tabular-nums">
+              {nfmt.format(p.latest)}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>
+          {new Date(minX).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}
+        </span>
+        <span className="opacity-70">each line scaled to its own peak</span>
+        <span>
+          {new Date(maxX).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}
+        </span>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
-import { Scissors, Archive, Upload, Eye, ArrowLeft } from "lucide-react";
+import { Upload, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import {
   PipelineDonut,
@@ -388,33 +388,6 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Quick actions */}
-      <div className="rounded-xl border border-border/50 bg-card p-5">
-        <h2 className="text-sm font-medium text-muted-foreground">Quick actions</h2>
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
-          <Link
-            href="/upload"
-            className="flex items-center gap-3 rounded-lg bg-accent/50 px-4 py-3 text-sm font-medium transition-colors hover:bg-accent"
-          >
-            <Upload className="h-4 w-4 text-primary" />
-            Upload takes
-          </Link>
-          <Link
-            href="/editing"
-            className="flex items-center gap-3 rounded-lg bg-accent/50 px-4 py-3 text-sm font-medium transition-colors hover:bg-accent"
-          >
-            <Scissors className="h-4 w-4 text-primary" />
-            Editing queue
-          </Link>
-          <Link
-            href="/vault"
-            className="flex items-center gap-3 rounded-lg bg-accent/50 px-4 py-3 text-sm font-medium transition-colors hover:bg-accent"
-          >
-            <Archive className="h-4 w-4 text-primary" />
-            Vault
-          </Link>
-        </div>
-      </div>
     </div>
   );
 }

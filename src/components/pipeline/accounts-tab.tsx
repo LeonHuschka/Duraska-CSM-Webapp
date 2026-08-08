@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { PipelineDonut, LineChart } from "@/components/dashboard/pipeline-donut";
+import { PipelineDonut, TrendChart } from "@/components/dashboard/pipeline-donut";
 
 /**
  * Accounts tab: the whole operation summarised, then one card per account
@@ -129,57 +129,63 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
   const totalViews = rows.reduce((a, r) => a + r.views, 0);
   const totalFollowers = rows.reduce((a, r) => a + (r.followers ?? 0), 0);
 
-  // The share chart shows views once there are any. Until the first reel
-  // grid is read there are none, and a donut of nothing teaches nothing —
-  // so it falls back to followers, which are already being measured, and
-  // says which of the two it is showing.
-  const byViews = rows.filter((r) => r.views > 0);
-  const shareIsViews = byViews.length > 0;
-  const shareRows = shareIsViews ? byViews : rows.filter((r) => (r.followers ?? 0) > 0);
-  const share = shareRows.map((r) => ({
-    label: `@${r.handle}`,
-    value: shareIsViews ? r.views : (r.followers ?? 0),
-    color: r.tone,
-  }));
-  const shareTotal = share.reduce((a, s) => a + s.value, 0);
+  // Views only, as asked — no follower stand-in. Until the first reel grid
+  // is read this is empty, and saying so is more use than a donut of
+  // followers wearing a views label.
+  const share = rows
+    .filter((r) => r.views > 0)
+    .map((r) => ({ label: `@${r.handle}`, value: r.views, color: r.tone }));
 
-  // Cumulative over time. Each capture is a reading of the whole account,
-  // not an increment, so a day's value is the sum of the newest reading per
-  // account on that day — adding the readings up would count the same
-  // followers again every morning.
+  // Each screenshot is a reading of the whole account, not an increment, so
+  // a day's figure is the newest reading per account summed across accounts.
+  // Adding the readings up would count the same followers again every
+  // morning and draw a rising curve out of a flat account.
   const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
-  const trendMap = new Map<string, Map<string, number>>();
-  const feed = shareIsViews
-    ? (reels ?? [])
-        .filter((r) => !r.needs_review && r.views != null && r.account_id)
-        .map((r) => ({
-          day: dayKey(r.captured_at),
-          account: r.account_id as string,
-          value: Number(r.views),
-          agg: "sum" as const,
-        }))
-    : (metrics ?? [])
-        .filter((m) => !m.needs_review && m.followers != null && m.account_id)
-        .map((m) => ({
-          day: dayKey(m.captured_at),
-          account: m.account_id as string,
-          value: Number(m.followers),
-          agg: "last" as const,
-        }));
-  for (const f of feed) {
-    const perDay = trendMap.get(f.day) ?? new Map<string, number>();
-    perDay.set(
-      f.account,
-      f.agg === "sum" ? (perDay.get(f.account) ?? 0) + f.value : Math.max(perDay.get(f.account) ?? 0, f.value)
-    );
-    trendMap.set(f.day, perDay);
-  }
-  const trend = Array.from(trendMap.entries())
-    .map(([day, perAccount]) => ({
-      t: new Date(day).getTime(),
-      value: Array.from(perAccount.values()).reduce((a, b) => a + b, 0),
-    }))
-    .sort((a, b) => a.t - b.t);
+  const seriesFrom = (
+    entries: { captured_at: string; account_id: string | null; value: number }[],
+    within: "sum" | "last"
+  ) => {
+    const perDay = new Map<string, Map<string, number>>();
+    for (const e of entries) {
+      if (!e.account_id) continue;
+      const day = dayKey(e.captured_at);
+      const accounts = perDay.get(day) ?? new Map<string, number>();
+      accounts.set(
+        e.account_id,
+        within === "sum"
+          ? (accounts.get(e.account_id) ?? 0) + e.value
+          : Math.max(accounts.get(e.account_id) ?? 0, e.value)
+      );
+      perDay.set(day, accounts);
+    }
+    return Array.from(perDay.entries())
+      .map(([day, accounts]) => ({
+        t: new Date(day).getTime(),
+        value: Array.from(accounts.values()).reduce((a, b) => a + b, 0),
+      }))
+      .sort((a, b) => a.t - b.t);
+  };
+
+  const viewSeries = seriesFrom(
+    (reels ?? [])
+      .filter((r) => !r.needs_review && r.views != null)
+      .map((r) => ({
+        captured_at: r.captured_at,
+        account_id: r.account_id,
+        value: Number(r.views),
+      })),
+    "sum"
+  );
+  const followerSeries = seriesFrom(
+    (metrics ?? [])
+      .filter((m) => !m.needs_review && m.followers != null)
+      .map((m) => ({
+        captured_at: m.captured_at,
+        account_id: m.account_id,
+        value: Number(m.followers),
+      })),
+    "last"
+  );
 
   const fmtAgo = (iso: string | null) => {
     if (!iso) return "no screenshots yet";
@@ -212,27 +218,39 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div>
             <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-              {shareIsViews ? "All views comparison" : "All followers comparison"}
+              All views comparison
             </h3>
             {share.length > 0 ? (
               <PipelineDonut
                 segments={share}
-                centerLabel={shareIsViews ? "views" : "followers"}
-                centerValue={nf.format(shareTotal)}
+                centerLabel="views"
+                centerValue={nf.format(totalViews)}
               />
             ) : (
-              <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 text-center text-xs text-muted-foreground">
-                Nothing read from the screenshots yet
+              <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 px-4 text-center text-xs text-muted-foreground">
+                No views yet — they come from the reel grid screenshot.
               </div>
             )}
           </div>
           <div>
             <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-              {shareIsViews ? "Views over time" : "Followers over time"}
+              Engagement over time
             </h3>
-            <LineChart
-              points={trend}
-              label={shareIsViews ? "total views" : "total followers"}
+            <TrendChart
+              series={[
+                {
+                  key: "views",
+                  label: "Views",
+                  color: "text-purple-400",
+                  points: viewSeries,
+                },
+                {
+                  key: "followers",
+                  label: "Followers",
+                  color: "text-emerald-400",
+                  points: followerSeries,
+                },
+              ]}
             />
           </div>
         </div>
