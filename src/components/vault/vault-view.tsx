@@ -597,7 +597,21 @@ const STAGE_OPTIONS = [
   { value: "all",    label: "All" },
   { value: "raw",    label: "Raw" },
   { value: "edited", label: "Edited ✓" },
-  { value: "final",  label: "Final" },
+] as const;
+
+/**
+ * One tap for the question a VA actually opens the Vault with: what can I
+ * post on Instagram right now?
+ *
+ * "Available" alone can't answer it — it means "posted nowhere", but a SFW
+ * reel that ran on Facebook is still free for Instagram. So a preset also
+ * narrows availability to the platform in question.
+ */
+const PLATFORM_PRESETS = [
+  { platform: "instagram", label: "Instagram", dot: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400" },
+  { platform: "facebook",  label: "Facebook",  dot: "bg-[#1877F2]" },
+  { platform: "tiktok",    label: "TikTok",    dot: "bg-neutral-200" },
+  { platform: "x",         label: "X",         dot: "bg-neutral-500" },
 ] as const;
 const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
@@ -606,6 +620,9 @@ const PLATFORM_FILTER_OPTIONS = [
   { value: "available", label: "Available" },
   { value: "posted", label: "Posted" },
 ];
+
+/** Filter value meaning "not on any account of this platform yet". */
+const freeOn = (platform: string) => `free:${platform}`;
 
 export function VaultView({
   assets,
@@ -771,6 +788,14 @@ export function VaultView({
       items = items.filter((a) => a.postedAccountIds.length === 0);
     } else if (platformFilter === "posted") {
       items = items.filter((a) => a.postedAccountIds.length > 0);
+    } else if (platformFilter.startsWith("free:")) {
+      const platform = platformFilter.slice(5);
+      const onPlatform = new Set(
+        accounts.filter((acc) => acc.platform === platform).map((acc) => acc.id)
+      );
+      items = items.filter(
+        (a) => !a.postedAccountIds.some((id) => onPlatform.has(id))
+      );
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -782,7 +807,27 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search]);
+  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, accounts]);
+
+  // What each preset would show, so the buttons can carry their own count.
+  const presets = useMemo(() => {
+    return PLATFORM_PRESETS.map((p) => {
+      const onPlatform = new Set(
+        accounts.filter((acc) => acc.platform === p.platform).map((acc) => acc.id)
+      );
+      if (onPlatform.size === 0) return { ...p, count: 0 };
+      const count = localAssets.filter(
+        (a) =>
+          a.stage === "edited" &&
+          !a.is_nsfw &&
+          !a.postedAccountIds.some((id) => onPlatform.has(id))
+      ).length;
+      return { ...p, count };
+    }).filter((p) => {
+      // Only platforms he actually posts on.
+      return accounts.some((acc) => acc.platform === p.platform);
+    });
+  }, [localAssets, accounts]);
 
   // Reset pagination whenever filters/search change
   const filterKey = `${stageFilter}-${nsfwFilter}-${platformFilter}-${search}`;
@@ -831,6 +876,44 @@ export function VaultView({
           </button>
         )}
       </div>
+
+      {/* One-tap presets, each carrying the count so the VA can see at a
+          glance whether there is anything to do for that platform. */}
+      {presets.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {presets.map((p) => {
+            const active =
+              stageFilter === "edited" &&
+              nsfwFilter === "sfw" &&
+              platformFilter === freeOn(p.platform);
+            return (
+              <button
+                key={p.platform}
+                onClick={() => {
+                  if (active) {
+                    setPlatformFilter("all");
+                    return;
+                  }
+                  setStageFilter("edited");
+                  setNsfwFilter("sfw");
+                  setPlatformFilter(freeOn(p.platform));
+                }}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className={`h-2.5 w-2.5 rounded-full ${p.dot}`} />
+                Ready for {p.label}
+                <span className="tabular-nums text-muted-foreground">
+                  {p.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Filters — tap-friendly dropdowns (no horizontal dragging on mobile) */}
       <div className="grid grid-cols-3 gap-2">
