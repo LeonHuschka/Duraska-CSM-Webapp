@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { PipelineDonut } from "@/components/dashboard/pipeline-donut";
+import { PipelineDonut, LineChart } from "@/components/dashboard/pipeline-donut";
 
 /**
  * Accounts tab: the whole operation summarised, then one card per account
@@ -128,9 +128,58 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
 
   const totalViews = rows.reduce((a, r) => a + r.views, 0);
   const totalFollowers = rows.reduce((a, r) => a + (r.followers ?? 0), 0);
-  const share = rows
-    .filter((r) => r.views > 0)
-    .map((r) => ({ label: `@${r.handle}`, value: r.views, color: r.tone }));
+
+  // The share chart shows views once there are any. Until the first reel
+  // grid is read there are none, and a donut of nothing teaches nothing —
+  // so it falls back to followers, which are already being measured, and
+  // says which of the two it is showing.
+  const byViews = rows.filter((r) => r.views > 0);
+  const shareIsViews = byViews.length > 0;
+  const shareRows = shareIsViews ? byViews : rows.filter((r) => (r.followers ?? 0) > 0);
+  const share = shareRows.map((r) => ({
+    label: `@${r.handle}`,
+    value: shareIsViews ? r.views : (r.followers ?? 0),
+    color: r.tone,
+  }));
+  const shareTotal = share.reduce((a, s) => a + s.value, 0);
+
+  // Cumulative over time. Each capture is a reading of the whole account,
+  // not an increment, so a day's value is the sum of the newest reading per
+  // account on that day — adding the readings up would count the same
+  // followers again every morning.
+  const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+  const trendMap = new Map<string, Map<string, number>>();
+  const feed = shareIsViews
+    ? (reels ?? [])
+        .filter((r) => !r.needs_review && r.views != null && r.account_id)
+        .map((r) => ({
+          day: dayKey(r.captured_at),
+          account: r.account_id as string,
+          value: Number(r.views),
+          agg: "sum" as const,
+        }))
+    : (metrics ?? [])
+        .filter((m) => !m.needs_review && m.followers != null && m.account_id)
+        .map((m) => ({
+          day: dayKey(m.captured_at),
+          account: m.account_id as string,
+          value: Number(m.followers),
+          agg: "last" as const,
+        }));
+  for (const f of feed) {
+    const perDay = trendMap.get(f.day) ?? new Map<string, number>();
+    perDay.set(
+      f.account,
+      f.agg === "sum" ? (perDay.get(f.account) ?? 0) + f.value : Math.max(perDay.get(f.account) ?? 0, f.value)
+    );
+    trendMap.set(f.day, perDay);
+  }
+  const trend = Array.from(trendMap.entries())
+    .map(([day, perAccount]) => ({
+      t: new Date(day).getTime(),
+      value: Array.from(perAccount.values()).reduce((a, b) => a + b, 0),
+    }))
+    .sort((a, b) => a.t - b.t);
 
   const fmtAgo = (iso: string | null) => {
     if (!iso) return "no screenshots yet";
@@ -145,7 +194,7 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       {/* Summary */}
       <div className="rounded-2xl border border-border/50 bg-card p-5">
         <h2 className="text-sm font-medium">Accounts summarized</h2>
-        <div className="mt-4 grid grid-cols-2 gap-4">
+        <div className="mt-4 flex flex-wrap gap-8">
           <div>
             <p className="text-3xl font-semibold tabular-nums">
               {nf.format(totalViews)}
@@ -160,18 +209,33 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
           </div>
         </div>
 
-        {share.length > 0 && (
-          <div className="mt-6">
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <div>
             <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-              Views by account
+              {shareIsViews ? "All views comparison" : "All followers comparison"}
             </h3>
-            <PipelineDonut
-              segments={share}
-              centerLabel="views"
-              centerValue={nf.format(totalViews)}
+            {share.length > 0 ? (
+              <PipelineDonut
+                segments={share}
+                centerLabel={shareIsViews ? "views" : "followers"}
+                centerValue={nf.format(shareTotal)}
+              />
+            ) : (
+              <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 text-center text-xs text-muted-foreground">
+                Nothing read from the screenshots yet
+              </div>
+            )}
+          </div>
+          <div>
+            <h3 className="mb-3 text-xs font-medium text-muted-foreground">
+              {shareIsViews ? "Views over time" : "Followers over time"}
+            </h3>
+            <LineChart
+              points={trend}
+              label={shareIsViews ? "total views" : "total followers"}
             />
           </div>
-        )}
+        </div>
       </div>
 
       {/* One card per account */}

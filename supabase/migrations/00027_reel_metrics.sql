@@ -46,3 +46,11 @@ create policy "reel_metrics_write" on public.reel_metrics
   for all to authenticated
   using (public.is_owner() or public.is_persona_member(persona_id))
   with check (public.is_owner() or public.is_persona_member(persona_id));
+
+-- Telegram hands the same file back for this id indefinitely, so keeping it
+-- means a screenshot can be re-read after a prompt change without storing
+-- the image ourselves.
+alter table public.reel_metrics
+  add column if not exists source_file_id text;
+alter table public.account_metrics
+  add column if not exists source_file_id text;

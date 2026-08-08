@@ -479,6 +479,7 @@ export type Database = {
           caption: string | null;
           source_chat_id: number | null;
           source_message_id: number | null;
+          source_file_id: string | null;
           confidence: number | null;
           needs_review: boolean;
           created_at: string;
@@ -494,6 +495,7 @@ export type Database = {
           caption?: string | null;
           source_chat_id?: number | null;
           source_message_id?: number | null;
+          source_file_id?: string | null;
           confidence?: number | null;
           needs_review?: boolean;
           created_at?: string;
@@ -522,6 +524,7 @@ export type Database = {
           account_id: string | null;
           source_chat_id: number | null;
           source_message_id: number | null;
+          source_file_id: string | null;
           image_path: string | null;
           captured_at: string;
           handle: string | null;
@@ -550,6 +553,7 @@ export type Database = {
           account_id?: string | null;
           source_chat_id?: number | null;
           source_message_id?: number | null;
+          source_file_id?: string | null;
           image_path?: string | null;
           captured_at?: string;
           handle?: string | null;
@@ -578,6 +582,7 @@ export type Database = {
           account_id: string | null;
           source_chat_id: number | null;
           source_message_id: number | null;
+          source_file_id: string | null;
           image_path: string | null;
           captured_at: string;
           handle: string | null;

@@ -404,3 +404,83 @@ export function ContentStock({
     </div>
   );
 }
+
+/**
+ * Cumulative line over time. Plain SVG — a chart library would be more
+ * kilobytes than this whole page.
+ */
+export function LineChart({
+  points,
+  label,
+}: {
+  points: { t: number; value: number }[];
+  label: string;
+}) {
+  if (points.length < 2) {
+    return (
+      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 text-center text-xs text-muted-foreground">
+        {points.length === 0
+          ? "No readings yet"
+          : "One reading so far — a line needs two"}
+      </div>
+    );
+  }
+
+  const W = 300;
+  const H = 140;
+  const PAD = 6;
+  const xs = points.map((p) => p.t);
+  const ys = points.map((p) => p.value);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  const spanX = maxX - minX || 1;
+  const spanY = maxY || 1;
+
+  const coords = points.map((p) => ({
+    x: PAD + ((p.t - minX) / spanX) * (W - PAD * 2),
+    y: H - PAD - (p.value / spanY) * (H - PAD * 2),
+  }));
+  const line = coords.map((c, i) => `${i ? "L" : "M"}${c.x},${c.y}`).join(" ");
+  const area = `${line} L${coords[coords.length - 1].x},${H} L${coords[0].x},${H} Z`;
+  const last = points[points.length - 1];
+  const first = points[0];
+  const nfmt = new Intl.NumberFormat("de-DE");
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-sm font-semibold tabular-nums">
+          {nfmt.format(last.value)}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 h-36 w-full">
+        <defs>
+          <linearGradient id="lineFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <g className="text-primary">
+          <path d={area} fill="url(#lineFill)" />
+          <path
+            d={line}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          {coords.map((c, i) => (
+            <circle key={i} cx={c.x} cy={c.y} r="2" fill="currentColor" />
+          ))}
+        </g>
+      </svg>
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>{new Date(first.t).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}</span>
+        <span>{new Date(last.t).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}</span>
+      </div>
+    </div>
+  );
+}

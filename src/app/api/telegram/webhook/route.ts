@@ -282,6 +282,7 @@ async function handleScreenshot(msg: TgMessage) {
         caption: r.caption,
         source_chat_id: msg.chat.id,
         source_message_id: msg.message_id,
+        source_file_id: photo.file_id,
         confidence: metrics.confidence,
         needs_review: metrics.confidence < 0.6,
       })),
@@ -301,6 +302,11 @@ async function handleScreenshot(msg: TgMessage) {
     account_id: account.id,
     source_chat_id: msg.chat.id,
     source_message_id: msg.message_id,
+    // Telegram keeps the file forever and hands it back for this id, so a
+    // screenshot can be run through the extractor again after a prompt
+    // change — without storing a single byte ourselves. The first ten
+    // arrived before this existed and are gone for re-reading.
+    source_file_id: photo.file_id,
     captured_at: new Date(msg.date * 1000).toISOString(),
     handle: metrics.handle ?? account.handle,
     platform: metrics.platform ?? account.platform,
