@@ -45,7 +45,9 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
         .order("captured_at", { ascending: false }),
       supabase
         .from("reel_metrics")
-        .select("account_id, captured_at, position, views, likes, caption, needs_review")
+        .select(
+          "account_id, captured_at, position, request_id, views, likes, caption, needs_review"
+        )
         .eq("persona_id", personaId)
         .order("captured_at", { ascending: false }),
     ]);
@@ -133,26 +135,33 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
           new Date(latest.captured_at).getTime() - 12 * 60 * 60 * 1000
     );
 
-    // Only the newest grid — an older one describes the same reels with
-    // smaller numbers and would double-count every view.
+    // A reel is seen again in every screenshot for weeks, drifting one
+    // place further back each time. Keyed on the reel itself, the newest
+    // reading wins and the same video is one row rather than ten. Tiles we
+    // couldn't identify fall back to their position within one capture, so
+    // they at least don't merge with each other.
     const mine = (reels ?? []).filter((r) => r.account_id === a.id);
-    const newestCapture = mine[0]?.captured_at ?? null;
-    const tiles = mine
-      .filter((r) => r.captured_at === newestCapture)
-      .sort((x, y) => x.position - y.position)
+    const latestPerReel = new Map<string, (typeof mine)[number]>();
+    for (const r of mine) {
+      const key = r.request_id ?? `pos:${r.captured_at}:${r.position}`;
+      const seen = latestPerReel.get(key);
+      if (!seen || r.captured_at > seen.captured_at) latestPerReel.set(key, r);
+    }
+    const tiles = Array.from(latestPerReel.values())
+      .sort((x, y) => (y.views ?? 0) - (x.views ?? 0))
       .map((r) => {
-        const requestId =
-          postedByAccount.get(a.id)?.[r.position - 1]?.requestId ?? "";
+        const requestId = r.request_id ?? "";
         const clip = clips.get(requestId);
         return {
+          key: `${r.captured_at}-${r.position}`,
           position: r.position,
           views: r.views,
           likes: r.likes,
           caption: r.caption,
           title: titles.get(requestId) ?? null,
+          seenAt: r.captured_at,
           src: clip ? (signed.get(clip.path) ?? null) : null,
           poster: clip?.thumb ? (signed.get(clip.thumb) ?? null) : null,
-          mime: clip?.mime ?? null,
         };
       });
 
@@ -164,8 +173,9 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
         latest?.followers != null && previous?.followers != null
           ? latest.followers - previous.followers
           : null,
-      lastSeen: latest?.captured_at ?? newestCapture ?? null,
+      lastSeen: latest?.captured_at ?? tiles[0]?.seenAt ?? null,
       tiles,
+      // Latest known value per reel, so a reel seen ten times counts once.
       views: tiles.reduce((sum, t) => sum + (t.views ?? 0), 0),
       uploads: tiles.length,
     };
@@ -211,36 +221,33 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       .sort((a, b) => a.t - b.t);
   };
 
-  // Two grids for the same account on one day describe the same reels
-  // twice — summing both would double the day's views. Only the newest
-  // capture of that day counts, and its tiles are summed.
-  const newestPerAccountPerDay = new Map<string, string>();
-  for (const r of reels ?? []) {
-    if (!r.account_id || r.needs_review || r.views == null) continue;
-    const key = `${r.account_id}|${dayKey(r.captured_at)}`;
-    const seen = newestPerAccountPerDay.get(key);
-    if (!seen || r.captured_at > seen) {
-      newestPerAccountPerDay.set(key, r.captured_at);
+  // Views over time, counted per reel: the newest reading of each reel on
+  // or before a given day, summed. Counting per screenshot instead would
+  // double a day where two grids arrived and would drop reels that simply
+  // weren't in the latest one.
+  const viewDays = Array.from(
+    new Set(
+      (reels ?? [])
+        .filter((r) => !r.needs_review && r.views != null)
+        .map((r) => dayKey(r.captured_at))
+    )
+  ).sort();
+  const viewSeries = viewDays.map((day) => {
+    const upto = new Date(`${day}T23:59:59.999Z`).getTime();
+    const latest = new Map<string, { at: number; views: number }>();
+    for (const r of reels ?? []) {
+      if (r.needs_review || r.views == null || !r.account_id) continue;
+      const at = new Date(r.captured_at).getTime();
+      if (at > upto) continue;
+      const key = r.request_id ?? `${r.account_id}|${r.captured_at}|${r.position}`;
+      const seen = latest.get(key);
+      if (!seen || at > seen.at) latest.set(key, { at, views: Number(r.views) });
     }
-  }
-  const viewSeries = seriesFrom(
-    (reels ?? [])
-      .filter(
-        (r) =>
-          !r.needs_review &&
-          r.views != null &&
-          r.account_id &&
-          newestPerAccountPerDay.get(
-            `${r.account_id}|${dayKey(r.captured_at)}`
-          ) === r.captured_at
-      )
-      .map((r) => ({
-        captured_at: r.captured_at,
-        account_id: r.account_id,
-        value: Number(r.views),
-      })),
-    "sum"
-  );
+    let total = 0;
+    latest.forEach((v) => (total += v.views));
+    return { t: new Date(day).getTime(), value: total };
+  });
+
   const followerSeries = seriesFrom(
     (metrics ?? [])
       .filter((m) => !m.needs_review && m.followers != null)
@@ -383,7 +390,7 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
           ) : (
             <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1">
               {r.tiles.map((t) => (
-                <div key={t.position} className="w-32 shrink-0">
+                <div key={t.key} className="w-32 shrink-0">
                   <div className="relative aspect-[9/16] overflow-hidden rounded-xl border border-border/40 bg-muted/30">
                     {t.src ? (
                       <video
@@ -402,12 +409,14 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
                         no cut in the vault
                       </div>
                     )}
-                    <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
-                      #{t.position}
-                    </span>
+
                   </div>
                   <p className="mt-1.5 truncate text-xs font-medium">
-                    {t.title ?? t.caption ?? "unmatched"}
+                    {t.title ?? (
+                      <span className="text-muted-foreground">
+                        {t.caption ?? "not in the app"}
+                      </span>
+                    )}
                   </p>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="tabular-nums">

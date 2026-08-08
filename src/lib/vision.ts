@@ -228,3 +228,155 @@ export async function extractMetricsFromImage(
     };
   }
 }
+
+
+/**
+ * Which of our reels is on each tile of the grid?
+ *
+ * Position is not identity. The same reel appears in every screenshot for
+ * weeks, drifting one place further back as newer ones are posted, and a
+ * reel posted outside the app occupies a tile we know nothing about — so
+ * "tile 2 is the second-most-recently posted reel" is a guess that breaks
+ * the moment anything is out of order.
+ *
+ * The tile is a still from our own video, so the picture answers it. The
+ * grid goes in alongside the candidates' thumbnails and the model says
+ * which is which, or says it can't tell.
+ */
+export interface GridMatch {
+  position: number;
+  /** index into the candidates array, or null when nothing matches */
+  candidate: number | null;
+  confidence: number;
+}
+
+const MATCH_TOOL = {
+  name: "match_tiles",
+  description:
+    "For each tile of the grid, name the candidate thumbnail showing the same video.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      matches: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            position: {
+              type: "integer",
+              description: "Tile number, counting reels only, 1 = first",
+            },
+            candidate: {
+              type: ["integer", "null"],
+              description:
+                "1-based index of the matching candidate image, or null if none of them is this video",
+            },
+            confidence: {
+              type: "number",
+              description: "0..1 for this single tile",
+            },
+          },
+          required: ["position", "candidate", "confidence"],
+        },
+      },
+    },
+    required: ["matches"],
+  },
+};
+
+export async function matchGridToReels(
+  gridImage: { base64: string; mime: string },
+  candidates: { base64: string; mime: string }[]
+): Promise<{ data: GridMatch[] | null; error?: string }> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { data: null, error: "ANTHROPIC_API_KEY not set" };
+  if (candidates.length === 0) return { data: [], error: undefined };
+
+  const content: unknown[] = [
+    {
+      type: "text",
+      text: "This is the grid of reels on the account. Tiles are numbered by reels only, left to right, top to bottom — ignore photo posts.",
+    },
+    {
+      type: "image",
+      source: { type: "base64", media_type: gridImage.mime, data: gridImage.base64 },
+    },
+    {
+      type: "text",
+      text: `Now ${candidates.length} candidate videos, numbered 1 to ${candidates.length}:`,
+    },
+  ];
+  candidates.forEach((c, i) => {
+    content.push({ type: "text", text: `Candidate ${i + 1}:` });
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: c.mime, data: c.base64 },
+    });
+  });
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_VISION_MODEL ?? "claude-sonnet-5",
+        max_tokens: 1024,
+        system: `You match thumbnails of the same video.
+
+The grid tiles are small, cropped and compressed; a candidate is a frame
+from the same video but not necessarily the same frame. Judge by person,
+outfit, background, framing and any on-screen text.
+
+Rules:
+- A tile may show a video that is not among the candidates. Answer null for
+  it. A wrong match is far worse than an honest null, because the numbers
+  would then be filed under someone else's video.
+- Never use the same candidate twice. Each video appears once in a grid.
+- Give a per-tile confidence and be strict: below 0.7 means unsure.`,
+        tools: [MATCH_TOOL],
+        tool_choice: { type: "tool", name: "match_tiles" },
+        messages: [{ role: "user", content }],
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      return { data: null, error: `anthropic ${res.status}: ${body.slice(0, 200)}` };
+    }
+    const json = (await res.json()) as {
+      content: { type: string; name?: string; input?: unknown }[];
+    };
+    const toolUse = json.content?.find(
+      (c) => c.type === "tool_use" && c.name === "match_tiles"
+    );
+    if (!toolUse?.input) return { data: null, error: "no structured output" };
+
+    const raw = (toolUse.input as { matches?: GridMatch[] }).matches ?? [];
+    const used = new Set<number>();
+    const out: GridMatch[] = [];
+    for (const m of raw) {
+      if (typeof m?.position !== "number") continue;
+      let candidate =
+        typeof m.candidate === "number" && m.candidate >= 1 ? m.candidate : null;
+      const confidence = typeof m.confidence === "number" ? m.confidence : 0;
+      // Belt and braces: the instruction not to reuse a candidate is a
+      // request, this is the guarantee. Also drop anything the model itself
+      // called unsure rather than filing views under the wrong reel.
+      if (candidate !== null && (used.has(candidate) || confidence < 0.7)) {
+        candidate = null;
+      }
+      if (candidate !== null) used.add(candidate);
+      out.push({ position: m.position, candidate, confidence });
+    }
+    return { data: out };
+  } catch (err) {
+    return {
+      data: null,
+      error: err instanceof Error ? err.message : "match call failed",
+    };
+  }
+}

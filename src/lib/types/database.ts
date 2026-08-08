@@ -474,6 +474,7 @@ export type Database = {
           account_id: string | null;
           captured_at: string;
           position: number;
+          request_id: string | null;
           views: number | null;
           likes: number | null;
           caption: string | null;
@@ -490,6 +491,7 @@ export type Database = {
           account_id?: string | null;
           captured_at?: string;
           position: number;
+          request_id?: string | null;
           views?: number | null;
           likes?: number | null;
           caption?: string | null;
@@ -506,6 +508,7 @@ export type Database = {
           account_id?: string | null;
           captured_at?: string;
           position?: number;
+          request_id?: string | null;
           views?: number | null;
           likes?: number | null;
           caption?: string | null;

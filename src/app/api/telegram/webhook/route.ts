@@ -10,7 +10,7 @@ import {
   parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
-import { extractMetricsFromImage } from "@/lib/vision";
+import { extractMetricsFromImage, matchGridToReels } from "@/lib/vision";
 
 export const dynamic = "force-dynamic";
 
@@ -304,12 +304,62 @@ async function handleScreenshot(msg: TgMessage) {
   // A grid is a list, not a measurement: one row per tile, keyed on the
   // message so Telegram redelivering the same photo changes nothing.
   if (metrics.reels.length > 0) {
+    // Which of our reels is on each tile. Candidates are the most recently
+    // finished cuts — deliberately not "what we think was posted here",
+    // since a posting nobody marked is exactly the case that breaks
+    // position-based guessing.
+    const { data: recent } = await supabase
+      .from("content_assets")
+      .select("request_id, thumbnail_path, uploaded_at")
+      .eq("stage", "edited")
+      .not("thumbnail_path", "is", null)
+      .order("uploaded_at", { ascending: false })
+      .limit(60);
+
+    const candidates: { requestId: string; base64: string; mime: string }[] = [];
+    const seenRequest = new Set<string>();
+    for (const c of recent ?? []) {
+      if (candidates.length >= 20) break;
+      if (!c.request_id || !c.thumbnail_path) continue;
+      if (seenRequest.has(c.request_id)) continue;
+      seenRequest.add(c.request_id);
+      const { data: signed } = await supabase.storage
+        .from("content-assets")
+        .createSignedUrl(c.thumbnail_path, 600);
+      if (!signed?.signedUrl) continue;
+      try {
+        const res = await fetch(signed.signedUrl);
+        if (!res.ok) continue;
+        const buf = Buffer.from(await res.arrayBuffer());
+        candidates.push({
+          requestId: c.request_id,
+          base64: buf.toString("base64"),
+          mime: "image/jpeg",
+        });
+      } catch {
+        // A thumbnail that won't load just isn't a candidate.
+      }
+    }
+
+    const { data: matches, error: matchErr } = await matchGridToReels(
+      { base64: file.base64, mime: file.mime },
+      candidates.map((c) => ({ base64: c.base64, mime: c.mime }))
+    );
+    if (matchErr) console.warn("[telegram] tile matching failed", matchErr);
+    const requestForPosition = new Map<number, string>();
+    for (const m of matches ?? []) {
+      if (m.candidate === null) continue;
+      const c = candidates[m.candidate - 1];
+      if (c) requestForPosition.set(m.position, c.requestId);
+    }
+
     const { error: gridErr } = await supabase.from("reel_metrics").upsert(
       metrics.reels.map((r) => ({
         persona_id: account.persona_id,
         account_id: account.id,
         captured_at: capturedAt,
         position: r.position,
+        request_id: requestForPosition.get(r.position) ?? null,
         views: r.views,
         likes: r.likes,
         caption: r.caption,

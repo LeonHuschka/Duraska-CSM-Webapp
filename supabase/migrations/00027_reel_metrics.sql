@@ -57,3 +57,14 @@ alter table public.reel_metrics
   add column if not exists source_file_id text;
 alter table public.account_metrics
   add column if not exists source_file_id text;
+
+-- Which of our reels a tile shows, decided by comparing the tile against
+-- our own thumbnails. Position is not identity: the same reel appears in
+-- every screenshot for weeks, one place further back each time, and a reel
+-- posted outside the app takes a tile we know nothing about.
+alter table public.reel_metrics
+  add column if not exists request_id uuid references public.content_requests(id) on delete set null;
+
+create index if not exists idx_reel_metrics_request
+  on public.reel_metrics(request_id, captured_at desc)
+  where request_id is not null;
