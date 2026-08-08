@@ -9,6 +9,7 @@ import {
   Archive,
   Upload,
   Scissors,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PersonaSwitcher } from "./persona-switcher";
@@ -21,6 +22,7 @@ const allNavItems = [
   { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
   { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
   { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },
+  { href: "/pipeline", label: "Pipeline", icon: Activity, roles: ["owner", "manager"] },
   { href: "/settings/personas", label: "Settings", icon: Settings, roles: ["owner", "manager"] },
 ];
 
