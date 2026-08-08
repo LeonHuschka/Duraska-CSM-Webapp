@@ -7,6 +7,7 @@ import {
   downloadFile,
   setMessageReaction,
   deleteMessage,
+  parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
 import { extractMetricsFromImage } from "@/lib/vision";
@@ -216,6 +217,16 @@ async function handleScreenshot(msg: TgMessage) {
     });
   await react(REACTION.seen);
 
+  // A date in the caption backdates the reading. Without one it is stamped
+  // with the time the message arrived, which is what the daily routine
+  // wants. Telegram only attaches a caption to the first photo of an album,
+  // so a backfilled pair has to be sent as two separate messages.
+  const backdated = parseCaptionDate(msg.caption);
+  const capturedAt = (backdated ?? new Date(msg.date * 1000)).toISOString();
+  if (backdated) {
+    console.log("[telegram] backdated from caption", capturedAt);
+  }
+
   // Which account does this screenshot belong to? The accounts sit in
   // topics of one forum group, so the chat id is the same for all of them
   // and only the topic tells them apart. An account that does get its own
@@ -297,7 +308,7 @@ async function handleScreenshot(msg: TgMessage) {
       metrics.reels.map((r) => ({
         persona_id: account.persona_id,
         account_id: account.id,
-        captured_at: new Date(msg.date * 1000).toISOString(),
+        captured_at: capturedAt,
         position: r.position,
         views: r.views,
         likes: r.likes,
@@ -334,7 +345,7 @@ async function handleScreenshot(msg: TgMessage) {
     // change — without storing a single byte ourselves. The first ten
     // arrived before this existed and are gone for re-reading.
     source_file_id: photo.file_id,
-    captured_at: new Date(msg.date * 1000).toISOString(),
+    captured_at: capturedAt,
     handle: metrics.handle ?? account.handle,
     platform: metrics.platform ?? account.platform,
     metric_kind: metrics.metric_kind,

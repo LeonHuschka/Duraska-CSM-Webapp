@@ -260,6 +260,59 @@ export async function checkInstagramAlive(
 }
 
 /**
+ * A date written into a screenshot's caption, for backfilling.
+ *
+ * Normally a reading is stamped with the time the message arrived, which is
+ * right when a VA posts today's numbers. It is wrong when someone catches
+ * up on last week — everything would land on today and the history would
+ * collapse into a single point. A caption like "05.08." or "2026-08-05"
+ * moves the reading to where it belongs.
+ *
+ * Midday, so a timezone shift can't push the reading into the day before.
+ */
+export function parseCaptionDate(
+  caption: string | undefined | null
+): Date | null {
+  if (!caption) return null;
+
+  let y: number | undefined;
+  let m: number | undefined;
+  let d: number | undefined;
+
+  const iso = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(caption);
+  const german = /(\d{1,2})\.(\d{1,2})\.(\d{2,4})?/.exec(caption);
+
+  if (iso) {
+    y = Number(iso[1]);
+    m = Number(iso[2]);
+    d = Number(iso[3]);
+  } else if (german) {
+    d = Number(german[1]);
+    m = Number(german[2]);
+    const year = german[3];
+    y = year
+      ? year.length === 2
+        ? 2000 + Number(year)
+        : Number(year)
+      : new Date().getFullYear();
+  } else {
+    return null;
+  }
+
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+
+  const parsed = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  // A future date is a typo, and one from before this operation existed is
+  // noise — in both cases the message time is the better guess.
+  if (parsed.getTime() > Date.now() + 24 * 60 * 60 * 1000) return null;
+  if (parsed.getTime() < Date.UTC(2025, 0, 1)) return null;
+
+  return parsed;
+}
+
+/**
  * Emoji vocabulary.
  *
  * Telegram only accepts a fixed set for bot reactions and rejects anything
