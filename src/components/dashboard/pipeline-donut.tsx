@@ -173,12 +173,21 @@ export function WeeklyGoal({
   target,
   liveAccounts,
   manual = false,
+  stockReels,
+  perDay,
+  stockFullDays = 10,
 }: {
   done: number;
   target: number;
   liveAccounts: number;
   /** true when an owner set the target by hand rather than deriving it */
   manual?: boolean;
+  /** reels she has delivered that nobody has posted yet */
+  stockReels: number;
+  /** reels going out per day across all live accounts */
+  perDay: number;
+  /** a shelf this full counts as fully stocked */
+  stockFullDays?: number;
 }) {
   const pct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
   const R = 46;
@@ -198,6 +207,21 @@ export function WeeklyGoal({
     pct >= 100
       ? "Week complete — you crushed it 🎉"
       : `${Math.max(0, target - done)} more to hit this week's minimum`;
+
+  // The ring says what she still owes this week. This says how long what she
+  // has already delivered will keep the accounts fed — the shop-keeper's
+  // question of when to restock, which the ring can never answer.
+  const daily = Math.max(1, perDay);
+  const days = stockReels / daily;
+  const stockPct = Math.min(100, (days / stockFullDays) * 100);
+  const stockDays =
+    days > 0 && days < 1 ? days.toFixed(1) : Math.floor(days).toString();
+  const stock =
+    days < 3
+      ? { bar: "bg-rose-400", text: "text-rose-400" }
+      : days < 7
+        ? { bar: "bg-amber-400", text: "text-amber-400" }
+        : { bar: "bg-emerald-400", text: "text-emerald-400" };
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card p-5">
@@ -242,6 +266,35 @@ export function WeeklyGoal({
           </p>
         </div>
       </div>
+
+      {/* How long the shelf lasts, kept in the same card so the two numbers
+          read as one picture rather than competing for attention. */}
+      <div className="mt-4 border-t border-border/40 pt-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-xs text-muted-foreground">Ready to post</span>
+          <span className="text-xs">
+            <span className={`font-semibold tabular-nums ${stock.text}`}>
+              {stockDays}
+            </span>
+            <span className="text-muted-foreground">
+              {" "}
+              {stockDays === "1" ? "day" : "days"} left
+            </span>
+          </span>
+        </div>
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${stock.bar} transition-all`}
+            style={{
+              width: `${stockReels > 0 ? Math.max(stockPct, 4) : 0}%`,
+            }}
+          />
+        </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+          {stockReels} reel{stockReels === 1 ? "" : "s"} waiting · {daily} go out
+          a day
+        </p>
+      </div>
     </div>
   );
 }
@@ -267,6 +320,87 @@ export function WeekBars({
           <span className="text-[9px] text-muted-foreground">{d.label}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * How much shot content is left before the accounts run dry.
+ *
+ * This is the number she actually steers by: she supplies the raw material,
+ * and the only question that matters to her is whether the shelf is still
+ * stocked. Everything else on this page is history — this one says whether
+ * to pick up the camera today.
+ */
+export function ContentStock({
+  reels,
+  perDay,
+  targetDays = 10,
+}: {
+  reels: number;
+  perDay: number;
+  targetDays?: number;
+}) {
+  const daily = Math.max(1, perDay);
+  const days = reels / daily;
+  const pct = Math.min(1, days / targetDays);
+
+  const tone =
+    days < 3
+      ? {
+          text: "text-rose-400",
+          bar: "bg-rose-400",
+          ring: "border-rose-500/40",
+          note: "Almost out — worth shooting today.",
+        }
+      : days < 7
+        ? {
+            text: "text-amber-400",
+            bar: "bg-amber-400",
+            ring: "border-amber-500/40",
+            note: "Getting low — good time to restock.",
+          }
+        : {
+            text: "text-emerald-400",
+            bar: "bg-emerald-400",
+            ring: "border-emerald-500/30",
+            note: "Well stocked — you're ahead.",
+          };
+
+  // Under a day, "0 days left" reads as nothing left at all, which is a
+  // different thing from "half a day".
+  const shown =
+    days > 0 && days < 1 ? days.toFixed(1) : Math.floor(days).toString();
+
+  return (
+    <div className={`rounded-2xl border ${tone.ring} bg-card p-5`}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <span className={`text-4xl font-semibold tabular-nums ${tone.text}`}>
+            {shown}
+          </span>
+          <span className="text-sm font-medium text-muted-foreground">
+            {shown === "1" ? "day" : "days"} of content left
+          </span>
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {reels} in stock
+        </span>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className={`h-full rounded-full ${tone.bar} transition-all`}
+          style={{ width: `${Math.max(pct * 100, reels > 0 ? 3 : 0)}%` }}
+        />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+        <span>{tone.note}</span>
+        <span className="shrink-0 tabular-nums">
+          {daily}/day going out · {targetDays}d is full
+        </span>
+      </div>
     </div>
   );
 }

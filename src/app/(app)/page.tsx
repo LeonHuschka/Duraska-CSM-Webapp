@@ -160,7 +160,7 @@ export default async function DashboardPage({
 
     const { data: tgCfg } = await supabase
       .from("telegram_config")
-      .select("posts_per_day, weekly_reel_target")
+      .select("posts_per_day, weekly_reel_target, chat_id, requests_thread_id")
       .eq("persona_id", personaId)
       .maybeSingle();
     const postsPerDay = tgCfg?.posts_per_day ?? 2;
@@ -178,6 +178,20 @@ export default async function DashboardPage({
       { label: "Edited", value: readyToPost, color: "stroke-emerald-400" },
     ];
     const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
+
+    // What she has delivered that nobody has posted yet — the shelf.
+    const inStock = toEdit + readyToPost;
+    const dailyOut = Math.max(1, Math.round(weeklyTarget / 7));
+
+    // Deep link into the requests topic, so "to shoot" is one tap from the
+    // list it comes from. Supergroup ids carry a -100 prefix t.me won't take.
+    const tgChat = tgCfg?.chat_id
+      ? String(tgCfg.chat_id).replace(/^-100/, "")
+      : null;
+    const tgLink =
+      tgChat && tgCfg?.requests_thread_id
+        ? `https://t.me/c/${tgChat}/${tgCfg.requests_thread_id}`
+        : null;
 
     const trend = thisWeek - lastWeek;
 
@@ -212,6 +226,8 @@ export default async function DashboardPage({
           target={weeklyTarget}
           liveAccounts={liveAccounts}
           manual={!!manualTarget && manualTarget > 0}
+          stockReels={inStock}
+          perDay={dailyOut}
         />
 
         {/* Three numbers she can act on, each with context */}
@@ -253,6 +269,23 @@ export default async function DashboardPage({
             </p>
           </div>
         </div>
+
+        <p className="px-1 text-[11px] leading-snug text-muted-foreground/80">
+          &ldquo;To shoot&rdquo; are the open inspo links in Telegram
+          {tgLink ? (
+            <>
+              {" · "}
+              <a
+                href={tgLink}
+                target="_blank"
+                rel="noreferrer"
+                className="text-foreground underline underline-offset-2"
+              >
+                open the topic
+              </a>
+            </>
+          ) : null}
+        </p>
 
         {openLinks === 0 && (
           <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-300">
