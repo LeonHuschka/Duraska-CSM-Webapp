@@ -77,13 +77,14 @@ const TOOL = {
       reels: {
         type: "array",
         description:
-          "For metric_kind=reel_grid only: one entry per visible thumbnail, in reading order (newest first, left to right, then next row). Skip tiles that carry no number, and skip the 'create reel' tile.",
+          "For metric_kind=reel_grid only: one entry per REEL/VIDEO tile, in reading order (newest first, left to right, then next row). Photo and feed-post tiles are not reels — leave them out entirely and do not count them when numbering. Also skip the 'create reel' tile.",
         items: {
           type: "object",
           properties: {
             position: {
               type: "integer",
-              description: "1 for the first tile in reading order, then 2, 3, …",
+              description:
+                "Counting REELS ONLY: 1 for the first reel in reading order, then 2, 3, … Photos in between must not consume a number.",
             },
             views: { type: ["integer", "null"], description: "The play/view count on the tile" },
             likes: { type: ["integer", "null"] },
@@ -117,10 +118,16 @@ Rules:
   Profilaufrufe=profile_visits.
 - A grid or horizontal row of reel thumbnails, each with a small play/eye
   count on it, is metric_kind="reel_grid". Fill the "reels" array with one
-  entry per tile in reading order and leave the single-value fields null.
-  The tile order is what the app relies on, so do not reorder or sort them.
-- If a tile's number is unreadable, still emit the tile with views=null
-  rather than shifting the positions of the tiles after it.
+  entry per REEL and leave the single-value fields null. The order is what
+  the app relies on, so do not reorder or sort them.
+- Such a grid often mixes reels with ordinary photo posts. Only reels count:
+  they carry a video/reel glyph and a play or view count. A tile that is
+  just a photo — no video marker, no view count — must be left out
+  completely and must NOT consume a position number, because the numbering
+  is how each reel is matched to its record. One photo counted by mistake
+  shifts every reel after it onto the wrong record.
+- If a reel's number is unreadable, still emit that reel with views=null.
+  Dropping it would shift the ones after it, which is the same damage.
 - If the image is not an analytics screenshot at all, set metric_kind="unknown"
   and confidence=0.
 - A photograph of a screen (visible glare, tilt, moiré) is not a screenshot:
