@@ -77,3 +77,8 @@ alter table public.reel_metrics
 create index if not exists idx_reel_metrics_asset
   on public.reel_metrics(asset_id, captured_at desc)
   where asset_id is not null;
+
+-- Who may submit screenshots. Empty means everyone, which is how it behaved
+-- before — and why every picture posted in a topic was being analysed.
+alter table public.telegram_config
+  add column if not exists screenshot_senders text[] not null default '{}';

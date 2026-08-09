@@ -26,6 +26,7 @@ export async function saveTelegramConfig(data: {
   min_open_links: number;
   max_unedited: number;
   weekly_reel_target: string;
+  screenshot_senders: string;
 }) {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
@@ -62,6 +63,11 @@ export async function saveTelegramConfig(data: {
       max_unedited: data.max_unedited,
       // Empty clears the override and falls back to the derived target.
       weekly_reel_target: num(data.weekly_reel_target),
+      // Empty means "anyone", which is how it behaved before this existed.
+      screenshot_senders: data.screenshot_senders
+        .split(",")
+        .map((h) => h.trim().replace(/^@/, ""))
+        .filter(Boolean),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "persona_id" }

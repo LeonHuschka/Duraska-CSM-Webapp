@@ -205,6 +205,24 @@ async function handleMessage(msg: TgMessage) {
 async function handleScreenshot(msg: TgMessage) {
   const supabase = createAdminClient();
 
+  // Only the people who manage the accounts get read. Anyone else posting a
+  // picture in a topic — a screenshot of something unrelated, a meme —
+  // would otherwise be run through the vision model and filed as numbers.
+  // No reaction either: reacting to everything is its own kind of noise.
+  const { data: senderCfg } = await supabase
+    .from("telegram_config")
+    .select("screenshot_senders")
+    .eq("chat_id", msg.chat.id)
+    .maybeSingle();
+  const allowed = (senderCfg?.screenshot_senders ?? []) as string[];
+  if (allowed.length > 0) {
+    const from = (msg.from?.username ?? "").toLowerCase().replace(/^@/, "");
+    if (!from || !allowed.some((a) => a.toLowerCase().replace(/^@/, "") === from)) {
+      console.log("[telegram] screenshot from", from || "(no username)", "— not a listed sender");
+      return;
+    }
+  }
+
   // Say "got it" before the slow part. Vision takes seconds and every exit
   // below used to be silent, so a VA could not tell a processed screenshot
   // from an ignored one — and the emoji that was meant to confirm it was

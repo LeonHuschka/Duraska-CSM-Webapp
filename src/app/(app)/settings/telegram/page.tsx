@@ -14,6 +14,7 @@ export interface TelegramConfigRow {
   min_open_links: number;
   max_unedited: number;
   weekly_reel_target: number | null;
+  screenshot_senders: string[] | null;
 }
 
 export default async function TelegramSettingsPage() {
@@ -26,7 +27,7 @@ export default async function TelegramSettingsPage() {
   const { data } = await supabase
     .from("telegram_config")
     .select(
-      "chat_id, requests_thread_id, talk_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, weekly_reel_target"
+      "chat_id, requests_thread_id, talk_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, weekly_reel_target, screenshot_senders"
     )
     .eq("persona_id", personaId)
     .maybeSingle();

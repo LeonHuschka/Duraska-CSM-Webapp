@@ -678,6 +678,7 @@ export type Database = {
           talk_thread_id: number | null;
           model_username: string | null;
           va_username: string | null;
+          screenshot_senders: string[] | null;
           manager_username: string | null;
           posts_per_day: number;
           min_ready_to_post: number;
@@ -698,6 +699,7 @@ export type Database = {
           talk_thread_id?: number | null;
           model_username?: string | null;
           va_username?: string | null;
+          screenshot_senders?: string[] | null;
           manager_username?: string | null;
           posts_per_day?: number;
           min_ready_to_post?: number;
@@ -718,6 +720,7 @@ export type Database = {
           talk_thread_id?: number | null;
           model_username?: string | null;
           va_username?: string | null;
+          screenshot_senders?: string[] | null;
           manager_username?: string | null;
           posts_per_day?: number;
           min_ready_to_post?: number;

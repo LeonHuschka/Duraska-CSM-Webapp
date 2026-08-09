@@ -66,6 +66,7 @@ export function TelegramSettings({
     min_open_links: config?.min_open_links ?? 10,
     max_unedited: config?.max_unedited ?? 15,
     weekly_reel_target: config?.weekly_reel_target?.toString() ?? "",
+    screenshot_senders: (config?.screenshot_senders ?? []).join(", "),
   });
 
   const set = (k: keyof typeof f, v: string | number) =>
