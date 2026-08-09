@@ -166,7 +166,17 @@ export async function saveAssetThumbnail(data: {
  *  - Otherwise insert a new posted slot dated "now".
  *  - Bump the request status to "posted".
  */
+/**
+ * Mark one finished cut as posted on one account.
+ *
+ * The cut is the unit, not the job. A job yields three to five distinct
+ * final cuts and each is its own reel that can go out exactly once — so
+ * recording this against the request, as it used to, marked all five as
+ * posted the moment a VA tagged one of them, and the other four silently
+ * left the available pool.
+ */
 export async function markAssetPostedFromVault(data: {
+  asset_id: string;
   request_id: string;
   account_id: string;
 }) {
@@ -182,12 +192,12 @@ export async function markAssetPostedFromVault(data: {
     .maybeSingle();
   const platform = account?.platform ?? "other";
 
-  // Look for an existing slot for this request on this account
+  // An existing slot for this exact cut on this account
   const { data: existing } = await supabase
     .from("schedule_slots")
     .select("id")
     .eq("persona_id", personaId)
-    .eq("request_id", data.request_id)
+    .eq("asset_id", data.asset_id)
     .eq("account_id", data.account_id)
     .order("scheduled_for", { ascending: false })
     .limit(1)
@@ -207,16 +217,13 @@ export async function markAssetPostedFromVault(data: {
       scheduled_for: now,
       posted_at: now,
       request_id: data.request_id,
+      asset_id: data.asset_id,
       status: "posted",
     });
     if (error) return { error: error.message };
   }
 
-  // Bump the content request status to posted
-  await supabase
-    .from("content_requests")
-    .update({ status: "posted", updated_at: now })
-    .eq("id", data.request_id);
+  await syncRequestStatus(supabase, data.request_id);
 
   revalidatePath("/vault");
   revalidatePath("/editing");
@@ -274,6 +281,7 @@ export async function setRequestNsfw(data: {
  * Undo: remove the "posted" mark for (request_id, account_id).
  */
 export async function unmarkAssetPostedFromVault(data: {
+  asset_id: string;
   request_id: string;
   account_id: string;
 }) {
@@ -284,7 +292,7 @@ export async function unmarkAssetPostedFromVault(data: {
     .from("schedule_slots")
     .select("id")
     .eq("persona_id", personaId)
-    .eq("request_id", data.request_id)
+    .eq("asset_id", data.asset_id)
     .eq("account_id", data.account_id)
     .eq("status", "posted")
     .order("posted_at", { ascending: false })
@@ -300,21 +308,49 @@ export async function unmarkAssetPostedFromVault(data: {
 
   if (error) return { error: error.message };
 
-  // If no more posted slots for this request, revert status to edited.
-  const { count } = await supabase
-    .from("schedule_slots")
-    .select("id", { count: "exact", head: true })
-    .eq("request_id", data.request_id)
-    .eq("status", "posted");
-  if ((count ?? 0) === 0) {
-    await supabase
-      .from("content_requests")
-      .update({ status: "edited", updated_at: new Date().toISOString() })
-      .eq("id", data.request_id);
-  }
+  await syncRequestStatus(supabase, data.request_id);
 
   revalidatePath("/vault");
   revalidatePath("/editing");
   revalidatePath("/requests");
   return { error: null };
+}
+
+
+/**
+ * A job counts as posted only once every one of its cuts has gone out.
+ *
+ * Flipping the job the moment the first cut was posted took the remaining
+ * cuts out of "ready to post" while they were still unused — which made the
+ * model's buffer look emptier than it was and hid finished work from the
+ * people meant to post it.
+ */
+async function syncRequestStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  requestId: string
+) {
+  const { data: cuts } = await supabase
+    .from("content_assets")
+    .select("id")
+    .eq("request_id", requestId)
+    .eq("stage", "edited");
+  const cutIds = (cuts ?? []).map((c) => c.id);
+  if (cutIds.length === 0) return;
+
+  const { data: posted } = await supabase
+    .from("schedule_slots")
+    .select("asset_id")
+    .eq("status", "posted")
+    .in("asset_id", cutIds);
+  const postedCuts = new Set(
+    (posted ?? []).map((p) => p.asset_id).filter(Boolean)
+  );
+
+  await supabase
+    .from("content_requests")
+    .update({
+      status: postedCuts.size >= cutIds.length ? "posted" : "edited",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", requestId);
 }

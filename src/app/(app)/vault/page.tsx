@@ -94,7 +94,7 @@ export default async function VaultPage() {
   // 3b. All schedule slots for those requests (to build posting status)
   const { data: slots } = await supabase
     .from("schedule_slots")
-    .select("request_id, platform, status, account_id")
+    .select("request_id, asset_id, platform, status, account_id")
     .eq("persona_id", personaId)
     .in("request_id", requestIds);
 
@@ -102,6 +102,7 @@ export default async function VaultPage() {
   const STATUS_RANK: Record<string, number> = { posted: 3, scheduled: 2, planned: 1 };
   const slotsByRequest: Record<string, Record<string, string>> = {};
   const postedAccountsByRequest: Record<string, Set<string>> = {};
+  const postedAccountsByAsset: Record<string, Set<string>> = {};
   for (const slot of slots ?? []) {
     const rid = slot.request_id;
     if (!rid) continue;
@@ -113,7 +114,14 @@ export default async function VaultPage() {
       slotsByRequest[rid][slot.platform] = slot.status;
     }
     if (slot.status === "posted" && slot.account_id) {
-      (postedAccountsByRequest[rid] ??= new Set()).add(slot.account_id);
+      if (slot.asset_id) {
+        // Posting belongs to one cut. Its siblings are separate reels.
+        (postedAccountsByAsset[slot.asset_id] ??= new Set()).add(slot.account_id);
+      } else {
+        // Rows from before cuts were tracked individually — they can only
+        // speak for the whole job, so they still do.
+        (postedAccountsByRequest[rid] ??= new Set()).add(slot.account_id);
+      }
     }
   }
 
@@ -170,8 +178,13 @@ export default async function VaultPage() {
         is_trial: req?.is_trial ?? false,
         is_warmup: req?.is_warmup ?? false,
         platformStatus: slotsByRequest[asset.request_id] ?? {},
+        // This cut's own postings, plus any legacy job-level marking that
+        // predates per-cut tracking.
         postedAccountIds: Array.from(
-          postedAccountsByRequest[asset.request_id] ?? []
+          new Set([
+            ...(postedAccountsByAsset[asset.id] ?? []),
+            ...(postedAccountsByRequest[asset.request_id] ?? []),
+          ])
         ),
       } satisfies VaultAsset;
     })

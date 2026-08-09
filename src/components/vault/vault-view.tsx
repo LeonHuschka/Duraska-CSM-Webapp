@@ -314,25 +314,27 @@ function VaultCard({
   function togglePostedAccount(account: PostingAccount) {
     const isPosted = postedSet.has(account.id);
     startTransition(async () => {
-      // Optimistic update
+      // Optimistic update — for this cut alone, not its siblings.
       const next = isPosted
         ? asset.postedAccountIds.filter((id) => id !== account.id)
         : [...asset.postedAccountIds, account.id];
-      onUpdatePosted(asset.request_id, next);
+      onUpdatePosted(asset.id, next);
 
       const result = isPosted
         ? await unmarkAssetPostedFromVault({
+            asset_id: asset.id,
             request_id: asset.request_id,
             account_id: account.id,
           })
         : await markAssetPostedFromVault({
+            asset_id: asset.id,
             request_id: asset.request_id,
             account_id: account.id,
           });
 
       if (result.error) {
         toast.error(result.error);
-        onUpdatePosted(asset.request_id, asset.postedAccountIds); // revert
+        onUpdatePosted(asset.id, asset.postedAccountIds); // revert
       } else {
         toast.success(
           isPosted
@@ -637,13 +639,11 @@ export function VaultView({
     setLocalAssets(assets);
   }, [assets]);
 
-  function handlePostedUpdate(requestId: string, postedAccountIds: string[]) {
-    // posted status lives on the request, so update every asset that
-    // belongs to the same request.
+  function handlePostedUpdate(assetId: string, postedAccountIds: string[]) {
+    // Posting belongs to the single cut — its siblings are separate reels
+    // and stay available.
     setLocalAssets((prev) =>
-      prev.map((a) =>
-        a.request_id === requestId ? { ...a, postedAccountIds } : a
-      )
+      prev.map((a) => (a.id === assetId ? { ...a, postedAccountIds } : a))
     );
   }
 
