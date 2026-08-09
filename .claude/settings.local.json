@@ -166,7 +166,9 @@
       "Bash(git commit -qam 'Let an owner start the fingerprint run from the browser *)",
       "Bash(git mv *)",
       "Bash(git commit -qam 'Move the fingerprint job beside the other machine endpoints *)",
-      "Bash(git commit -q -m 'Fingerprint new cuts on the schedule, not just by hand *)"
+      "Bash(git commit -q -m 'Fingerprint new cuts on the schedule, not just by hand *)",
+      "Bash(ls -la \"/Users/leon/Library/Containers/ru.keepcoder.Telegram/Data/tmp/\" 2>/dev/null | head -8)",
+      "Bash(git commit -q -m 'Add a screenshot check, because the layout is never ours *)"
     ]
   }
 }

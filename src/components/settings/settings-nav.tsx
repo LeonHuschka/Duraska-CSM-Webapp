@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, AtSign, Send } from "lucide-react";
+import { Users, AtSign, Send, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/settings/personas", label: "Personas", icon: Users },
   { href: "/settings/accounts", label: "Accounts", icon: AtSign },
   { href: "/settings/telegram", label: "Telegram", icon: Send },
+  { href: "/settings/screenshot-test", label: "Screenshot check", icon: ScanSearch },
 ];
 
 export function SettingsNav() {
