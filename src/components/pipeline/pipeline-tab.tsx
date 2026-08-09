@@ -216,23 +216,46 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
     }
   }
 
+  // End to end: from the moment the link was asked for to the moment the
+  // reel went out. Measured on reels that actually completed the whole run,
+  // not by adding the three medians up — those come from different reels
+  // and their sum describes no reel that ever existed.
+  const linkAskedAt = new Map<string, number>();
+  for (const l of links ?? []) {
+    if (!l.request_id || !l.posted_at) continue;
+    const t = new Date(l.posted_at).getTime();
+    const prev = linkAskedAt.get(l.request_id);
+    if (prev === undefined || t < prev) linkAskedAt.set(l.request_id, t);
+  }
+  const endToEndHours: number[] = [];
+  for (const r of reqs) {
+    if (!currentEra.has(r.id)) continue;
+    const out = firstPosted.get(r.id);
+    const start = linkAskedAt.get(r.id) ?? firstRaw.get(r.id);
+    if (out !== undefined && start !== undefined && out > start) {
+      endToEndHours.push((out - start) / HOUR);
+    }
+  }
+  const endToEndDays =
+    median(endToEndHours) !== null ? median(endToEndHours)! / 24 : null;
+
   const legs = [
     {
       label: "Inspo → uploaded",
       days: median(inspoHours) !== null ? median(inspoHours)! / 24 : null,
-      target: 3,
+      target: 5,
       hint: "link out to her takes in",
     },
     {
       label: "Uploaded → cut",
       days: median(editHours) !== null ? median(editHours)! / 24 : null,
-      target: 2,
+      target: 1,
       hint: "takes waiting for the editor",
     },
     {
       label: "Cut → posted",
       days: median(postHours) !== null ? median(postHours)! / 24 : null,
-      target: 2,
+      target: 1,
       hint: "finished reels waiting to go out",
     },
   ];
@@ -268,7 +291,11 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
         />
         <PostedCard total={postedCuts} last7={last7} previous7={previous7} />
       </div>
-      <StageGauges legs={legs} />
+      <StageGauges
+        legs={legs}
+        endToEndDays={endToEndDays}
+        endToEndCount={endToEndHours.length}
+      />
       <StageFunnel stages={stages} />
       <ThroughputChart weeks={weeks} />
       <OldestWaiting items={oldest} />

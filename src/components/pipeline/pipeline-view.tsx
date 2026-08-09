@@ -320,8 +320,13 @@ export function PostedCard({
  */
 export function StageGauges({
   legs,
+  endToEndDays,
+  endToEndCount,
 }: {
   legs: { label: string; days: number | null; target: number; hint: string }[];
+  /** Median link-to-posted, over reels that ran the whole way */
+  endToEndDays: number | null;
+  endToEndCount: number;
 }) {
   const measured = legs.filter((l) => l.days !== null);
   const worst =
@@ -336,6 +341,21 @@ export function StageGauges({
       title="How fast we turn things around"
       hint="Median over the last 30 days, against what each leg should take"
     >
+      <div className="mb-5 flex items-baseline gap-3 border-b border-border/40 pb-4">
+        <span className="text-3xl font-semibold tabular-nums">
+          {endToEndDays === null
+            ? "—"
+            : endToEndDays < 1
+              ? `${Math.round(endToEndDays * 24)}h`
+              : `${endToEndDays.toFixed(1)}d`}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {endToEndDays === null
+            ? "no reel has run from link to posted yet"
+            : `end to end, across ${endToEndCount} reel${endToEndCount === 1 ? "" : "s"}`}
+        </span>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-3">
         {legs.map((l) => {
           const ratio = l.days === null ? 0 : Math.min(l.days / l.target, 1.6);
