@@ -10,12 +10,13 @@ import {
   parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
-import { extractMetricsFromImage } from "@/lib/vision";
+import { extractMetricsFromImage, matchTilesToCandidates } from "@/lib/vision";
 import {
   fingerprint,
   cropTile,
   identify,
   identifyByText,
+  shortlist,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -351,15 +352,17 @@ async function handleScreenshot(msg: TgMessage) {
     // useful as a gap than as a plausible wrong answer.
     const { data: cuts } = await supabase
       .from("content_assets")
-      .select("id, request_id, phash, overlay_text")
+      .select("id, request_id, phash, overlay_text, thumbnail_path")
       .eq("stage", "edited")
       .not("phash", "is", null)
       .lte("uploaded_at", capturedAt);
 
     const hashPool: Candidate[] = [];
     const textPool: TextCandidate[] = [];
+    const thumbPath = new Map<string, string>();
     for (const c of cuts ?? []) {
       if (!c.id || !c.request_id) continue;
+      if (c.thumbnail_path) thumbPath.set(c.id, c.thumbnail_path);
       if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
       if (c.overlay_text) {
         textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
@@ -369,18 +372,23 @@ async function handleScreenshot(msg: TgMessage) {
     type Hit = { assetId: string; requestId: string; method: string; score: number };
     const cutForPosition = new Map<number, Hit>();
     const taken = new Set<string>();
+    const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
     let cropped = 0;
     let noBox = 0;
 
     for (const r of metrics.reels) {
       // Picture first. It is free, it is the same answer every time, and it
       // tells two takes from one session apart — which the text cannot.
+      let tileHash: string | null = null;
+      let tileCrop: Buffer | null = null;
+
       if (r.box) {
         try {
-          const tile = await cropTile(Buffer.from(file.base64, "base64"), r.box);
+          tileCrop = await cropTile(Buffer.from(file.base64, "base64"), r.box);
           cropped++;
+          tileHash = await fingerprint(tileCrop);
           const verdict = identify(
-            await fingerprint(tile),
+            tileHash,
             hashPool.filter((c) => !taken.has(c.id))
           );
           if (verdict.kind === "match") {
@@ -415,6 +423,88 @@ async function handleScreenshot(msg: TgMessage) {
           score: byText.score,
         });
         taken.add(byText.candidate.id);
+        continue;
+      }
+
+      if (tileHash && tileCrop) {
+        unresolved.push({ position: r.position, crop: tileCrop, hash: tileHash });
+      }
+    }
+
+    // Last stage: a look at what neither test could settle.
+    //
+    // Only this can recognise a reel across a genuinely different frame,
+    // which is the case Instagram's cover picker and Meta's tighter crop
+    // both produce. It sees a shortlist, not the vault: the hash is a poor
+    // judge here but a good sorter, and the right answer sat at rank 12 of
+    // 122 in the case that motivated this.
+    if (unresolved.length > 0 && hashPool.length > 0) {
+      const SHORTLIST = 12;
+      const union: Candidate[] = [];
+      const seen = new Set<string>();
+      for (const u of unresolved) {
+        for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), SHORTLIST)) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            union.push(c);
+          }
+        }
+      }
+
+      const thumbs: { base64: string; mime: string }[] = [];
+      const kept: Candidate[] = [];
+      const paths = union
+        .map((c) => thumbPath.get(c.id))
+        .filter((p): p is string => !!p);
+      const { data: signedThumbs } = await supabase.storage
+        .from("content-assets")
+        .createSignedUrls(paths, 600);
+      const urlFor = new Map<string, string>();
+      for (const s of signedThumbs ?? []) {
+        if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
+      }
+      for (const c of union) {
+        const path = thumbPath.get(c.id);
+        const url = path ? urlFor.get(path) : undefined;
+        if (!url) continue;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          thumbs.push({
+            base64: Buffer.from(await res.arrayBuffer()).toString("base64"),
+            mime: "image/jpeg",
+          });
+          kept.push(c);
+        } catch {
+          // A thumbnail that won't load is simply not offered.
+        }
+      }
+
+      if (kept.length > 0) {
+        const { data: verdicts, error: mErr } = await matchTilesToCandidates(
+          unresolved.map((u) => ({
+            position: u.position,
+            base64: u.crop.toString("base64"),
+            mime: "image/jpeg",
+          })),
+          thumbs
+        );
+        if (mErr) {
+          console.warn("[telegram] final comparison failed", mErr);
+        }
+        for (const v of verdicts ?? []) {
+          if (v.candidate === null) continue;
+          if (cutForPosition.has(v.position)) continue;
+          const c = kept[v.candidate - 1];
+          if (!c || taken.has(c.id)) continue;
+          cutForPosition.set(v.position, {
+            assetId: c.id,
+            requestId: c.requestId,
+            method: "looked",
+            score: v.confidence,
+          });
+          taken.add(c.id);
+        }
       }
     }
 

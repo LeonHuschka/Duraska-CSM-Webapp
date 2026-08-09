@@ -132,7 +132,9 @@ function Tile({ t }: { t: TileResult }) {
                 ? `by picture — ${t.match.score} bits apart, ${(
                     (t.match.ratio ?? 0) * 100
                   ).toFixed(0)}% of the runner-up`
-                : `by text — ${(t.match.score * 100).toFixed(0)}% alike`}
+                : t.match.method === "text"
+                  ? `by text — ${(t.match.score * 100).toFixed(0)}% alike`
+                  : `by looking — ${(t.match.score * 100).toFixed(0)}% sure`}
             </p>
           </>
         ) : (

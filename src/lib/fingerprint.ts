@@ -211,3 +211,19 @@ export function identifyByText(
   if (bestS - secondS < TEXT_RUNNER_UP_GAP) return null;
   return { candidate: best, score: bestS };
 }
+
+/**
+ * The n nearest candidates, decisive or not.
+ *
+ * When identify() refuses, the answer is usually still near the top of the
+ * list — Posing #29 sat at rank 12 of 122 in a case the hash could not
+ * settle. That makes a poor verdict a good shortlist, which is what the
+ * final look is given instead of the whole vault.
+ */
+export function shortlist(tileHash: string, pool: Candidate[], n: number): Candidate[] {
+  return pool
+    .map((c) => ({ c, d: distance(tileHash, c.hash) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, n)
+    .map((x) => x.c);
+}

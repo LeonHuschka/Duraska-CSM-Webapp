@@ -373,3 +373,128 @@ export async function readOverlayTexts(
     };
   }
 }
+
+/**
+ * Last resort: look at the tiles the fingerprint could not settle, against
+ * a short list of candidates it ranked highest.
+ *
+ * This is the only step that can recognise the same reel across a genuinely
+ * different frame — a different pose, a different moment — which no amount
+ * of hashing or cropping achieves. It is also the only step that could be
+ * confidently wrong, so the bar is deliberately high and "none of them" is
+ * an answer the prompt asks for by name.
+ */
+export async function matchTilesToCandidates(
+  tiles: { position: number; base64: string; mime: string }[],
+  candidates: { base64: string; mime: string }[]
+): Promise<{ data: { position: number; candidate: number | null; confidence: number }[] | null; error?: string }> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { data: null, error: "ANTHROPIC_API_KEY not set" };
+  if (tiles.length === 0 || candidates.length === 0) return { data: [] };
+
+  const tool = {
+    name: "record_matches",
+    description: "Say which candidate video each tile shows, or none.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        matches: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              position: { type: "integer", description: "The tile's number" },
+              candidate: {
+                type: ["integer", "null"],
+                description:
+                  "1-based candidate number, or null if none of them is this video",
+              },
+              confidence: { type: "number", description: "0..1 for this tile alone" },
+            },
+            required: ["position", "candidate", "confidence"],
+          },
+        },
+      },
+      required: ["matches"],
+    },
+  };
+
+  const content: unknown[] = [
+    {
+      type: "text",
+      text:
+        `Each TILE below is a thumbnail of a video, taken from a screenshot of a social ` +
+        `media profile. Each CANDIDATE is a still from one of our own videos.\n\n` +
+        `For every tile, say which candidate is the same video, or null.\n\n` +
+        `These clips are all of the same person, often in the same room and the same ` +
+        `outfit, filmed in one session. So "looks similar" is not enough — most of them ` +
+        `look similar. Decide on things that identify one specific clip: the text burnt ` +
+        `into the picture, the exact clothing, the background arrangement, the framing.\n\n` +
+        `The tile is usually a different moment of the same clip than the candidate still, ` +
+        `so the pose and expression will differ. That alone does not rule a candidate out.\n\n` +
+        `A tile's video may not be among the candidates at all. Answer null when that is ` +
+        `the case, and null again whenever you are not sure — a wrong pairing puts one ` +
+        `reel's numbers onto another reel's record, which is worse than no answer. ` +
+        `Never give the same candidate to two tiles.`,
+    },
+  ];
+  tiles.forEach((t) => {
+    content.push({ type: "text", text: `TILE ${t.position}:` });
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: t.mime, data: t.base64 },
+    });
+  });
+  candidates.forEach((c, i) => {
+    content.push({ type: "text", text: `CANDIDATE ${i + 1}:` });
+    content.push({
+      type: "image",
+      source: { type: "base64", media_type: c.mime, data: c.base64 },
+    });
+  });
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_VISION_MODEL ?? "claude-sonnet-5",
+        max_tokens: 1024,
+        tools: [tool],
+        tool_choice: { type: "tool", name: "record_matches" },
+        messages: [{ role: "user", content }],
+      }),
+    });
+    if (!res.ok) return { data: null, error: `Anthropic answered ${res.status}` };
+    const body = (await res.json()) as {
+      content?: {
+        type: string;
+        input?: { matches?: { position?: number; candidate?: number | null; confidence?: number }[] };
+      }[];
+    };
+    const use = body.content?.find((c) => c.type === "tool_use");
+    const out: { position: number; candidate: number | null; confidence: number }[] = [];
+    const used = new Set<number>();
+    for (const m of use?.input?.matches ?? []) {
+      if (typeof m.position !== "number") continue;
+      let cand =
+        typeof m.candidate === "number" && m.candidate >= 1 && m.candidate <= candidates.length
+          ? m.candidate
+          : null;
+      const conf = typeof m.confidence === "number" ? m.confidence : 0;
+      // The instruction not to reuse a candidate is a request; this is the
+      // guarantee. The bar is high because this step is the one that can be
+      // confidently wrong.
+      if (cand !== null && (used.has(cand) || conf < 0.85)) cand = null;
+      if (cand !== null) used.add(cand);
+      out.push({ position: m.position, candidate: cand, confidence: conf });
+    }
+    return { data: out };
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : "match call failed" };
+  }
+}

@@ -2,12 +2,13 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
-import { extractMetricsFromImage } from "@/lib/vision";
+import { extractMetricsFromImage, matchTilesToCandidates } from "@/lib/vision";
 import {
   fingerprint,
   cropTile,
   identify,
   identifyByText,
+  shortlist,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -20,7 +21,7 @@ export type TileResult = {
   crop: string | null;
   match: {
     title: string;
-    method: "image" | "text";
+    method: "image" | "text" | "looked";
     score: number;
     ratio: number | null;
     thumb: string | null;
@@ -93,6 +94,7 @@ export async function analyseScreenshot(form: FormData) {
   const tiles: TileResult[] = [];
   const taken = new Set<string>();
   const wantThumbs = new Set<string>();
+  const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
 
   for (const r of metrics.reels) {
     const row: TileResult = {
@@ -105,13 +107,18 @@ export async function analyseScreenshot(form: FormData) {
       nearest: null,
     };
 
+    let tileCrop: Buffer | null = null;
+    let tileHash: string | null = null;
+
     if (r.box) {
       try {
         const tile = await cropTile(buf, r.box);
+        tileCrop = tile;
         // Small enough to inline, big enough to see what was cut out.
         row.crop = `data:image/jpeg;base64,${tile.toString("base64")}`;
+        tileHash = await fingerprint(tile);
         const verdict = identify(
-          await fingerprint(tile),
+          tileHash,
           hashPool.filter((c) => !taken.has(c.id))
         );
         if (verdict.kind === "match") {
@@ -157,10 +164,79 @@ export async function analyseScreenshot(form: FormData) {
           thumb: t ?? null,
         };
         taken.add(byText.candidate.id);
+      } else if (tileCrop && tileHash) {
+        unresolved.push({ position: r.position, crop: tileCrop, hash: tileHash });
       }
     }
 
     tiles.push(row);
+  }
+
+  // The final look, on a shortlist the hash ranked rather than decided.
+  if (unresolved.length > 0 && hashPool.length > 0) {
+    const union: Candidate[] = [];
+    const seen = new Set<string>();
+    for (const u of unresolved) {
+      for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), 12)) {
+        if (!seen.has(c.id)) {
+          seen.add(c.id);
+          union.push(c);
+        }
+      }
+    }
+    const paths = union.map((c) => thumbOf.get(c.id)).filter((p): p is string => !!p);
+    const { data: signedThumbs } = await supabase.storage
+      .from("content-assets")
+      .createSignedUrls(paths, 600);
+    const urlFor = new Map<string, string>();
+    for (const s of signedThumbs ?? []) {
+      if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
+    }
+    const kept: Candidate[] = [];
+    const thumbs: { base64: string; mime: string }[] = [];
+    for (const c of union) {
+      const path = thumbOf.get(c.id);
+      const url = path ? urlFor.get(path) : undefined;
+      if (!url) continue;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        thumbs.push({
+          base64: Buffer.from(await r.arrayBuffer()).toString("base64"),
+          mime: "image/jpeg",
+        });
+        kept.push(c);
+      } catch {
+        // not offered
+      }
+    }
+    if (kept.length > 0) {
+      const { data: verdicts } = await matchTilesToCandidates(
+        unresolved.map((u) => ({
+          position: u.position,
+          base64: u.crop.toString("base64"),
+          mime: "image/jpeg",
+        })),
+        thumbs
+      );
+      for (const v of verdicts ?? []) {
+        if (v.candidate === null) continue;
+        const c = kept[v.candidate - 1];
+        if (!c || taken.has(c.id)) continue;
+        const row = tiles.find((t) => t.position === v.position);
+        if (!row || row.match) continue;
+        const t = thumbOf.get(c.id);
+        if (t) wantThumbs.add(t);
+        row.match = {
+          title: titles.get(c.requestId) ?? "—",
+          method: "looked",
+          score: v.confidence,
+          ratio: null,
+          thumb: t ?? null,
+        };
+        taken.add(c.id);
+      }
+    }
   }
 
   // One signing call for every thumbnail we are about to show.
