@@ -45,7 +45,10 @@ export async function AccountsTab({
           "id, handle, platform, status, telegram_thread_id, posts_per_day, manager_username"
         )
         .eq("persona_id", personaId)
-        .order("platform"),
+        // Handle as a tiebreaker, or two accounts on the same platform swap
+        // places between loads and the card you were about to click moves.
+        .order("platform")
+        .order("handle"),
       supabase
         .from("account_metrics")
         .select("account_id, captured_at, followers, needs_review")
