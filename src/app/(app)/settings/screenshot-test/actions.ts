@@ -9,6 +9,7 @@ import {
   identify,
   identifyByText,
   shortlist,
+  distance,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -33,6 +34,9 @@ export type TileResult = {
   } | null;
   /** Why it refused, when it did — the number that made the decision. */
   nearest: { title: string; distance: number; ratio: number } | null;
+  /** The three closest cuts by name, so "it isn't in the vault" can be told
+   *  apart from "it is there but the picture drifted". */
+  closest: { title: string; distance: number }[];
 };
 
 /**
@@ -97,6 +101,7 @@ export async function analyseScreenshot(form: FormData) {
   }
 
   const tiles: TileResult[] = [];
+  let lastStage: { tiles: number; candidates: number; error: string | null } | null = null;
   const taken = new Set<string>();
   const wantThumbs = new Set<string>();
   const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
@@ -110,6 +115,7 @@ export async function analyseScreenshot(form: FormData) {
       crop: null,
       match: null,
       nearest: null,
+      closest: [],
     };
 
     let tileCrop: Buffer | null = null;
@@ -122,6 +128,10 @@ export async function analyseScreenshot(form: FormData) {
         // Small enough to inline, big enough to see what was cut out.
         row.crop = `data:image/jpeg;base64,${tile.toString("base64")}`;
         tileHash = await fingerprint(tile);
+        row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
+          title: titles.get(c.requestId) ?? "—",
+          distance: distance(tileHash!, c.hash),
+        }));
         const verdict = identify(
           tileHash,
           hashPool.filter((c) => !taken.has(c.id))
@@ -184,7 +194,7 @@ export async function analyseScreenshot(form: FormData) {
     const union: Candidate[] = [];
     const seen = new Set<string>();
     for (const u of unresolved) {
-      for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), 12)) {
+      for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), 8)) {
         if (!seen.has(c.id)) {
           seen.add(c.id);
           union.push(c);
@@ -217,8 +227,9 @@ export async function analyseScreenshot(form: FormData) {
         // not offered
       }
     }
+    lastStage = { tiles: unresolved.length, candidates: kept.length, error: null };
     if (kept.length > 0) {
-      const { data: verdicts } = await matchTilesToCandidates(
+      const { data: verdicts, error: lerr } = await matchTilesToCandidates(
         unresolved.map((u) => ({
           position: u.position,
           base64: u.crop.toString("base64"),
@@ -226,6 +237,7 @@ export async function analyseScreenshot(form: FormData) {
         })),
         thumbs
       );
+      if (lerr) lastStage.error = lerr;
       for (const v of verdicts ?? []) {
         if (v.candidate === null) continue;
         const c = kept[v.candidate - 1];
@@ -267,6 +279,7 @@ export async function analyseScreenshot(form: FormData) {
     confidence: metrics.confidence,
     poolSize: hashPool.length,
     textPoolSize: textPool.length,
+    lastStage,
     tiles,
   };
 }

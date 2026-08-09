@@ -1,6 +1,10 @@
 import { getActivePersonaId } from "@/lib/persona";
 import { ScreenshotTest } from "@/components/settings/screenshot-test";
 
+// Reading a screenshot is one Vision call, and the last stage may add a
+// second. Ten seconds — the default — is not enough for either.
+export const maxDuration = 60;
+
 export default async function ScreenshotTestPage() {
   const personaId = await getActivePersonaId();
   if (!personaId) {

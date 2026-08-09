@@ -85,6 +85,17 @@ export function ScreenshotTest() {
             </span>
           </div>
 
+          {res.lastStage && (
+            <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Final look: {res.lastStage.tiles} tile
+              {res.lastStage.tiles === 1 ? "" : "s"} against{" "}
+              {res.lastStage.candidates} shortlisted cuts
+              {res.lastStage.error && (
+                <span className="text-rose-300"> — failed: {res.lastStage.error}</span>
+              )}
+            </p>
+          )}
+
           {res.tiles && res.tiles.length > 0 ? (
             <>
               <p className="text-xs text-muted-foreground">
@@ -147,6 +158,12 @@ function Tile({ t }: { t: TileResult }) {
                 : "the model gave no position for this tile"}
             </p>
           </>
+        )}
+        {!t.match && t.closest.length > 0 && (
+          <p className="mt-1 text-[10px] leading-tight text-muted-foreground/70">
+            closest:{" "}
+            {t.closest.map((c) => `${c.title} (${c.distance})`).join(", ")}
+          </p>
         )}
         {t.caption && (
           <p className="mt-1 line-clamp-2 text-muted-foreground/70">
