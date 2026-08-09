@@ -10,7 +10,7 @@ import {
   identifyByText,
   shortlist,
   distance,
-  snapToGrid,
+  refineGrid,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -107,7 +107,7 @@ export async function analyseScreenshot(form: FormData) {
   const wantThumbs = new Set<string>();
   const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
 
-  const boxes = snapToGrid(metrics.reels.map((r) => r.box));
+  const boxes = await refineGrid(buf, metrics.reels.map((r) => r.box));
 
   for (let i = 0; i < metrics.reels.length; i++) {
     const r = metrics.reels[i];

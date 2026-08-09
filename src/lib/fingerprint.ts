@@ -290,3 +290,93 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
     return moved > Math.max(w, h) * 0.5 ? b : snapped;
   });
 }
+
+/**
+ * Find the grid's true edges in the picture, using the model only for scale.
+ *
+ * Snapping to a lattice removes the scatter between boxes but not a shift
+ * they all share — and they did all share one: every crop sat a fifth of a
+ * tile too low, so each contained the bottom of one reel and the top of the
+ * next. No amount of averaging fixes a common offset.
+ *
+ * The picture knows where the edges are. Tile borders are where brightness
+ * changes abruptly right across the image, so the spacing comes from the
+ * boxes and the position comes from wherever that change actually is.
+ */
+export async function refineGrid(
+  image: Buffer,
+  boxes: (Box | null)[]
+): Promise<(Box | null)[]> {
+  const snapped = snapToGrid(boxes);
+  const present = snapped.filter((b): b is Box => b !== null);
+  if (present.length < 2) return snapped;
+
+  const w = present[0].w;
+  const h = present[0].h;
+
+  // Edge energy along each axis, from a small greyscale copy: how much the
+  // picture changes as you step across it.
+  const N = 256;
+  const raw = await sharp(image).greyscale().resize(N, N, { fit: "fill" }).raw().toBuffer();
+  const rowEnergy = new Float64Array(N);
+  const colEnergy = new Float64Array(N);
+  for (let y = 1; y < N; y++) {
+    for (let x = 1; x < N; x++) {
+      const v = raw[y * N + x];
+      rowEnergy[y] += Math.abs(v - raw[(y - 1) * N + x]);
+      colEnergy[x] += Math.abs(v - raw[y * N + x - 1]);
+    }
+  }
+
+  /**
+   * Slide the predicted borders across one period and keep the placement
+   * that lands them on the strongest edges. Only a shift is searched — the
+   * spacing is already known, and letting both float would find patterns in
+   * anything.
+   */
+  const bestShift = (energy: Float64Array, size: number, centres: number[]) => {
+    const pitch = size * N;
+    if (!(pitch > 4)) return 0;
+    let best = 0;
+    let bestScore = -1;
+    const step = Math.max(1, Math.round(pitch / 40));
+    for (let s = -Math.round(pitch / 2); s <= Math.round(pitch / 2); s += step) {
+      let score = 0;
+      for (const c of centres) {
+        for (const edge of [c * N - pitch / 2 + s, c * N + pitch / 2 + s]) {
+          const i = Math.round(edge);
+          if (i < 1 || i >= N) continue;
+          score += energy[i - 1] + energy[i] + (i + 1 < N ? energy[i + 1] : 0);
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    return best / N;
+  };
+
+  const uniq = (vs: number[], tol: number) => {
+    const s = [...vs].sort((a, b) => a - b);
+    const out: number[] = [];
+    for (const v of s) if (!out.length || v - out[out.length - 1] > tol) out.push(v);
+    return out;
+  };
+  const cols = uniq(present.map((b) => b.x + b.w / 2), w * 0.5);
+  const rows = uniq(present.map((b) => b.y + b.h / 2), h * 0.5);
+
+  const dx = bestShift(colEnergy, w, cols);
+  const dy = bestShift(rowEnergy, h, rows);
+
+  return snapped.map((b) =>
+    b === null
+      ? null
+      : {
+          x: Math.max(0, Math.min(1 - b.w, b.x + dx)),
+          y: Math.max(0, Math.min(1 - b.h, b.y + dy)),
+          w: b.w,
+          h: b.h,
+        }
+  );
+}

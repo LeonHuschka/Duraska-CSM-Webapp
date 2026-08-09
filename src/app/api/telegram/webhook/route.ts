@@ -17,7 +17,7 @@ import {
   identify,
   identifyByText,
   shortlist,
-  snapToGrid,
+  refineGrid,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -380,7 +380,10 @@ async function handleScreenshot(msg: TgMessage) {
     // One lattice for all of them, before a single pixel is cut: a model
     // asked for nine rectangles gives nine roughly-right rectangles, and
     // cropping on those yields fragments spanning two tiles.
-    const boxes = snapToGrid(metrics.reels.map((r) => r.box));
+    const boxes = await refineGrid(
+      Buffer.from(file.base64, "base64"),
+      metrics.reels.map((r) => r.box)
+    );
 
     for (let i = 0; i < metrics.reels.length; i++) {
       const r = metrics.reels[i];

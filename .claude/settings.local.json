@@ -173,7 +173,8 @@
       "Bash(git commit -q -m 'Let something look at what the fingerprint could not settle *)",
       "Bash(cat)",
       "Bash(git commit *)",
-      "Bash(cat > *)"
+      "Bash(cat > *)",
+      "Bash(node --experimental-strip-types test/gridtest.mts)"
     ]
   }
 }
