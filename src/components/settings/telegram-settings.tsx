@@ -384,6 +384,22 @@ export function TelegramSettings({
         </div>
       </div>
 
+      {/* Who may submit screenshots */}
+      <div className="rounded-xl border border-border/50 bg-card p-4">
+        <h2 className="text-sm font-medium">Screenshot senders</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Only these @handles have their pictures read. Leave empty and every
+          photo posted in a topic gets analysed, by anyone.
+        </p>
+        <Input
+          value={f.screenshot_senders}
+          onChange={(e) => set("screenshot_senders", e.target.value)}
+          placeholder="lyza, another_va"
+          disabled={saving}
+          className="mt-3 h-10"
+        />
+      </div>
+
       {/* Weekly goal — owner only, it's what the model is measured against */}
       {isOwner && (
         <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4">
