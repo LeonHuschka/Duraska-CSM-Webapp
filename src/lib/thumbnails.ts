@@ -349,3 +349,92 @@ export function thumbnailPathFor(filePath: string): string {
   const base = dot > slash ? filePath.slice(0, dot) : filePath;
   return `${base}.thumb.jpg`;
 }
+
+// ─── Frame sheet ────────────────────────────────────────────────────────────
+//
+// A strip of stills taken across the clip, saved as one image.
+//
+// A grid tile is a frame of the video, but almost never the frame our
+// thumbnail was cut from — the poster picks a cover, and the platform crops
+// it. One still could only recognise the tile that happened to be the same
+// moment; measured, a correct match scored 108 where wrong ones scored 118,
+// which is no signal at all. Several stills turned that into 77 against 107.
+//
+// Made here because the video is already decoded in the browser, and saved
+// as a picture rather than as numbers so the hashing stays on the server:
+// one engine for both sides of every comparison.
+
+export const FRAME_COUNT = 8;
+const FRAME_WIDTH = 180;
+
+export async function generateFrameSheet(
+  source: File | Blob | string,
+  mimeType?: string
+): Promise<{ blob: Blob; count: number } | null> {
+  const isUrl = typeof source === "string";
+  const mime = isUrl ? (mimeType ?? "video/mp4") : (mimeType ?? (source as Blob).type);
+  if (!mime.startsWith("video/")) return null;
+
+  const url = isUrl ? (source as string) : URL.createObjectURL(source as Blob);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.src = url;
+
+  const TIMEOUT_MS = 20_000;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("metadata timeout")), TIMEOUT_MS);
+      video.onloadedmetadata = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(t);
+        reject(new Error("video load failed"));
+      };
+    });
+
+    const dur = video.duration && isFinite(video.duration) ? video.duration : 0;
+    if (!dur || !video.videoWidth) return null;
+
+    const fh = Math.round((FRAME_WIDTH * video.videoHeight) / video.videoWidth);
+    const sheet = document.createElement("canvas");
+    sheet.width = FRAME_WIDTH * FRAME_COUNT;
+    sheet.height = fh;
+    const ctx = sheet.getContext("2d");
+    if (!ctx) return null;
+
+    // Spread across the clip but off both ends: the first and last moments
+    // are often a fade, and a black frame fingerprints as every other black
+    // frame in the vault.
+    let drawn = 0;
+    for (let i = 0; i < FRAME_COUNT; i++) {
+      const t = dur * (0.06 + (0.88 * i) / Math.max(1, FRAME_COUNT - 1));
+      try {
+        await seekAndWaitForFrame(video, Math.min(t, Math.max(0.05, dur - 0.05)), 8000);
+      } catch {
+        continue;
+      }
+      ctx.drawImage(video, i * FRAME_WIDTH, 0, FRAME_WIDTH, fh);
+      drawn++;
+    }
+    if (drawn === 0) return null;
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      sheet.toBlob((b) => resolve(b), "image/jpeg", 0.72)
+    );
+    return blob ? { blob, count: FRAME_COUNT } : null;
+  } catch {
+    return null;
+  } finally {
+    if (!isUrl) URL.revokeObjectURL(url);
+  }
+}
+
+/** Sibling of thumbnailPathFor, so the sheet lives beside its cut. */
+export function framesPathFor(filePath: string): string {
+  return filePath.replace(/\.[^./]+$/, "") + ".frames.jpg";
+}

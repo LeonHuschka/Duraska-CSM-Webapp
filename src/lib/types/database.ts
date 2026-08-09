@@ -240,6 +240,9 @@ export type Database = {
           notes: string | null;
           deleted_at: string | null;
           phash: string | null;
+          phashes: string[] | null;
+          frames_path: string | null;
+          frame_count: number | null;
           overlay_text: string | null;
           fingerprinted_at: string | null;
         };
@@ -260,6 +263,9 @@ export type Database = {
           notes?: string | null;
           deleted_at?: string | null;
           phash?: string | null;
+          phashes?: string[] | null;
+          frames_path?: string | null;
+          frame_count?: number | null;
           overlay_text?: string | null;
           fingerprinted_at?: string | null;
         };
@@ -280,6 +286,9 @@ export type Database = {
           notes?: string | null;
           deleted_at?: string | null;
           phash?: string | null;
+          phashes?: string[] | null;
+          frames_path?: string | null;
+          frame_count?: number | null;
           overlay_text?: string | null;
           fingerprinted_at?: string | null;
         };

@@ -353,7 +353,7 @@ async function handleScreenshot(msg: TgMessage) {
     // useful as a gap than as a plausible wrong answer.
     const { data: cuts } = await supabase
       .from("content_assets")
-      .select("id, request_id, phash, overlay_text, thumbnail_path")
+      .select("id, request_id, phash, phashes, overlay_text, thumbnail_path")
       .eq("stage", "edited")
       .not("phash", "is", null)
       .lte("uploaded_at", capturedAt);
@@ -364,7 +364,12 @@ async function handleScreenshot(msg: TgMessage) {
     for (const c of cuts ?? []) {
       if (!c.id || !c.request_id) continue;
       if (c.thumbnail_path) thumbPath.set(c.id, c.thumbnail_path);
-      if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
+      // The frame set when it exists, the single thumbnail hash while the
+      // backfill is still running.
+      const hashes = c.phashes?.length ? c.phashes : c.phash ? [c.phash] : [];
+      if (hashes.length) {
+        hashPool.push({ id: c.id, requestId: c.request_id, hashes });
+      }
       if (c.overlay_text) {
         textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
       }
