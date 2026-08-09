@@ -198,9 +198,13 @@ async function handleMessage(msg: TgMessage) {
  * Screenshot posted in a group that's mapped to an account → run it through
  * the vision model and store whatever numbers it could read.
  *
- * Every outcome answers with a reaction, because the VA has no other way
- * to know: 👀 picked up, 💯 numbers stored, 🤔 stored but flagged for
- * review, 🤨 nothing readable, 🤷‍♂️ this topic isn't tied to an account.
+ * Only pictures from a listed sender, in a topic tied to an account, are
+ * touched at all. Everywhere else the bot stays completely silent — the
+ * instructions topic is a conversation, not a data source.
+ *
+ * Once it does engage it always answers, because the sender has no other
+ * way to know: 👀 picked up, 💯 numbers stored, 🤔 stored but flagged for
+ * review, 🤨 nothing readable.
  */
 async function handleScreenshot(msg: TgMessage) {
   const supabase = createAdminClient();
@@ -223,17 +227,12 @@ async function handleScreenshot(msg: TgMessage) {
     }
   }
 
-  // Say "got it" before the slow part. Vision takes seconds and every exit
-  // below used to be silent, so a VA could not tell a processed screenshot
-  // from an ignored one — and the emoji that was meant to confirm it was
-  // rejected by Telegram anyway.
   const react = (emoji: string) =>
     setMessageReaction({
       chat_id: msg.chat.id,
       message_id: msg.message_id,
       emoji,
     });
-  await react(REACTION.seen);
 
   // A date in the caption backdates the reading. Without one it is stamped
   // with the time the message arrived, which is what the daily routine
@@ -277,10 +276,16 @@ async function handleScreenshot(msg: TgMessage) {
     account = data;
   }
   if (!account) {
-    console.log("[telegram] screenshot from unmapped chat", msg.chat.id, "topic", thread);
-    await react(REACTION.unmapped);
+    // Not one of the account topics — the instructions topic, the requests
+    // topic, any chat the bot happens to sit in. Nothing is read and
+    // nothing is answered: a reaction here is noise in a conversation that
+    // has nothing to do with statistics.
+    console.log("[telegram] photo outside an account topic", msg.chat.id, "topic", thread);
     return;
   }
+
+  // Confirmed an account topic, so say "got it" before the slow part.
+  await react(REACTION.seen);
 
   // Already processed? (Telegram can redeliver.)
   const { data: existing } = await supabase

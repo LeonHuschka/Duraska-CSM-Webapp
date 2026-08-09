@@ -331,5 +331,4 @@ export const REACTION = {
   read: "💯", // numbers extracted and stored
   unsure: "🤔", // extracted but flagged for review
   unreadable: "🤨", // nothing usable in the image
-  unmapped: "🤷‍♂️", // this topic isn't tied to an account
 } as const;
