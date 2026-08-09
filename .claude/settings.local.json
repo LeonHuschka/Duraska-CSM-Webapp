@@ -165,7 +165,8 @@
       "Bash(git commit -q -m 'Identify reels by the picture, not by their position *)",
       "Bash(git commit -qam 'Let an owner start the fingerprint run from the browser *)",
       "Bash(git mv *)",
-      "Bash(git commit -qam 'Move the fingerprint job beside the other machine endpoints *)"
+      "Bash(git commit -qam 'Move the fingerprint job beside the other machine endpoints *)",
+      "Bash(git commit -q -m 'Fingerprint new cuts on the schedule, not just by hand *)"
     ]
   }
 }

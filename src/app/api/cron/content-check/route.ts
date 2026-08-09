@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { dailyDemand } from "@/lib/demand";
+import { fingerprintPending } from "@/lib/fingerprint-job";
 import {
   checkInstagramAlive,
   deleteMessage,
@@ -63,6 +64,13 @@ export async function GET(req: Request) {
   for (const cfg of configs ?? []) {
     summary[cfg.persona_id] = await runForPersona(supabase, cfg, deadline);
   }
+
+  // New cuts need a hash and their hook text before a screenshot can
+  // recognise them. Riding along here keeps it inside the two scheduled
+  // jobs the plan allows, at the cost of up to twelve hours' delay.
+  summary.fingerprint = await fingerprintPending(
+    Math.min(deadline + 10_000, Date.now() + 12_000)
+  );
 
   return NextResponse.json({ ok: true, summary });
 }
