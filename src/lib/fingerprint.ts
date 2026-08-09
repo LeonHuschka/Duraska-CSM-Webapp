@@ -227,3 +227,66 @@ export function shortlist(tileHash: string, pool: Candidate[], n: number): Candi
     .slice(0, n)
     .map((x) => x.c);
 }
+
+export type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * Straighten the tile boxes against the grid they came from.
+ *
+ * Asked for nine rectangles, a model gives nine roughly-right rectangles —
+ * each off by a little, in its own direction. Cropping on those produced
+ * slivers and fragments spanning two tiles, and the fingerprint was then
+ * being asked to recognise something that was never a reel.
+ *
+ * But a profile grid is a lattice, and that is information the individual
+ * guesses throw away. Columns and rows are recovered from the guesses as a
+ * whole, and every tile is rebuilt from the lattice: one consistent size,
+ * and edges that agree with their neighbours.
+ */
+export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
+  const present = boxes.filter((b): b is Box => b !== null);
+  if (present.length < 3) return boxes; // too few to infer anything
+
+  const med = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  const w = med(present.map((b) => b.w));
+  const h = med(present.map((b) => b.h));
+  if (!(w > 0) || !(h > 0)) return boxes;
+
+  // Group centres that sit within half a tile of each other; the group's
+  // median is the true column or row line.
+  const lines = (values: number[], tolerance: number) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const groups: number[][] = [];
+    for (const v of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && v - last[last.length - 1] <= tolerance) last.push(v);
+      else groups.push([v]);
+    }
+    return groups.map(med);
+  };
+  const cols = lines(present.map((b) => b.x + b.w / 2), w * 0.5);
+  const rows = lines(present.map((b) => b.y + b.h / 2), h * 0.5);
+
+  const nearest = (v: number, ls: number[]) =>
+    ls.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), ls[0]);
+
+  return boxes.map((b) => {
+    if (!b) return null;
+    const cx = nearest(b.x + b.w / 2, cols);
+    const cy = nearest(b.y + b.h / 2, rows);
+    const snapped = {
+      x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+      y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+      w,
+      h,
+    };
+    // If snapping moved a tile more than half its own size, the lattice
+    // does not describe this box — keep what the model said rather than
+    // inventing a location for it.
+    const moved = Math.hypot(snapped.x - b.x, snapped.y - b.y);
+    return moved > Math.max(w, h) * 0.5 ? b : snapped;
+  });
+}

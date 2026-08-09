@@ -17,6 +17,7 @@ import {
   identify,
   identifyByText,
   shortlist,
+  snapToGrid,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -376,15 +377,22 @@ async function handleScreenshot(msg: TgMessage) {
     let cropped = 0;
     let noBox = 0;
 
-    for (const r of metrics.reels) {
+    // One lattice for all of them, before a single pixel is cut: a model
+    // asked for nine rectangles gives nine roughly-right rectangles, and
+    // cropping on those yields fragments spanning two tiles.
+    const boxes = snapToGrid(metrics.reels.map((r) => r.box));
+
+    for (let i = 0; i < metrics.reels.length; i++) {
+      const r = metrics.reels[i];
+      const box = boxes[i];
       // Picture first. It is free, it is the same answer every time, and it
       // tells two takes from one session apart — which the text cannot.
       let tileHash: string | null = null;
       let tileCrop: Buffer | null = null;
 
-      if (r.box) {
+      if (box) {
         try {
-          tileCrop = await cropTile(Buffer.from(file.base64, "base64"), r.box);
+          tileCrop = await cropTile(Buffer.from(file.base64, "base64"), box);
           cropped++;
           tileHash = await fingerprint(tileCrop);
           const verdict = identify(

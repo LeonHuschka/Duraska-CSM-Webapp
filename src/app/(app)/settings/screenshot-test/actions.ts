@@ -10,6 +10,7 @@ import {
   identifyByText,
   shortlist,
   distance,
+  snapToGrid,
   type Candidate,
   type TextCandidate,
 } from "@/lib/fingerprint";
@@ -106,12 +107,16 @@ export async function analyseScreenshot(form: FormData) {
   const wantThumbs = new Set<string>();
   const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
 
-  for (const r of metrics.reels) {
+  const boxes = snapToGrid(metrics.reels.map((r) => r.box));
+
+  for (let i = 0; i < metrics.reels.length; i++) {
+    const r = metrics.reels[i];
+    const box = boxes[i];
     const row: TileResult = {
       position: r.position,
       views: r.views,
       caption: r.caption,
-      box: r.box,
+      box,
       crop: null,
       match: null,
       nearest: null,
@@ -121,9 +126,9 @@ export async function analyseScreenshot(form: FormData) {
     let tileCrop: Buffer | null = null;
     let tileHash: string | null = null;
 
-    if (r.box) {
+    if (box) {
       try {
-        const tile = await cropTile(buf, r.box);
+        const tile = await cropTile(buf, box);
         tileCrop = tile;
         // Small enough to inline, big enough to see what was cut out.
         row.crop = `data:image/jpeg;base64,${tile.toString("base64")}`;
