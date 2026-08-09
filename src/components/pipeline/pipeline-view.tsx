@@ -414,10 +414,11 @@ function Gauge({
           ? "text-amber-400"
           : "text-rose-400";
 
-  // Left end = 180°, right end = 0°.
-  const angle = ratio === null ? null : Math.PI * ratio;
-  const cx = 50 + 40 * Math.cos(angle ?? 0) * -1;
-  const cy = 50 - 40 * Math.sin(angle ?? 0);
+  // The arc is drawn left to right, so 0° is the left end and 180° the
+  // right one. A ratio of 0 — instant — therefore belongs at 180°.
+  const angle = ratio === null ? 0 : Math.PI * (1 - ratio);
+  const cx = 50 - 40 * Math.cos(angle);
+  const cy = 50 - 40 * Math.sin(angle);
 
   return (
     <div className="text-center">
@@ -441,7 +442,7 @@ function Gauge({
         </span>
       </div>
 
-      <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+      <div className="mx-auto mt-1 flex w-32 items-center justify-between text-[10px] text-muted-foreground">
         {editable ? (
           <SlowBoundInput legKey={leg.key as "inspo" | "edit" | "post"} value={leg.slowDays} />
         ) : (

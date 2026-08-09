@@ -143,7 +143,8 @@
       "WebFetch(domain:help.creatorhero.com)",
       "WebFetch(domain:core.telegram.org)",
       "Bash(grep -n \"const iso\\\\|const german\\\\|d{4}\\\\|d{1,2}\" src/lib/telegram.ts)",
-      "Bash(git commit -q -m 'Read the gauges the way the work runs: slow left, zero right *)"
+      "Bash(git commit -q -m 'Read the gauges the way the work runs: slow left, zero right *)",
+      "Bash(git commit -qam 'Put zero on the right, where the label says it is *)"
     ]
   }
 }
