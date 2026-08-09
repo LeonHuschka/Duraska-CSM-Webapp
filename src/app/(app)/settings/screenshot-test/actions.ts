@@ -9,7 +9,7 @@ import {
   identify,
   identifyByText,
   shortlist,
-  distance,
+  distanceToCandidate,
   refineGrid,
   type Candidate,
   type TextCandidate,
@@ -71,7 +71,7 @@ export async function analyseScreenshot(form: FormData) {
 
   const { data: cuts } = await supabase
     .from("content_assets")
-    .select("id, request_id, phash, overlay_text, thumbnail_path")
+    .select("id, request_id, phash, phashes, overlay_text, thumbnail_path")
     .eq("stage", "edited")
     .not("phash", "is", null);
 
@@ -94,7 +94,8 @@ export async function analyseScreenshot(form: FormData) {
   for (const c of cuts ?? []) {
     if (!c.id || !c.request_id) continue;
     if (!titles.has(c.request_id)) continue; // another persona's cut
-    if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
+    const hashes = c.phashes?.length ? c.phashes : c.phash ? [c.phash] : [];
+      if (hashes.length) hashPool.push({ id: c.id, requestId: c.request_id, hashes });
     if (c.overlay_text) {
       textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
     }
@@ -135,7 +136,7 @@ export async function analyseScreenshot(form: FormData) {
         tileHash = await fingerprint(tile);
         row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
           title: titles.get(c.requestId) ?? "—",
-          distance: distance(tileHash!, c.hash),
+          distance: distanceToCandidate(tileHash!, c),
         }));
         const verdict = identify(
           tileHash,

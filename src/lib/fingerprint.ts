@@ -28,6 +28,44 @@ export const HASH_BITS = (W - 1) * H;
  */
 const CROP_BOTTOM = 0.2;
 
+/**
+ * The windows a platform might show our 9:16 frame through.
+ *
+ * Instagram's grid shows the whole frame; Meta's library shows a 3:4 band of
+ * it. A single fingerprint of the whole frame cannot recognise a band of
+ * itself: cropped to 3:4, the same picture scored 51 to 110 against its own
+ * stored hash, close enough to wrong answers that one of six was matched to
+ * the wrong reel and the rest would have been refused.
+ *
+ * Fingerprinting the frame through each window fixes that — measured on
+ * crops deliberately placed between the stored windows, so it does not
+ * depend on guessing the platform's exact geometry: 24 of 24 identified,
+ * best-to-runner-up between 0.21 and 0.64 against a limit of 0.8.
+ */
+const ASPECTS = [0.75, 0.8, 1.0];
+const OFFSETS = [0, 0.34, 0.67, 1];
+
+/** Every fingerprint of one still: the whole frame, and each window of it. */
+export async function fingerprintSet(image: Buffer): Promise<string[]> {
+  const meta = await sharp(image).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (!w || !h) return [];
+
+  const out = [await fingerprint(image)];
+  for (const aspect of ASPECTS) {
+    const bandH = Math.round(w / aspect);
+    if (bandH >= h || bandH < 16) continue;
+    for (const off of OFFSETS) {
+      const band = await sharp(image)
+        .extract({ left: 0, top: Math.round((h - bandH) * off), width: w, height: bandH })
+        .toBuffer();
+      out.push(await fingerprint(band));
+    }
+  }
+  return out;
+}
+
 export async function fingerprint(image: Buffer): Promise<string> {
   const meta = await sharp(image).metadata();
   const w = meta.width ?? 0;
@@ -92,7 +130,17 @@ export function distance(a: string, b: string): number {
 const MAX_DISTANCE = 90;
 const MAX_RATIO = 0.8;
 
-export type Candidate = { id: string; requestId: string; hash: string };
+export type Candidate = { id: string; requestId: string; hashes: string[] };
+
+/** How far a tile is from the nearest window this cut was fingerprinted in. */
+export function distanceToCandidate(tileHash: string, c: Candidate): number {
+  let best = HASH_BITS;
+  for (const h of c.hashes) {
+    const d = distance(tileHash, h);
+    if (d < best) best = d;
+  }
+  return best;
+}
 export type Verdict =
   | { kind: "match"; candidate: Candidate; distance: number; ratio: number }
   | { kind: "unsure"; distance: number; ratio: number };
@@ -112,7 +160,7 @@ export function identify(tileHash: string, pool: Candidate[]): Verdict {
   let bestD = Infinity;
   let secondD = Infinity;
   for (const c of pool) {
-    const d = distance(tileHash, c.hash);
+    const d = distanceToCandidate(tileHash, c);
     if (d < bestD) {
       secondD = bestD;
       bestD = d;
@@ -222,7 +270,7 @@ export function identifyByText(
  */
 export function shortlist(tileHash: string, pool: Candidate[], n: number): Candidate[] {
   return pool
-    .map((c) => ({ c, d: distance(tileHash, c.hash) }))
+    .map((c) => ({ c, d: distanceToCandidate(tileHash, c) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, n)
     .map((x) => x.c);

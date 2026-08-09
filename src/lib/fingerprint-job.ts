@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fingerprint } from "@/lib/fingerprint";
+import { fingerprint, fingerprintSet } from "@/lib/fingerprint";
 import { readOverlayTexts } from "@/lib/vision";
 
 /**
@@ -21,7 +21,7 @@ export async function fingerprintPending(deadline: number) {
     .select("id, thumbnail_path")
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .is("fingerprinted_at", null)
+    .or("fingerprinted_at.is.null,phashes.is.null")
     .limit(HASH_BATCH);
 
   if (error) return { ok: false, error: error.message };
@@ -38,7 +38,7 @@ export async function fingerprintPending(deadline: number) {
     if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
   }
 
-  const loaded: { id: string; buf: Buffer; hash: string }[] = [];
+  const loaded: { id: string; buf: Buffer; hash: string; hashes: string[] }[] = [];
   for (const a of pending) {
     if (Date.now() > deadline) break;
     const url = a.thumbnail_path ? urlFor.get(a.thumbnail_path) : undefined;
@@ -47,7 +47,14 @@ export async function fingerprintPending(deadline: number) {
       const res = await fetch(url);
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
-      loaded.push({ id: a.id, buf, hash: await fingerprint(buf) });
+      loaded.push({
+        id: a.id,
+        buf,
+        hash: await fingerprint(buf),
+        // One per window a platform might crop the frame to — a 3:4 tile
+        // cannot be recognised by a fingerprint of the whole 9:16 frame.
+        hashes: await fingerprintSet(buf),
+      });
     } catch {
       // A thumbnail that won't load stays unfingerprinted and is retried,
       // rather than being marked done with nothing to show for it.
@@ -77,6 +84,7 @@ export async function fingerprintPending(deadline: number) {
       .from("content_assets")
       .update({
         phash: l.hash,
+        phashes: l.hashes,
         overlay_text: texts.get(l.id),
         fingerprinted_at: new Date().toISOString(),
       })
@@ -89,7 +97,7 @@ export async function fingerprintPending(deadline: number) {
     .select("id", { count: "exact", head: true })
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .is("fingerprinted_at", null);
+    .or("fingerprinted_at.is.null,phashes.is.null");
 
   return { ok: true, done: (left ?? 0) === 0, hashed: loaded.length, written, remaining: left ?? 0 };
 }
