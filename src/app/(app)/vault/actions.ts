@@ -299,12 +299,33 @@ export async function unmarkAssetPostedFromVault(data: {
     .limit(1)
     .maybeSingle();
 
-  if (!slot) return { error: null };
+  // Nothing recorded against this cut — but a row from before cuts were
+  // tracked individually may still be claiming the whole job on this
+  // account, which is what puts the tick on every one of its cuts. That row
+  // is the thing to remove: it asserts something that was never true.
+  // Without this the tick could not be cleared from the app at all.
+  const legacy = slot
+    ? null
+    : (
+        await supabase
+          .from("schedule_slots")
+          .select("id")
+          .eq("persona_id", personaId)
+          .eq("request_id", data.request_id)
+          .eq("account_id", data.account_id)
+          .eq("status", "posted")
+          .is("asset_id", null)
+          .limit(1)
+          .maybeSingle()
+      ).data;
+
+  const target = slot ?? legacy;
+  if (!target) return { error: null };
 
   const { error } = await supabase
     .from("schedule_slots")
     .delete()
-    .eq("id", slot.id);
+    .eq("id", target.id);
 
   if (error) return { error: error.message };
 
