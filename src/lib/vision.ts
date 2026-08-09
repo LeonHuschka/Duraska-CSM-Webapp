@@ -14,6 +14,8 @@ export interface ExtractedReel {
   views: number | null;
   likes: number | null;
   caption: string | null;
+  /** Tile bounds as fractions of the image, for cutting it back out. */
+  box: { x: number; y: number; w: number; h: number } | null;
 }
 
 export interface ExtractedMetrics {
@@ -88,7 +90,23 @@ const TOOL = {
             },
             views: { type: ["integer", "null"], description: "The play/view count on the tile" },
             likes: { type: ["integer", "null"] },
-            caption: { type: ["string", "null"], description: "Caption text on the tile, if any" },
+            caption: {
+              type: ["string", "null"],
+              description:
+                "Text visible ON the tile image itself — the hook rendered into the video (e.g. \"Me when I realize I'm losing the argument:\"). Copy it verbatim, including line breaks as spaces. Null if the tile carries no text.",
+            },
+            box: {
+              type: ["object", "null"],
+              description:
+                "Where this tile sits in the image, as fractions of the full width and height (0..1). Give the picture area only — not the surrounding page, and not the phone's bezel if the screenshot is a photo of a screen.",
+              properties: {
+                x: { type: "number", description: "Left edge, 0..1" },
+                y: { type: "number", description: "Top edge, 0..1" },
+                w: { type: "number", description: "Width, 0..1" },
+                h: { type: "number", description: "Height, 0..1" },
+              },
+              required: ["x", "y", "w", "h"],
+            },
           },
           required: ["position"],
         },
@@ -106,6 +124,24 @@ const TOOL = {
     required: ["metric_kind", "confidence"],
   },
 };
+
+/**
+ * A box is only useful if it could plausibly be a reel tile. Models
+ * occasionally return the whole image or a sliver; cropping on that would
+ * produce a fingerprint of nothing and a confident wrong answer downstream.
+ */
+function validBox(b: unknown): ExtractedReel["box"] {
+  if (!b || typeof b !== "object") return null;
+  const o = b as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const x = n(o.x), y = n(o.y), w = n(o.w), h = n(o.h);
+  if (x === null || y === null || w === null || h === null) return null;
+  if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1.02 || y + h > 1.02) return null;
+  // A reel tile is portrait and a fraction of the page. Anything near
+  // full-height or wider than tall is not one.
+  if (w > 0.6 || h > 0.7) return null;
+  return { x, y, w: Math.min(w, 1 - x), h: Math.min(h, 1 - y) };
+}
 
 const SYSTEM = `You read social-media analytics screenshots and extract the numbers.
 
@@ -126,6 +162,13 @@ Rules:
   completely and must NOT consume a position number, because the numbering
   is how each reel is matched to its record. One photo counted by mistake
   shifts every reel after it onto the wrong record.
+- Give a "box" for every reel tile: where its picture sits in the image, as
+  fractions of the full width and height. This is used to cut the tile back
+  out and compare it against our own videos, so it must frame the picture
+  itself — tight, and without the page around it. If the screenshot is a
+  photo of a phone screen, exclude the bezel and the room behind it.
+- "caption" is the text rendered INTO the video and visible on the tile, not
+  the post's written caption. Copy it exactly as it reads.
 - If a reel's number is unreadable, still emit that reel with views=null.
   Dropping it would shift the ones after it, which is the same damage.
 - If the image is not an analytics screenshot at all, set metric_kind="unknown"
@@ -215,6 +258,7 @@ export async function extractMetricsFromImage(
                 views: r.views ?? null,
                 likes: r.likes ?? null,
                 caption: r.caption ?? null,
+                box: validBox(r.box),
               }))
           : [],
         confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
@@ -231,86 +275,62 @@ export async function extractMetricsFromImage(
 
 
 /**
- * Which of our reels is on each tile of the grid?
+ * Read the hook text off a batch of our own thumbnails.
  *
- * Position is not identity. The same reel appears in every screenshot for
- * weeks, drifting one place further back as newer ones are posted, and a
- * reel posted outside the app occupies a tile we know nothing about — so
- * "tile 2 is the second-most-recently posted reel" is a guess that breaks
- * the moment anything is out of order.
- *
- * The tile is a still from our own video, so the picture answers it. The
- * grid goes in alongside the candidates' thumbnails and the model says
- * which is which, or says it can't tell.
+ * Runs once per cut, not once per screenshot: the text a clip carries never
+ * changes, so this is a property of the video, stored alongside its hash.
+ * Batched because the cost is per call far more than per image.
  */
-export interface GridMatch {
-  position: number;
-  /** index into the candidates array, or null when nothing matches */
-  candidate: number | null;
-  confidence: number;
-}
+export async function readOverlayTexts(
+  images: { base64: string; mime: string }[]
+): Promise<{ data: (string | null)[] | null; error?: string }> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { data: null, error: "ANTHROPIC_API_KEY is not set" };
+  if (images.length === 0) return { data: [] };
 
-const MATCH_TOOL = {
-  name: "match_tiles",
-  description:
-    "For each tile of the grid, name the candidate thumbnail showing the same video.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      matches: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            position: {
-              type: "integer",
-              description: "Tile number, counting reels only, 1 = first",
+  const tool = {
+    name: "record_texts",
+    description: "Report the on-image text of each numbered picture.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        texts: {
+          type: "array",
+          description: "One entry per picture, in the order given.",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "integer", description: "1-based picture number" },
+              text: {
+                type: ["string", "null"],
+                description:
+                  "The text rendered into the picture, verbatim. Null if it carries none.",
+              },
             },
-            candidate: {
-              type: ["integer", "null"],
-              description:
-                "1-based index of the matching candidate image, or null if none of them is this video",
-            },
-            confidence: {
-              type: "number",
-              description: "0..1 for this single tile",
-            },
+            required: ["index"],
           },
-          required: ["position", "candidate", "confidence"],
         },
       },
+      required: ["texts"],
     },
-    required: ["matches"],
-  },
-};
-
-export async function matchGridToReels(
-  gridImage: { base64: string; mime: string },
-  candidates: { base64: string; mime: string }[]
-): Promise<{ data: GridMatch[] | null; error?: string }> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { data: null, error: "ANTHROPIC_API_KEY not set" };
-  if (candidates.length === 0) return { data: [], error: undefined };
+  };
 
   const content: unknown[] = [
     {
       type: "text",
-      text: "This is the grid of reels on the account. Tiles are numbered by reels only, left to right, top to bottom — ignore photo posts.",
-    },
-    {
-      type: "image",
-      source: { type: "base64", media_type: gridImage.mime, data: gridImage.base64 },
-    },
-    {
-      type: "text",
-      text: `Now ${candidates.length} candidate videos, numbered 1 to ${candidates.length}:`,
+      text:
+        `Here are ${images.length} video thumbnails, numbered 1 to ${images.length}.\n\n` +
+        `For each, copy the text that is rendered INTO the picture — the hook or caption ` +
+        `burnt into the video frame. Copy it exactly as written, including spelling. ` +
+        `Do not describe the picture, do not invent text, and do not read any interface ` +
+        `elements such as timestamps or buttons. If a picture carries no text, return null.`,
     },
   ];
-  candidates.forEach((c, i) => {
-    content.push({ type: "text", text: `Candidate ${i + 1}:` });
+  images.forEach((img, i) => {
+    content.push({ type: "text", text: `Picture ${i + 1}:` });
     content.push({
       type: "image",
-      source: { type: "base64", media_type: c.mime, data: c.base64 },
+      source: { type: "base64", media_type: img.mime, data: img.base64 },
     });
   });
 
@@ -318,65 +338,38 @@ export async function matchGridToReels(
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
         model: process.env.ANTHROPIC_VISION_MODEL ?? "claude-sonnet-5",
-        max_tokens: 1024,
-        system: `You match thumbnails of the same video.
-
-The grid tiles are small, cropped and compressed; a candidate is a frame
-from the same video but not necessarily the same frame. Judge by person,
-outfit, background, framing and any on-screen text.
-
-Rules:
-- A tile may show a video that is not among the candidates. Answer null for
-  it. A wrong match is far worse than an honest null, because the numbers
-  would then be filed under someone else's video.
-- Never use the same candidate twice. Each video appears once in a grid.
-- Give a per-tile confidence and be strict: below 0.7 means unsure.`,
-        tools: [MATCH_TOOL],
-        tool_choice: { type: "tool", name: "match_tiles" },
+        max_tokens: 2048,
+        tools: [tool],
+        tool_choice: { type: "tool", name: "record_texts" },
         messages: [{ role: "user", content }],
       }),
     });
-
     if (!res.ok) {
-      const body = await res.text();
-      return { data: null, error: `anthropic ${res.status}: ${body.slice(0, 200)}` };
+      return { data: null, error: `Anthropic answered ${res.status}` };
     }
-    const json = (await res.json()) as {
-      content: { type: string; name?: string; input?: unknown }[];
+    const body = (await res.json()) as {
+      content?: { type: string; input?: { texts?: { index?: number; text?: string | null }[] } }[];
     };
-    const toolUse = json.content?.find(
-      (c) => c.type === "tool_use" && c.name === "match_tiles"
-    );
-    if (!toolUse?.input) return { data: null, error: "no structured output" };
-
-    const raw = (toolUse.input as { matches?: GridMatch[] }).matches ?? [];
-    const used = new Set<number>();
-    const out: GridMatch[] = [];
-    for (const m of raw) {
-      if (typeof m?.position !== "number") continue;
-      let candidate =
-        typeof m.candidate === "number" && m.candidate >= 1 ? m.candidate : null;
-      const confidence = typeof m.confidence === "number" ? m.confidence : 0;
-      // Belt and braces: the instruction not to reuse a candidate is a
-      // request, this is the guarantee. Also drop anything the model itself
-      // called unsure rather than filing views under the wrong reel.
-      if (candidate !== null && (used.has(candidate) || confidence < 0.7)) {
-        candidate = null;
+    const use = body.content?.find((c) => c.type === "tool_use");
+    const rows = use?.input?.texts ?? [];
+    const out: (string | null)[] = new Array(images.length).fill(null);
+    for (const r of rows) {
+      const i = typeof r.index === "number" ? r.index - 1 : -1;
+      if (i >= 0 && i < out.length) {
+        out[i] = typeof r.text === "string" && r.text.trim() !== "" ? r.text.trim() : null;
       }
-      if (candidate !== null) used.add(candidate);
-      out.push({ position: m.position, candidate, confidence });
     }
     return { data: out };
   } catch (err) {
     return {
       data: null,
-      error: err instanceof Error ? err.message : "match call failed",
+      error: err instanceof Error ? err.message : "text call failed",
     };
   }
 }

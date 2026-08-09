@@ -239,6 +239,9 @@ export type Database = {
           uploaded_at: string;
           notes: string | null;
           deleted_at: string | null;
+          phash: string | null;
+          overlay_text: string | null;
+          fingerprinted_at: string | null;
         };
         Insert: {
           id?: string;
@@ -256,6 +259,9 @@ export type Database = {
           uploaded_at?: string;
           notes?: string | null;
           deleted_at?: string | null;
+          phash?: string | null;
+          overlay_text?: string | null;
+          fingerprinted_at?: string | null;
         };
         Update: {
           id?: string;
@@ -273,6 +279,9 @@ export type Database = {
           uploaded_at?: string;
           notes?: string | null;
           deleted_at?: string | null;
+          phash?: string | null;
+          overlay_text?: string | null;
+          fingerprinted_at?: string | null;
         };
         Relationships: [
           {
@@ -490,6 +499,8 @@ export type Database = {
           source_file_id: string | null;
           confidence: number | null;
           needs_review: boolean;
+          match_method: string | null;
+          match_score: number | null;
           created_at: string;
         };
         Insert: {
@@ -508,6 +519,8 @@ export type Database = {
           source_file_id?: string | null;
           confidence?: number | null;
           needs_review?: boolean;
+          match_method?: string | null;
+          match_score?: number | null;
           created_at?: string;
         };
         Update: {
@@ -525,6 +538,8 @@ export type Database = {
           source_message_id?: number | null;
           confidence?: number | null;
           needs_review?: boolean;
+          match_method?: string | null;
+          match_score?: number | null;
           created_at?: string;
         };
         Relationships: [];
@@ -586,6 +601,8 @@ export type Database = {
           raw?: Json | null;
           confidence?: number | null;
           needs_review?: boolean;
+          match_method?: string | null;
+          match_score?: number | null;
           created_at?: string;
         };
         Update: Partial<{

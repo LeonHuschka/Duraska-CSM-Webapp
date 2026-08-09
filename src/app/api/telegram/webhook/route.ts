@@ -10,9 +10,21 @@ import {
   parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
-import { extractMetricsFromImage, matchGridToReels } from "@/lib/vision";
+import { extractMetricsFromImage } from "@/lib/vision";
+import {
+  fingerprint,
+  cropTile,
+  identify,
+  identifyByText,
+  type Candidate,
+  type TextCandidate,
+} from "@/lib/fingerprint";
 
 export const dynamic = "force-dynamic";
+// Reading a grid means one Vision call to extract it and up to three more to
+// identify the tiles. That does not fit in the ten seconds a function gets by
+// default, and a screenshot that times out leaves no trace anywhere.
+export const maxDuration = 60;
 
 /**
  * Telegram webhook.
@@ -329,107 +341,86 @@ async function handleScreenshot(msg: TgMessage) {
   if (metrics.reels.length > 0) {
     // Which of our reels is on each tile.
     //
-    // Candidates are anchored on when the screenshot was taken, not on
-    // today: a grid from three weeks ago can only contain cuts that existed
-    // by then, and the twenty newest cuts as of now wouldn't include any of
-    // them. For a live screenshot this is the same set as before.
+    // The tile is a frame of a video we hold, so this is decided by
+    // comparing pictures, not by counting positions. Position was never
+    // identity: an unrecorded posting, a pinned reel or a deleted one shifts
+    // every tile after it, and the old logic had no way to notice.
     //
-    // Deliberately not "what we think was posted on this account" — an
-    // unmarked posting is exactly the case that broke position-based
-    // guessing.
-    const { data: recent } = await supabase
+    // Two independent tests, each able to refuse. Nothing is written unless
+    // one of them is clearly decided — a tile we cannot place is far more
+    // useful as a gap than as a plausible wrong answer.
+    const { data: cuts } = await supabase
       .from("content_assets")
-      .select("id, request_id, thumbnail_path, uploaded_at")
+      .select("id, request_id, phash, overlay_text")
       .eq("stage", "edited")
-      .not("thumbnail_path", "is", null)
-      .lte("uploaded_at", capturedAt)
-      .order("uploaded_at", { ascending: false })
-      .limit(200);
+      .not("phash", "is", null)
+      .lte("uploaded_at", capturedAt);
 
-    // Every cut is a candidate in its own right. Collapsing them per job
-    // was wrong: a job holds three to five distinct reels, and offering one
-    // of them made the other four unrecognisable.
-    const pool: { assetId: string; requestId: string; path: string }[] = [];
-    for (const c of recent ?? []) {
-      if (!c.id || !c.request_id || !c.thumbnail_path) continue;
-      pool.push({
-        assetId: c.id,
-        requestId: c.request_id,
-        path: c.thumbnail_path,
-      });
+    const hashPool: Candidate[] = [];
+    const textPool: TextCandidate[] = [];
+    for (const c of cuts ?? []) {
+      if (!c.id || !c.request_id) continue;
+      if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
+      if (c.overlay_text) {
+        textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
+      }
     }
 
-    const loadThumb = async (path: string) => {
-      const { data: url } = await supabase.storage
-        .from("content-assets")
-        .createSignedUrl(path, 600);
-      if (!url?.signedUrl) return null;
-      try {
-        const res = await fetch(url.signedUrl);
-        if (!res.ok) return null;
-        const buf = Buffer.from(await res.arrayBuffer());
-        return buf.toString("base64");
-      } catch {
-        return null; // a thumbnail that won't load just isn't a candidate
+    type Hit = { assetId: string; requestId: string; method: string; score: number };
+    const cutForPosition = new Map<number, Hit>();
+    const taken = new Set<string>();
+    let cropped = 0;
+    let noBox = 0;
+
+    for (const r of metrics.reels) {
+      // Picture first. It is free, it is the same answer every time, and it
+      // tells two takes from one session apart — which the text cannot.
+      if (r.box) {
+        try {
+          const tile = await cropTile(Buffer.from(file.base64, "base64"), r.box);
+          cropped++;
+          const verdict = identify(
+            await fingerprint(tile),
+            hashPool.filter((c) => !taken.has(c.id))
+          );
+          if (verdict.kind === "match") {
+            cutForPosition.set(r.position, {
+              assetId: verdict.candidate.id,
+              requestId: verdict.candidate.requestId,
+              method: "image",
+              score: verdict.distance,
+            });
+            taken.add(verdict.candidate.id);
+            continue;
+          }
+        } catch (err) {
+          console.warn("[telegram] tile crop failed", err);
+        }
+      } else {
+        noBox++;
       }
-    };
 
-    // Work through the pool in batches, oldest rounds only for the tiles
-    // still unidentified. Sending sixty thumbnails in one call would be
-    // slower and less accurate than three focused ones.
-    const BATCH = 20;
-    const MAX_ROUNDS = 3;
-    const cutForPosition = new Map<number, { assetId: string; requestId: string }>();
-    const takenCuts = new Set<string>();
-
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const open = metrics.reels
-        .map((r) => r.position)
-        .filter((p) => !cutForPosition.has(p));
-      if (open.length === 0) break;
-
-      const slice = pool
-        .filter((c) => !takenCuts.has(c.assetId))
-        .slice(round * BATCH, round * BATCH + BATCH);
-      if (slice.length === 0) break;
-
-      const batch: {
-        assetId: string;
-        requestId: string;
-        base64: string;
-        mime: string;
-      }[] = [];
-      for (const c of slice) {
-        const base64 = await loadThumb(c.path);
-        if (base64)
-          batch.push({
-            assetId: c.assetId,
-            requestId: c.requestId,
-            base64,
-            mime: "image/jpeg",
-          });
-      }
-      if (batch.length === 0) continue;
-
-      const { data: matches, error: matchErr } = await matchGridToReels(
-        { base64: file.base64, mime: file.mime },
-        batch.map((c) => ({ base64: c.base64, mime: c.mime }))
+      // The hook burnt into the clip. This is what carries the cases the
+      // picture cannot: Instagram showing a tighter crop, or a cover frame
+      // from a different moment.
+      const byText = identifyByText(
+        r.caption,
+        textPool.filter((c) => !taken.has(c.id))
       );
-      if (matchErr) {
-        console.warn("[telegram] tile matching failed", matchErr);
-        break;
-      }
-      for (const m of matches ?? []) {
-        if (m.candidate === null) continue;
-        if (cutForPosition.has(m.position)) continue;
-        const c = batch[m.candidate - 1];
-        if (!c || takenCuts.has(c.assetId)) continue;
-        cutForPosition.set(m.position, { assetId: c.assetId, requestId: c.requestId });
-        takenCuts.add(c.assetId);
+      if (byText) {
+        cutForPosition.set(r.position, {
+          assetId: byText.candidate.id,
+          requestId: byText.candidate.requestId,
+          method: "text",
+          score: byText.score,
+        });
+        taken.add(byText.candidate.id);
       }
     }
+
     console.log(
-      `[telegram] matched ${cutForPosition.size}/${metrics.reels.length} tiles from ${pool.length} candidates`
+      `[telegram] @${account.handle}: identified ${cutForPosition.size}/${metrics.reels.length} tiles ` +
+        `(${cropped} cropped, ${noBox} without a box) against ${hashPool.length} hashed cuts`
     );
 
     const { error: gridErr } = await supabase.from("reel_metrics").upsert(
@@ -440,6 +431,8 @@ async function handleScreenshot(msg: TgMessage) {
         position: r.position,
         asset_id: cutForPosition.get(r.position)?.assetId ?? null,
         request_id: cutForPosition.get(r.position)?.requestId ?? null,
+        match_method: cutForPosition.get(r.position)?.method ?? null,
+        match_score: cutForPosition.get(r.position)?.score ?? null,
         views: r.views,
         likes: r.likes,
         caption: r.caption,
