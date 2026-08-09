@@ -12,8 +12,6 @@ export async function createAssetRecord(data: {
   mime_type: string;
   size_bytes: number;
   thumbnail_path?: string | null;
-  frames_path?: string | null;
-  frame_count?: number | null;
 }) {
   const supabase = await createClient();
 
@@ -30,8 +28,6 @@ export async function createAssetRecord(data: {
     mime_type: data.mime_type,
     size_bytes: data.size_bytes,
     thumbnail_path: data.thumbnail_path ?? null,
-    frames_path: data.frames_path ?? null,
-    frame_count: data.frame_count ?? null,
     uploaded_by: user.id,
   });
 

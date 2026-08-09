@@ -174,10 +174,7 @@
       "Bash(cat)",
       "Bash(git commit *)",
       "Bash(cat > *)",
-      "Bash(node --experimental-strip-types test/gridtest.mts)",
-      "Bash(curl -s -o v5940.mp4 \"https://nlwkpkhtevgcdpqbksed.supabase.co/storage/v1/object/sign/content-assets/personas/1fd1ea86-354e-4b89-be7f-b45e9441f7b1/requests/425a4ee3-4a49-40c3-8204-3df8d37cd80d/edited/1450e590-e436-4d32-80da-259d0fab4687_IMG_5940.MP4?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mMWE5YmRkYy02YzU3LTQxNTgtYjMzYy0zYjM5ZmY0Zjg3ZWQiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJjb250ZW50LWFzc2V0cy9wZXJzb25hcy8xZmQxZWE4Ni0zNTRlLTRiODktYmU3Zi1iNDVlOTQ0MWY3YjEvcmVxdWVzdHMvNDI1YTRlZTMtNGE0OS00MGMzLTgyMDQtM2RmOGQzN2NkODBkL2VkaXRlZC8xNDUwZTU5MC1lNDM2LTRkMzItODBkYS0yNTlkMGZhYjQ2ODdfSU1HXzU5NDAuTVA0Iiwic2NvcGUiOiJkb3dubG9hZCIsImlhdCI6MTc4NjI5NTc5MiwiZXhwIjoxNzg2Mjk5MzkyfQ.70ldlOygl4ezYSoQlBzTtDlfQUr-q8H65qrortZ3PIY\")",
-      "Bash(ffprobe -v error -show_entries format=duration -of csv=p=0 v5940.mp4)",
-      "Bash(ffmpeg -v error -i v5940.mp4 -vf \"fps=4,scale=360:-1\" frames/f%03d.jpg)"
+      "Bash(node --experimental-strip-types test/gridtest.mts)"
     ]
   }
 }

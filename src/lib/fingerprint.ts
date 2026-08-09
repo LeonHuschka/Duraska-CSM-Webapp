@@ -28,69 +28,6 @@ export const HASH_BITS = (W - 1) * H;
  */
 const CROP_BOTTOM = 0.2;
 
-/**
- * The shapes a platform might cut our 9:16 frame into before showing it.
- *
- * Instagram's profile grid shows the whole frame; Meta's business library
- * shows a 3:4 band of it. Comparing a band against a whole frame is what
- * made a correct match score 108 where wrong ones scored 118 — the same
- * picture, measured through different windows.
- *
- * So each frame is fingerprinted through every window a platform is likely
- * to use, and a tile is compared against all of them.
- */
-const ASPECTS = [0.75, 1.0, 0.8];
-const OFFSETS = [0, 0.5, 1];
-
-/**
- * Every fingerprint of one still: the whole frame, plus each plausible crop
- * of it at the top, middle and bottom.
- */
-export async function fingerprintSet(image: Buffer): Promise<string[]> {
-  const meta = await sharp(image).metadata();
-  const w = meta.width ?? 0;
-  const h = meta.height ?? 0;
-  if (!w || !h) return [];
-
-  const out = [await fingerprint(image)];
-  for (const aspect of ASPECTS) {
-    // The band of this frame that has the requested shape.
-    const bandH = Math.round(w / aspect);
-    if (bandH >= h || bandH < 16) continue;
-    for (const off of OFFSETS) {
-      const top = Math.round((h - bandH) * off);
-      const band = await sharp(image)
-        .extract({ left: 0, top, width: w, height: bandH })
-        .toBuffer();
-      out.push(await fingerprint(band));
-    }
-  }
-  return out;
-}
-
-/**
- * Cut a sprite sheet of stills back into its frames.
- *
- * The sheet is made in the browser, where the video is already decoded, and
- * hashed here — one engine for both sides of every comparison, so a match
- * never fails because two libraries round a pixel differently.
- */
-export async function framesFromSheet(sheet: Buffer, count: number): Promise<Buffer[]> {
-  const meta = await sharp(sheet).metadata();
-  const w = meta.width ?? 0;
-  const h = meta.height ?? 0;
-  if (!w || !h || count < 1) return [];
-  const fw = Math.floor(w / count);
-  if (fw < 16) return [];
-  const out: Buffer[] = [];
-  for (let i = 0; i < count; i++) {
-    out.push(
-      await sharp(sheet).extract({ left: i * fw, top: 0, width: fw, height: h }).toBuffer()
-    );
-  }
-  return out;
-}
-
 export async function fingerprint(image: Buffer): Promise<string> {
   const meta = await sharp(image).metadata();
   const w = meta.width ?? 0;
@@ -155,17 +92,7 @@ export function distance(a: string, b: string): number {
 const MAX_DISTANCE = 90;
 const MAX_RATIO = 0.8;
 
-export type Candidate = { id: string; requestId: string; hashes: string[] };
-
-/** How far a tile is from the nearest fingerprint this cut has. */
-export function distanceToCandidate(tileHash: string, c: Candidate): number {
-  let best = HASH_BITS;
-  for (const h of c.hashes) {
-    const d = distance(tileHash, h);
-    if (d < best) best = d;
-  }
-  return best;
-}
+export type Candidate = { id: string; requestId: string; hash: string };
 export type Verdict =
   | { kind: "match"; candidate: Candidate; distance: number; ratio: number }
   | { kind: "unsure"; distance: number; ratio: number };
@@ -185,7 +112,7 @@ export function identify(tileHash: string, pool: Candidate[]): Verdict {
   let bestD = Infinity;
   let secondD = Infinity;
   for (const c of pool) {
-    const d = distanceToCandidate(tileHash, c);
+    const d = distance(tileHash, c.hash);
     if (d < bestD) {
       secondD = bestD;
       bestD = d;
@@ -295,7 +222,7 @@ export function identifyByText(
  */
 export function shortlist(tileHash: string, pool: Candidate[], n: number): Candidate[] {
   return pool
-    .map((c) => ({ c, d: distanceToCandidate(tileHash, c) }))
+    .map((c) => ({ c, d: distance(tileHash, c.hash) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, n)
     .map((x) => x.c);

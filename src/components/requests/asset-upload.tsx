@@ -5,13 +5,7 @@ import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import {
-  generateThumbnail,
-  thumbnailPathFor,
-  safeStorageName,
-  generateFrameSheet,
-  framesPathFor,
-} from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 
 interface AssetUploadProps {
   requestId: string;
@@ -76,32 +70,6 @@ export function AssetUpload({
             console.warn("[upload] thumbnail step failed", err);
           }
 
-          // A strip of stills across the clip, for recognising it later in a
-          // screenshot of an account. Only finished cuts are ever looked for
-          // there, and only they are worth the seconds this takes.
-          let framesPath: string | null = null;
-          let frameCount: number | null = null;
-          if (stage === "edited") {
-            try {
-              const sheet = await generateFrameSheet(file);
-              if (sheet) {
-                const fPath = framesPathFor(filePath);
-                const { error: fErr } = await supabase.storage
-                  .from("content-assets")
-                  .upload(fPath, sheet.blob, {
-                    contentType: "image/jpeg",
-                    upsert: true,
-                  });
-                if (!fErr) {
-                  framesPath = fPath;
-                  frameCount = sheet.count;
-                }
-              }
-            } catch (err) {
-              console.warn("[upload] frame strip step failed", err);
-            }
-          }
-
           try {
             await createAssetRecord({
               request_id: requestId,
@@ -111,8 +79,6 @@ export function AssetUpload({
               mime_type: file.type,
               size_bytes: file.size,
               thumbnail_path: thumbnailPath,
-              frames_path: framesPath,
-              frame_count: frameCount,
             });
           } catch (err) {
             toast.error(

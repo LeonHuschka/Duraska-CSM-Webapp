@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fingerprint, fingerprintSet, framesFromSheet } from "@/lib/fingerprint";
+import { fingerprint } from "@/lib/fingerprint";
 import { readOverlayTexts } from "@/lib/vision";
 
 /**
@@ -18,10 +18,10 @@ export async function fingerprintPending(deadline: number) {
 
   const { data: pending, error } = await supabase
     .from("content_assets")
-    .select("id, thumbnail_path, frames_path, frame_count")
+    .select("id, thumbnail_path")
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .or("fingerprinted_at.is.null,and(frames_path.not.is.null,phashes.is.null)")
+    .is("fingerprinted_at", null)
     .limit(HASH_BATCH);
 
   if (error) return { ok: false, error: error.message };
@@ -29,10 +29,7 @@ export async function fingerprintPending(deadline: number) {
 
   // Signing is metadata only; the bytes below are a few tens of kilobytes
   // per thumbnail, which is why this never touches the videos themselves.
-  const paths = [
-    ...pending.map((a) => a.thumbnail_path!),
-    ...pending.map((a) => a.frames_path).filter((p): p is string => !!p),
-  ].filter(Boolean);
+  const paths = pending.map((a) => a.thumbnail_path!).filter(Boolean);
   const { data: signed } = await supabase.storage
     .from("content-assets")
     .createSignedUrls(paths, 900);
@@ -41,7 +38,7 @@ export async function fingerprintPending(deadline: number) {
     if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
   }
 
-  const loaded: { id: string; buf: Buffer; hash: string; hashes: string[] }[] = [];
+  const loaded: { id: string; buf: Buffer; hash: string }[] = [];
   for (const a of pending) {
     if (Date.now() > deadline) break;
     const url = a.thumbnail_path ? urlFor.get(a.thumbnail_path) : undefined;
@@ -50,24 +47,7 @@ export async function fingerprintPending(deadline: number) {
       const res = await fetch(url);
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
-      const hash = await fingerprint(buf);
-
-      // Every still of the clip, through every crop shape a platform might
-      // use. The thumbnail is only the fallback for cuts whose sheet has
-      // not been made yet.
-      let hashes: string[] = await fingerprintSet(buf);
-      const sheetUrl = a.frames_path ? urlFor.get(a.frames_path) : undefined;
-      if (sheetUrl && a.frame_count) {
-        const sres = await fetch(sheetUrl);
-        if (sres.ok) {
-          const frames = await framesFromSheet(
-            Buffer.from(await sres.arrayBuffer()),
-            a.frame_count
-          );
-          for (const f of frames) hashes = hashes.concat(await fingerprintSet(f));
-        }
-      }
-      loaded.push({ id: a.id, buf, hash, hashes });
+      loaded.push({ id: a.id, buf, hash: await fingerprint(buf) });
     } catch {
       // A thumbnail that won't load stays unfingerprinted and is retried,
       // rather than being marked done with nothing to show for it.
@@ -97,7 +77,6 @@ export async function fingerprintPending(deadline: number) {
       .from("content_assets")
       .update({
         phash: l.hash,
-        phashes: l.hashes,
         overlay_text: texts.get(l.id),
         fingerprinted_at: new Date().toISOString(),
       })
@@ -110,7 +89,7 @@ export async function fingerprintPending(deadline: number) {
     .select("id", { count: "exact", head: true })
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .or("fingerprinted_at.is.null,and(frames_path.not.is.null,phashes.is.null)");
+    .is("fingerprinted_at", null);
 
   return { ok: true, done: (left ?? 0) === 0, hashed: loaded.length, written, remaining: left ?? 0 };
 }

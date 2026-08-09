@@ -27,13 +27,7 @@ import {
 } from "@/app/(app)/requests/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
 import { createClient } from "@/lib/supabase/client";
-import {
-  generateThumbnail,
-  thumbnailPathFor,
-  safeStorageName,
-  generateFrameSheet,
-  framesPathFor,
-} from "@/lib/thumbnails";
+import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thumbnails";
 import type { ContentRequest } from "@/lib/types/database";
 
 const STATUS_FLOW = ["requested", "shooted", "edited", "scheduled", "posted"];
@@ -116,29 +110,6 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
             console.warn("[upload] thumbnail step failed", err);
           }
 
-          // A strip of stills across the clip, so a screenshot of an account
-          // can recognise it later whichever frame the poster picks as cover.
-          let framesPath: string | null = null;
-          let frameCount: number | null = null;
-          try {
-            const sheet = await generateFrameSheet(file);
-            if (sheet) {
-              const fPath = framesPathFor(filePath);
-              const { error: fErr } = await supabase.storage
-                .from("content-assets")
-                .upload(fPath, sheet.blob, {
-                  contentType: "image/jpeg",
-                  upsert: true,
-                });
-              if (!fErr) {
-                framesPath = fPath;
-                frameCount = sheet.count;
-              }
-            }
-          } catch (err) {
-            console.warn("[upload] frame strip step failed", err);
-          }
-
           try {
             await createAssetRecord({
               request_id: request.id,
@@ -148,8 +119,6 @@ export function RequestCard({ request, personaId }: RequestCardProps) {
               mime_type: file.type,
               size_bytes: file.size,
               thumbnail_path: thumbnailPath,
-              frames_path: framesPath,
-              frame_count: frameCount,
             });
             completed++;
           } catch {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, AtSign, Send, ScanSearch, Film } from "lucide-react";
+import { Users, AtSign, Send, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -10,7 +10,6 @@ const items = [
   { href: "/settings/accounts", label: "Accounts", icon: AtSign },
   { href: "/settings/telegram", label: "Telegram", icon: Send },
   { href: "/settings/screenshot-test", label: "Screenshot check", icon: ScanSearch },
-  { href: "/settings/frames", label: "Stills", icon: Film },
 ];
 
 export function SettingsNav() {
