@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { fingerprint } from "@/lib/fingerprint";
 import { readOverlayTexts } from "@/lib/vision";
 
@@ -22,10 +23,26 @@ const TEXT_BATCH = 12;
 const BUDGET_MS = 45_000;
 
 export async function GET(req: Request) {
+  // Either the scheduler, or a signed-in owner opening the URL. The second
+  // exists so the backfill can be started without anyone handling a secret.
   const secret = process.env.CRON_SECRET;
-  const authed =
+  let authed =
     req.headers.get("x-vercel-cron") !== null ||
-    (secret && new URL(req.url).searchParams.get("secret") === secret);
+    (!!secret && new URL(req.url).searchParams.get("secret") === secret);
+  if (!authed) {
+    const session = await createClient();
+    const { data: user } = await session.auth.getUser();
+    if (user.user) {
+      const { data: role } = await session
+        .from("persona_members")
+        .select("role")
+        .eq("user_id", user.user.id)
+        .in("role", ["owner", "manager"])
+        .limit(1)
+        .maybeSingle();
+      authed = !!role;
+    }
+  }
   if (!authed) return NextResponse.json({ ok: false }, { status: 401 });
 
   const deadline = Date.now() + BUDGET_MS;

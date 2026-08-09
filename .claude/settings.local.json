@@ -162,7 +162,8 @@
       "Bash(grep -E \"^tsx$|^ts-node$\")",
       "Bash(node -e \"console.log\\(process.version\\)\")",
       "Bash(node --experimental-strip-types test/validate.mts)",
-      "Bash(git commit -q -m 'Identify reels by the picture, not by their position *)"
+      "Bash(git commit -q -m 'Identify reels by the picture, not by their position *)",
+      "Bash(git commit -qam 'Let an owner start the fingerprint run from the browser *)"
     ]
   }
 }
