@@ -138,9 +138,14 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
   ];
 
   // ── Posted, and whether the pace is picking up ──
+  // Same population as the total above it. Counting every slot here while
+  // the total counts only current-era cuts put "0 posted" and "30 in the
+  // last 7 days" on screen together.
+  const currentRequestIds = new Set(requestIds);
   const postedTimes: number[] = [];
   for (const s of slots ?? []) {
     if (s.status !== "posted") continue;
+    if (!s.request_id || !currentRequestIds.has(s.request_id)) continue;
     const when = s.posted_at ?? s.scheduled_for;
     if (when) postedTimes.push(new Date(when).getTime());
   }
