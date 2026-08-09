@@ -2,8 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import {
   StageFunnel,
   ThroughputChart,
-  StageDurations,
   OldestWaiting,
+  AccountsPie,
+  PostedCard,
+  StageGauges,
 } from "@/components/pipeline/pipeline-view";
 
 const HOUR = 60 * 60 * 1000;
@@ -21,13 +23,32 @@ function median(values: number[]): number | null {
 export async function PipelineTab({ personaId }: { personaId: string }) {
   const supabase = await createClient();
 
-  const [{ data: requests }, { data: links }] = await Promise.all([
-    supabase
-      .from("content_requests")
-      .select("id, title, status, created_at, shooted_at")
-      .eq("persona_id", personaId),
-    supabase.from("content_links").select("status").eq("persona_id", personaId),
-  ]);
+  const [{ data: requests }, { data: links }, { data: accountRows }, { data: cfg }] =
+    await Promise.all([
+      supabase
+        .from("content_requests")
+        .select("id, title, status, created_at, shooted_at")
+        .eq("persona_id", personaId)
+        // Only the current era. Everything before the July rebuild is named
+        // Boyfriend / Roleplay / Speaking and belongs to a workflow that no
+        // longer exists; counting it makes every figure look healthier than
+        // the operation actually is.
+        .ilike("title", "Reel #%"),
+      supabase
+        .from("content_links")
+        .select("status, posted_at, request_id")
+        .eq("persona_id", personaId),
+      supabase
+        .from("accounts")
+        .select("id, platform")
+        .eq("persona_id", personaId)
+        .not("status", "in", '("dead","paused")'),
+      supabase
+        .from("telegram_config")
+        .select("posts_per_day")
+        .eq("persona_id", personaId)
+        .maybeSingle(),
+    ]);
 
   const reqs = requests ?? [];
   // Assets carry no persona of their own — they belong to one through their
@@ -37,12 +58,12 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
     requestIds.length
       ? supabase
           .from("content_assets")
-          .select("request_id, stage, uploaded_at")
+          .select("id, request_id, stage, uploaded_at")
           .in("request_id", requestIds)
       : Promise.resolve({ data: [] }),
     supabase
       .from("schedule_slots")
-      .select("request_id, status, posted_at, scheduled_for")
+      .select("request_id, asset_id, status, posted_at, scheduled_for")
       .eq("persona_id", personaId)
       .eq("status", "posted"),
   ]);
@@ -71,11 +92,30 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
   }
 
   // ── Where the work sits ──
+  //
+  // Counted in cuts, not jobs. A job yields several final cuts and each is
+  // its own reel that goes out once, so "ready" has to mean the cuts nobody
+  // has posted — which is also the number the model's buffer uses.
+  const editedCuts = (assets ?? []).filter((a) => a.stage === "edited");
+  const postedCutIds = new Set<string>();
+  const postedRequestsLegacy = new Set<string>();
+  for (const s of slots ?? []) {
+    if (s.status !== "posted") continue;
+    if (s.asset_id) postedCutIds.add(s.asset_id);
+    else if (s.request_id) postedRequestsLegacy.add(s.request_id);
+  }
+  const isPosted = (a: { id: string; request_id: string | null }) =>
+    postedCutIds.has(a.id) ||
+    (a.request_id ? postedRequestsLegacy.has(a.request_id) : false);
+
+  const availableCuts = editedCuts.filter((a) => !isPosted(a)).length;
+  const postedCuts = editedCuts.filter((a) => isPosted(a)).length;
+
   const openLinks = (links ?? []).filter((l) => l.status === "open").length;
   const toEdit = reqs.filter((r) => r.status === "shooted").length;
-  const ready = reqs.filter((r) => r.status === "edited").length;
-  const posted = reqs.filter((r) => r.status === "posted").length;
 
+  // Posted is deliberately absent: it only ever grows, so in a proportional
+  // bar it swallows the three figures that actually move.
   const stages = [
     {
       label: "Open inspo",
@@ -87,21 +127,35 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
       label: "To edit",
       value: toEdit,
       tone: "bg-purple-400",
-      note: "takes waiting for a cut",
+      note: "jobs waiting for a cut",
     },
     {
       label: "Ready",
-      value: ready,
+      value: availableCuts,
       tone: "bg-emerald-400",
-      note: "cut, not posted yet",
-    },
-    {
-      label: "Posted",
-      value: posted,
-      tone: "bg-blue-400",
-      note: "done and out",
+      note: "cuts nobody has posted",
     },
   ];
+
+  // ── Posted, and whether the pace is picking up ──
+  const postedTimes: number[] = [];
+  for (const s of slots ?? []) {
+    if (s.status !== "posted") continue;
+    const when = s.posted_at ?? s.scheduled_for;
+    if (when) postedTimes.push(new Date(when).getTime());
+  }
+  const last7 = postedTimes.filter((t) => t >= Date.now() - 7 * DAY).length;
+  const previous7 = postedTimes.filter(
+    (t) => t >= Date.now() - 14 * DAY && t < Date.now() - 7 * DAY
+  ).length;
+
+  const platformOrder = ["instagram", "facebook", "tiktok", "x"];
+  const platformCounts = platformOrder
+    .map((p) => ({
+      platform: p,
+      count: (accountRows ?? []).filter((a) => a.platform === p).length,
+    }))
+    .filter((p) => p.count > 0);
 
   // ── Throughput, last 8 weeks (Mon–Sun) ──
   const now = new Date();
@@ -145,18 +199,36 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
     }
   }
 
-  const durations = [
+  // Inspo link posted → her first take uploaded. The leg that is entirely
+  // the model's, and the only one the other two can't be blamed for.
+  const inspoHours: number[] = [];
+  for (const l of links ?? []) {
+    if (!l.request_id || !l.posted_at) continue;
+    const raw = firstRaw.get(l.request_id);
+    const asked = new Date(l.posted_at).getTime();
+    if (raw !== undefined && raw >= since && raw > asked) {
+      inspoHours.push((raw - asked) / HOUR);
+    }
+  }
+
+  const legs = [
     {
-      label: "Upload → cut",
-      median: median(editHours),
-      slowest: editHours.length ? Math.max(...editHours) : null,
-      hint: "how long takes wait for the editor",
+      label: "Inspo → uploaded",
+      days: median(inspoHours) !== null ? median(inspoHours)! / 24 : null,
+      target: 3,
+      hint: "link out to her takes in",
+    },
+    {
+      label: "Uploaded → cut",
+      days: median(editHours) !== null ? median(editHours)! / 24 : null,
+      target: 2,
+      hint: "takes waiting for the editor",
     },
     {
       label: "Cut → posted",
-      median: median(postHours),
-      slowest: postHours.length ? Math.max(...postHours) : null,
-      hint: "how long finished reels sit before going out",
+      days: median(postHours) !== null ? median(postHours)! / 24 : null,
+      target: 2,
+      hint: "finished reels waiting to go out",
     },
   ];
 
@@ -184,9 +256,16 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
 
   return (
     <div className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <AccountsPie
+          counts={platformCounts}
+          postsPerDay={cfg?.posts_per_day ?? 2}
+        />
+        <PostedCard total={postedCuts} last7={last7} previous7={previous7} />
+      </div>
+      <StageGauges legs={legs} />
       <StageFunnel stages={stages} />
       <ThroughputChart weeks={weeks} />
-      <StageDurations durations={durations} />
       <OldestWaiting items={oldest} />
     </div>
   );

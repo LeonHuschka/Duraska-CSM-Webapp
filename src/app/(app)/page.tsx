@@ -92,8 +92,12 @@ export default async function DashboardPage({
 
   const { data: requests } = await supabase
     .from("content_requests")
-    .select("status, created_at")
-    .eq("persona_id", personaId);
+    .select("id, status, created_at")
+    .eq("persona_id", personaId)
+    // Current era only. The pre-July jobs (Boyfriend, Roleplay, Speaking)
+    // belong to a workflow that no longer exists and would inflate every
+    // figure on both dashboards.
+    .ilike("title", "Reel #%");
 
   const count = (s: string) => requests?.filter((r) => r.status === s).length ?? 0;
   const toEdit = count("shooted");
@@ -181,8 +185,31 @@ export default async function DashboardPage({
     ];
     const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
 
-    // What she has delivered that nobody has posted yet — the shelf.
-    const inStock = toEdit + readyToPost;
+    // The shelf, counted the same way the manager dashboard counts it:
+    // finished cuts nobody has posted. A job is not the unit — it yields
+    // several cuts and each goes out once — and counting jobs is why this
+    // number and the manager's disagreed.
+    const { data: cutRows } = await supabase
+      .from("content_assets")
+      .select("id, request_id, stage")
+      .in("request_id", (requests ?? []).map((r) => r.id))
+      .eq("stage", "edited");
+    const { data: postedSlots } = await supabase
+      .from("schedule_slots")
+      .select("asset_id, request_id, status")
+      .eq("persona_id", personaId)
+      .eq("status", "posted");
+    const postedCutIds = new Set<string>();
+    const postedJobsLegacy = new Set<string>();
+    for (const s of postedSlots ?? []) {
+      if (s.asset_id) postedCutIds.add(s.asset_id);
+      else if (s.request_id) postedJobsLegacy.add(s.request_id);
+    }
+    const inStock = (cutRows ?? []).filter(
+      (c) =>
+        !postedCutIds.has(c.id) &&
+        !(c.request_id && postedJobsLegacy.has(c.request_id))
+    ).length;
     // What the accounts actually consume — not what she is asked to shoot.
     // Those are different numbers whenever the weekly goal is set by hand,
     // and using the goal would report a healthy buffer while it drains.

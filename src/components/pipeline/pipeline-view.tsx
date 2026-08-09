@@ -1,3 +1,5 @@
+import { PlatformBadges } from "@/components/dashboard/pipeline-donut";
+
 /**
  * Manager's view of the pipeline: where the work sits, how fast it moves
  * through, and which stage is holding everything up.
@@ -207,6 +209,202 @@ export function OldestWaiting({
           ))}
         </ul>
       )}
+    </Card>
+  );
+}
+
+
+/** Live accounts, split by platform, with the platform marks in the middle. */
+export function AccountsPie({
+  counts,
+  postsPerDay,
+}: {
+  counts: { platform: string; count: number }[];
+  postsPerDay: number;
+}) {
+  const total = counts.reduce((a, c) => a + c.count, 0);
+  const TONE: Record<string, string> = {
+    instagram: "stroke-rose-400",
+    facebook: "stroke-blue-400",
+    tiktok: "stroke-neutral-300",
+    x: "stroke-neutral-500",
+  };
+  const R = 42;
+  const C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = counts.map((c) => {
+    const len = total > 0 ? (c.count / total) * C : 0;
+    const arc = { ...c, len, gap: C - len, offset };
+    offset += len;
+    return arc;
+  });
+
+  return (
+    <Card title="Live accounts" hint={`${postsPerDay} posts a day on each`}>
+      <div className="flex items-center gap-5">
+        <div className="relative shrink-0">
+          <svg viewBox="0 0 100 100" className="h-28 w-28 -rotate-90">
+            <circle cx="50" cy="50" r={R} fill="none" strokeWidth="12" className="stroke-muted" />
+            {arcs.map((a) =>
+              a.len <= 0 ? null : (
+                <circle
+                  key={a.platform}
+                  cx="50"
+                  cy="50"
+                  r={R}
+                  fill="none"
+                  strokeWidth="12"
+                  strokeDasharray={`${a.len} ${a.gap}`}
+                  strokeDashoffset={-a.offset}
+                  className={TONE[a.platform] ?? "stroke-muted-foreground"}
+                />
+              )
+            )}
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <PlatformBadges counts={counts} />
+          </div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-3xl font-semibold tabular-nums">{total}</p>
+          <p className="text-xs text-muted-foreground">
+            {total * postsPerDay} reels needed a day
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Everything that has gone out, and whether the pace is picking up. */
+export function PostedCard({
+  total,
+  last7,
+  previous7,
+}: {
+  total: number;
+  last7: number;
+  previous7: number;
+}) {
+  const delta = last7 - previous7;
+  return (
+    <Card title="Posted" hint="Reels that have gone out, all time">
+      <p className="text-4xl font-semibold tabular-nums">{total}</p>
+      <div className="mt-2 flex items-baseline gap-2 text-xs">
+        <span className="tabular-nums">{last7} in the last 7 days</span>
+        {previous7 > 0 || last7 > 0 ? (
+          <span
+            className={
+              delta > 0
+                ? "text-emerald-400"
+                : delta < 0
+                  ? "text-rose-400"
+                  : "text-muted-foreground"
+            }
+          >
+            {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"}
+            {delta !== 0 && ` ${Math.abs(delta)}`} vs the 7 before
+          </span>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * How long each leg takes, and which one is holding everything up.
+ *
+ * A gauge needs a scale, and there is no natural maximum for "days in a
+ * stage" — so each is drawn against a target, and the slowest leg is named
+ * outright rather than left to be spotted.
+ */
+export function StageGauges({
+  legs,
+}: {
+  legs: { label: string; days: number | null; target: number; hint: string }[];
+}) {
+  const measured = legs.filter((l) => l.days !== null);
+  const worst =
+    measured.length > 0
+      ? measured.reduce((a, b) =>
+          (b.days ?? 0) / b.target > (a.days ?? 0) / a.target ? b : a
+        )
+      : null;
+
+  return (
+    <Card
+      title="How fast we turn things around"
+      hint="Median over the last 30 days, against what each leg should take"
+    >
+      <div className="grid gap-4 sm:grid-cols-3">
+        {legs.map((l) => {
+          const ratio = l.days === null ? 0 : Math.min(l.days / l.target, 1.6);
+          const tone =
+            l.days === null
+              ? "stroke-muted-foreground"
+              : ratio <= 0.75
+                ? "stroke-emerald-400"
+                : ratio <= 1
+                  ? "stroke-amber-400"
+                  : "stroke-rose-400";
+          // Half circle: 180° of a r=40 arc.
+          const LEN = Math.PI * 40;
+          const filled = Math.min(ratio, 1) * LEN;
+          return (
+            <div key={l.label} className="text-center">
+              <div className="relative mx-auto h-16 w-28">
+                <svg viewBox="0 0 100 54" className="h-full w-full">
+                  <path
+                    d="M10,50 A40,40 0 0 1 90,50"
+                    fill="none"
+                    strokeWidth="8"
+                    strokeLinecap="round"
+                    className="stroke-muted"
+                  />
+                  <path
+                    d="M10,50 A40,40 0 0 1 90,50"
+                    fill="none"
+                    strokeWidth="8"
+                    strokeLinecap="round"
+                    strokeDasharray={`${filled} ${LEN}`}
+                    className={tone}
+                  />
+                </svg>
+                <span className="absolute inset-x-0 bottom-0 text-lg font-semibold tabular-nums">
+                  {l.days === null
+                    ? "—"
+                    : l.days < 1
+                      ? `${Math.round(l.days * 24)}h`
+                      : `${l.days.toFixed(1)}d`}
+                </span>
+              </div>
+              <p className="mt-1 text-xs font-medium">{l.label}</p>
+              <p className="text-[11px] leading-tight text-muted-foreground">
+                {l.hint}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-4 rounded-lg bg-muted/40 px-3 py-2 text-xs">
+        {worst ? (
+          <>
+            <span className="font-medium">Biggest bottleneck: {worst.label}</span>
+            <span className="text-muted-foreground">
+              {" "}
+              — {worst.days! < 1
+                ? `${Math.round(worst.days! * 24)}h`
+                : `${worst.days!.toFixed(1)} days`}{" "}
+              against a target of {worst.target}.
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">
+            Nothing finished a full leg in the last 30 days yet.
+          </span>
+        )}
+      </p>
     </Card>
   );
 }
