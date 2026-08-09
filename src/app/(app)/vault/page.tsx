@@ -181,10 +181,11 @@ export default async function VaultPage() {
         // This cut's own postings, plus any legacy job-level marking that
         // predates per-cut tracking.
         postedAccountIds: Array.from(
-          new Set([
-            ...(postedAccountsByAsset[asset.id] ?? []),
-            ...(postedAccountsByRequest[asset.request_id] ?? []),
-          ])
+          new Set(
+            Array.from(postedAccountsByAsset[asset.id] ?? []).concat(
+              Array.from(postedAccountsByRequest[asset.request_id] ?? [])
+            )
+          )
         ),
       } satisfies VaultAsset;
     })
