@@ -1,4 +1,5 @@
 import { PlatformBadges } from "@/components/dashboard/pipeline-donut";
+import { SlowBoundInput } from "@/components/pipeline/slow-bound-input";
 
 /**
  * Manager's view of the pipeline: where the work sits, how fast it moves
@@ -314,40 +315,47 @@ export function PostedCard({
 /**
  * How long each leg takes, and which one is holding everything up.
  *
- * A gauge needs a scale, and there is no natural maximum for "days in a
- * stage" — so each is drawn against a target, and the slowest leg is named
- * outright rather than left to be spotted.
+ * The scale runs the way the work does: slow on the left, zero on the
+ * right, so a marker further right is unambiguously better. There is no
+ * natural maximum for "days in a stage", so each leg carries its own — what
+ * counts as unacceptably slow — and that bound is editable in place,
+ * because only the person running the operation knows it.
  */
 export function StageGauges({
   legs,
   endToEndDays,
   endToEndCount,
+  editable = false,
 }: {
-  legs: { label: string; days: number | null; target: number; hint: string }[];
-  /** Median link-to-posted, over reels that ran the whole way */
+  legs: {
+    key: string;
+    label: string;
+    days: number | null;
+    slowDays: number;
+    hint: string;
+  }[];
   endToEndDays: number | null;
   endToEndCount: number;
+  editable?: boolean;
 }) {
   const measured = legs.filter((l) => l.days !== null);
+  // Worst relative to its own bound, not in absolute days — five days on a
+  // leg allowed fourteen is healthier than two on a leg allowed one.
   const worst =
     measured.length > 0
       ? measured.reduce((a, b) =>
-          (b.days ?? 0) / b.target > (a.days ?? 0) / a.target ? b : a
+          (b.days ?? 0) / b.slowDays > (a.days ?? 0) / a.slowDays ? b : a
         )
       : null;
 
   return (
     <Card
       title="How fast we turn things around"
-      hint="Median over the last 30 days, against what each leg should take"
+      hint="Median over the last 30 days. Left is as slow as it should ever get, right is instant."
     >
       <div className="mb-5 flex items-baseline gap-3 border-b border-border/40 pb-4">
         <span className="text-3xl font-semibold tabular-nums">
-          {endToEndDays === null
-            ? "—"
-            : endToEndDays < 1
-              ? `${Math.round(endToEndDays * 24)}h`
-              : `${endToEndDays.toFixed(1)}d`}
+          {fmtDuration(endToEndDays)}
         </span>
         <span className="text-xs text-muted-foreground">
           {endToEndDays === null
@@ -356,67 +364,19 @@ export function StageGauges({
         </span>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {legs.map((l) => {
-          const ratio = l.days === null ? 0 : Math.min(l.days / l.target, 1.6);
-          const tone =
-            l.days === null
-              ? "stroke-muted-foreground"
-              : ratio <= 0.75
-                ? "stroke-emerald-400"
-                : ratio <= 1
-                  ? "stroke-amber-400"
-                  : "stroke-rose-400";
-          // Half circle: 180° of a r=40 arc.
-          const LEN = Math.PI * 40;
-          const filled = Math.min(ratio, 1) * LEN;
-          return (
-            <div key={l.label} className="text-center">
-              <div className="relative mx-auto h-16 w-28">
-                <svg viewBox="0 0 100 54" className="h-full w-full">
-                  <path
-                    d="M10,50 A40,40 0 0 1 90,50"
-                    fill="none"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    className="stroke-muted"
-                  />
-                  <path
-                    d="M10,50 A40,40 0 0 1 90,50"
-                    fill="none"
-                    strokeWidth="8"
-                    strokeLinecap="round"
-                    strokeDasharray={`${filled} ${LEN}`}
-                    className={tone}
-                  />
-                </svg>
-                <span className="absolute inset-x-0 bottom-0 text-lg font-semibold tabular-nums">
-                  {l.days === null
-                    ? "—"
-                    : l.days < 1
-                      ? `${Math.round(l.days * 24)}h`
-                      : `${l.days.toFixed(1)}d`}
-                </span>
-              </div>
-              <p className="mt-1 text-xs font-medium">{l.label}</p>
-              <p className="text-[11px] leading-tight text-muted-foreground">
-                {l.hint}
-              </p>
-            </div>
-          );
-        })}
+      <div className="grid gap-6 sm:grid-cols-3">
+        {legs.map((l) => (
+          <Gauge key={l.key} leg={l} editable={editable} />
+        ))}
       </div>
 
-      <p className="mt-4 rounded-lg bg-muted/40 px-3 py-2 text-xs">
+      <p className="mt-5 rounded-lg bg-muted/40 px-3 py-2 text-xs">
         {worst ? (
           <>
             <span className="font-medium">Biggest bottleneck: {worst.label}</span>
             <span className="text-muted-foreground">
               {" "}
-              — {worst.days! < 1
-                ? `${Math.round(worst.days! * 24)}h`
-                : `${worst.days!.toFixed(1)} days`}{" "}
-              against a target of {worst.target}.
+              — {fmtDuration(worst.days)} of an allowed {worst.slowDays}d.
             </span>
           </>
         ) : (
@@ -426,5 +386,72 @@ export function StageGauges({
         )}
       </p>
     </Card>
+  );
+}
+
+function fmtDuration(days: number | null) {
+  if (days === null) return "—";
+  if (days < 1) return `${Math.round(days * 24)}h`;
+  return `${days.toFixed(1)}d`;
+}
+
+function Gauge({
+  leg,
+  editable,
+}: {
+  leg: { key: string; label: string; days: number | null; slowDays: number; hint: string };
+  editable: boolean;
+}) {
+  // 0 sits on the right, the slow bound on the left. Anything past the
+  // bound pins to the left rather than running off the dial.
+  const ratio = leg.days === null ? null : Math.min(leg.days / leg.slowDays, 1);
+  const tone =
+    ratio === null
+      ? "text-muted-foreground"
+      : ratio <= 0.34
+        ? "text-emerald-400"
+        : ratio <= 0.67
+          ? "text-amber-400"
+          : "text-rose-400";
+
+  // Left end = 180°, right end = 0°.
+  const angle = ratio === null ? null : Math.PI * ratio;
+  const cx = 50 + 40 * Math.cos(angle ?? 0) * -1;
+  const cy = 50 - 40 * Math.sin(angle ?? 0);
+
+  return (
+    <div className="text-center">
+      <div className="relative mx-auto h-16 w-32">
+        <svg viewBox="0 0 100 56" className="h-full w-full">
+          <path
+            d="M10,50 A40,40 0 0 1 90,50"
+            fill="none"
+            strokeWidth="7"
+            strokeLinecap="round"
+            className="stroke-muted"
+          />
+          {ratio !== null && (
+            <circle cx={cx} cy={cy} r="5.5" className={`${tone} fill-current`} />
+          )}
+        </svg>
+        <span
+          className={`absolute inset-x-0 bottom-0 text-lg font-semibold tabular-nums ${tone}`}
+        >
+          {fmtDuration(leg.days)}
+        </span>
+      </div>
+
+      <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+        {editable ? (
+          <SlowBoundInput legKey={leg.key as "inspo" | "edit" | "post"} value={leg.slowDays} />
+        ) : (
+          <span>{leg.slowDays}d</span>
+        )}
+        <span>0h</span>
+      </div>
+
+      <p className="mt-1 text-xs font-medium">{leg.label}</p>
+      <p className="text-[11px] leading-tight text-muted-foreground">{leg.hint}</p>
+    </div>
   );
 }

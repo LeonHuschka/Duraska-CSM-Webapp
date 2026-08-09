@@ -406,7 +406,10 @@ export default async function DashboardPage({
           {tab === "accounts" ? (
             <AccountsTab personaId={personaId} />
           ) : (
-            <PipelineTab personaId={personaId} />
+            <PipelineTab
+              personaId={personaId}
+              canEdit={active.role === "owner" || active.role === "manager"}
+            />
           )}
         </div>
       </div>

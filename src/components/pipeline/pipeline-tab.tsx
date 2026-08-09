@@ -20,7 +20,13 @@ function median(values: number[]): number | null {
 }
 
 /** The Pipeline tab of the manager dashboard. */
-export async function PipelineTab({ personaId }: { personaId: string }) {
+export async function PipelineTab({
+  personaId,
+  canEdit = false,
+}: {
+  personaId: string;
+  canEdit?: boolean;
+}) {
   const supabase = await createClient();
 
   const [{ data: requests }, { data: links }, { data: accountRows }, { data: cfg }] =
@@ -40,7 +46,9 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
         .not("status", "in", '("dead","paused")'),
       supabase
         .from("telegram_config")
-        .select("posts_per_day")
+        .select(
+          "posts_per_day, slow_inspo_days, slow_edit_days, slow_post_days"
+        )
         .eq("persona_id", personaId)
         .maybeSingle(),
     ]);
@@ -241,21 +249,24 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
 
   const legs = [
     {
+      key: "inspo",
       label: "Inspo → uploaded",
       days: median(inspoHours) !== null ? median(inspoHours)! / 24 : null,
-      target: 5,
+      slowDays: Number(cfg?.slow_inspo_days ?? 14),
       hint: "link out to her takes in",
     },
     {
+      key: "edit",
       label: "Uploaded → cut",
       days: median(editHours) !== null ? median(editHours)! / 24 : null,
-      target: 1,
+      slowDays: Number(cfg?.slow_edit_days ?? 7),
       hint: "takes waiting for the editor",
     },
     {
+      key: "post",
       label: "Cut → posted",
       days: median(postHours) !== null ? median(postHours)! / 24 : null,
-      target: 1,
+      slowDays: Number(cfg?.slow_post_days ?? 7),
       hint: "finished reels waiting to go out",
     },
   ];
@@ -295,6 +306,7 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
         legs={legs}
         endToEndDays={endToEndDays}
         endToEndCount={endToEndHours.length}
+        editable={canEdit}
       />
       <StageFunnel stages={stages} />
       <ThroughputChart weeks={weeks} />
