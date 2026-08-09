@@ -93,11 +93,7 @@ export default async function DashboardPage({
   const { data: requests } = await supabase
     .from("content_requests")
     .select("id, status, created_at")
-    .eq("persona_id", personaId)
-    // Current era only. The pre-July jobs (Boyfriend, Roleplay, Speaking)
-    // belong to a workflow that no longer exists and would inflate every
-    // figure on both dashboards.
-    .ilike("title", "Reel #%");
+    .eq("persona_id", personaId);
 
   const count = (s: string) => requests?.filter((r) => r.status === s).length ?? 0;
   const toEdit = count("shooted");

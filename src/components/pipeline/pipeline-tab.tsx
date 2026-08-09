@@ -28,12 +28,7 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
       supabase
         .from("content_requests")
         .select("id, title, status, created_at, shooted_at")
-        .eq("persona_id", personaId)
-        // Only the current era. Everything before the July rebuild is named
-        // Boyfriend / Roleplay / Speaking and belongs to a workflow that no
-        // longer exists; counting it makes every figure look healthier than
-        // the operation actually is.
-        .ilike("title", "Reel #%"),
+        .eq("persona_id", personaId),
       supabase
         .from("content_links")
         .select("status, posted_at, request_id")
@@ -138,14 +133,9 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
   ];
 
   // ── Posted, and whether the pace is picking up ──
-  // Same population as the total above it. Counting every slot here while
-  // the total counts only current-era cuts put "0 posted" and "30 in the
-  // last 7 days" on screen together.
-  const currentRequestIds = new Set(requestIds);
   const postedTimes: number[] = [];
   for (const s of slots ?? []) {
     if (s.status !== "posted") continue;
-    if (!s.request_id || !currentRequestIds.has(s.request_id)) continue;
     const when = s.posted_at ?? s.scheduled_for;
     if (when) postedTimes.push(new Date(when).getTime());
   }
@@ -189,10 +179,19 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
   });
 
   // ── Time per stage, last 30 days ──
+  //
+  // Stocks count everything; speed does not. The pre-July jobs ran under a
+  // workflow with different steps and sat for months afterwards, so mixing
+  // them in describes a process nobody follows any more. They stay in every
+  // other figure on this page.
+  const currentEra = new Set(
+    reqs.filter((r) => /^Reel #/i.test(r.title)).map((r) => r.id)
+  );
   const since = Date.now() - 30 * DAY;
   const editHours: number[] = [];
   const postHours: number[] = [];
   for (const r of reqs) {
+    if (!currentEra.has(r.id)) continue;
     const raw = firstRaw.get(r.id);
     const cut = firstEdited.get(r.id);
     const out = firstPosted.get(r.id);
@@ -209,6 +208,7 @@ export async function PipelineTab({ personaId }: { personaId: string }) {
   const inspoHours: number[] = [];
   for (const l of links ?? []) {
     if (!l.request_id || !l.posted_at) continue;
+    if (!currentEra.has(l.request_id)) continue;
     const raw = firstRaw.get(l.request_id);
     const asked = new Date(l.posted_at).getTime();
     if (raw !== undefined && raw >= since && raw > asked) {
