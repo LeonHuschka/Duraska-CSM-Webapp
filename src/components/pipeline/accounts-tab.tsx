@@ -46,7 +46,7 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       supabase
         .from("reel_metrics")
         .select(
-          "account_id, captured_at, position, request_id, views, likes, caption, needs_review"
+          "account_id, captured_at, position, request_id, asset_id, views, likes, caption, needs_review"
         )
         .eq("persona_id", personaId)
         .order("captured_at", { ascending: false }),
@@ -143,7 +143,9 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
     const mine = (reels ?? []).filter((r) => r.account_id === a.id);
     const latestPerReel = new Map<string, (typeof mine)[number]>();
     for (const r of mine) {
-      const key = r.request_id ?? `pos:${r.captured_at}:${r.position}`;
+      // The cut is the reel. Keying on the job would merge its three to
+      // five distinct cuts into one and add up their views.
+      const key = r.asset_id ?? r.request_id ?? `pos:${r.captured_at}:${r.position}`;
       const seen = latestPerReel.get(key);
       if (!seen || r.captured_at > seen.captured_at) latestPerReel.set(key, r);
     }
@@ -239,7 +241,8 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
       if (r.needs_review || r.views == null || !r.account_id) continue;
       const at = new Date(r.captured_at).getTime();
       if (at > upto) continue;
-      const key = r.request_id ?? `${r.account_id}|${r.captured_at}|${r.position}`;
+      const key =
+        r.asset_id ?? r.request_id ?? `${r.account_id}|${r.captured_at}|${r.position}`;
       const seen = latest.get(key);
       if (!seen || at > seen.at) latest.set(key, { at, views: Number(r.views) });
     }

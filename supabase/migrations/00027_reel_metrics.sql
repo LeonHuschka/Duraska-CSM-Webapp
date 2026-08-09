@@ -68,3 +68,12 @@ alter table public.reel_metrics
 create index if not exists idx_reel_metrics_request
   on public.reel_metrics(request_id, captured_at desc)
   where request_id is not null;
+
+-- The cut, not the job. A job holds three to five distinct final cuts and
+-- each is its own reel, so a reading belongs to one of them.
+alter table public.reel_metrics
+  add column if not exists asset_id uuid references public.content_assets(id) on delete set null;
+
+create index if not exists idx_reel_metrics_asset
+  on public.reel_metrics(asset_id, captured_at desc)
+  where asset_id is not null;

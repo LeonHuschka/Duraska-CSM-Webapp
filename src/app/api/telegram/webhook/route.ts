@@ -316,20 +316,24 @@ async function handleScreenshot(msg: TgMessage) {
     // guessing.
     const { data: recent } = await supabase
       .from("content_assets")
-      .select("request_id, thumbnail_path, uploaded_at")
+      .select("id, request_id, thumbnail_path, uploaded_at")
       .eq("stage", "edited")
       .not("thumbnail_path", "is", null)
       .lte("uploaded_at", capturedAt)
       .order("uploaded_at", { ascending: false })
       .limit(200);
 
-    const pool: { requestId: string; path: string }[] = [];
-    const seenRequest = new Set<string>();
+    // Every cut is a candidate in its own right. Collapsing them per job
+    // was wrong: a job holds three to five distinct reels, and offering one
+    // of them made the other four unrecognisable.
+    const pool: { assetId: string; requestId: string; path: string }[] = [];
     for (const c of recent ?? []) {
-      if (!c.request_id || !c.thumbnail_path) continue;
-      if (seenRequest.has(c.request_id)) continue;
-      seenRequest.add(c.request_id);
-      pool.push({ requestId: c.request_id, path: c.thumbnail_path });
+      if (!c.id || !c.request_id || !c.thumbnail_path) continue;
+      pool.push({
+        assetId: c.id,
+        requestId: c.request_id,
+        path: c.thumbnail_path,
+      });
     }
 
     const loadThumb = async (path: string) => {
@@ -352,24 +356,35 @@ async function handleScreenshot(msg: TgMessage) {
     // slower and less accurate than three focused ones.
     const BATCH = 20;
     const MAX_ROUNDS = 3;
-    const requestForPosition = new Map<number, string>();
-    const takenRequests = new Set<string>();
+    const cutForPosition = new Map<number, { assetId: string; requestId: string }>();
+    const takenCuts = new Set<string>();
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const open = metrics.reels
         .map((r) => r.position)
-        .filter((p) => !requestForPosition.has(p));
+        .filter((p) => !cutForPosition.has(p));
       if (open.length === 0) break;
 
       const slice = pool
-        .filter((c) => !takenRequests.has(c.requestId))
+        .filter((c) => !takenCuts.has(c.assetId))
         .slice(round * BATCH, round * BATCH + BATCH);
       if (slice.length === 0) break;
 
-      const batch: { requestId: string; base64: string; mime: string }[] = [];
+      const batch: {
+        assetId: string;
+        requestId: string;
+        base64: string;
+        mime: string;
+      }[] = [];
       for (const c of slice) {
         const base64 = await loadThumb(c.path);
-        if (base64) batch.push({ requestId: c.requestId, base64, mime: "image/jpeg" });
+        if (base64)
+          batch.push({
+            assetId: c.assetId,
+            requestId: c.requestId,
+            base64,
+            mime: "image/jpeg",
+          });
       }
       if (batch.length === 0) continue;
 
@@ -383,15 +398,15 @@ async function handleScreenshot(msg: TgMessage) {
       }
       for (const m of matches ?? []) {
         if (m.candidate === null) continue;
-        if (requestForPosition.has(m.position)) continue;
+        if (cutForPosition.has(m.position)) continue;
         const c = batch[m.candidate - 1];
-        if (!c || takenRequests.has(c.requestId)) continue;
-        requestForPosition.set(m.position, c.requestId);
-        takenRequests.add(c.requestId);
+        if (!c || takenCuts.has(c.assetId)) continue;
+        cutForPosition.set(m.position, { assetId: c.assetId, requestId: c.requestId });
+        takenCuts.add(c.assetId);
       }
     }
     console.log(
-      `[telegram] matched ${requestForPosition.size}/${metrics.reels.length} tiles from ${pool.length} candidates`
+      `[telegram] matched ${cutForPosition.size}/${metrics.reels.length} tiles from ${pool.length} candidates`
     );
 
     const { error: gridErr } = await supabase.from("reel_metrics").upsert(
@@ -400,7 +415,8 @@ async function handleScreenshot(msg: TgMessage) {
         account_id: account.id,
         captured_at: capturedAt,
         position: r.position,
-        request_id: requestForPosition.get(r.position) ?? null,
+        asset_id: cutForPosition.get(r.position)?.assetId ?? null,
+        request_id: cutForPosition.get(r.position)?.requestId ?? null,
         views: r.views,
         likes: r.likes,
         caption: r.caption,
