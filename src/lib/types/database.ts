@@ -429,6 +429,8 @@ export type Database = {
           notes: string | null;
           telegram_chat_id: number | null;
           telegram_thread_id: number | null;
+          posts_per_day: number;
+          manager_username: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -445,6 +447,8 @@ export type Database = {
           notes?: string | null;
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
+          posts_per_day?: number;
+          manager_username?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -461,6 +465,8 @@ export type Database = {
           notes?: string | null;
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
+          posts_per_day?: number;
+          manager_username?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;

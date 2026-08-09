@@ -12,7 +12,6 @@ export type Cfg = {
   model_username: string | null;
   va_username: string | null;
   manager_username: string | null;
-  posts_per_day: number;
   min_ready_to_post: number;
   min_open_links: number;
   max_unedited: number;

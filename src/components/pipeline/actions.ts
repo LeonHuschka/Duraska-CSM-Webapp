@@ -43,3 +43,47 @@ export async function setSlowBound(leg: Leg, days: number) {
   revalidatePath("/");
   return { error: null };
 }
+
+/**
+ * How often one account posts, and who runs it.
+ *
+ * Both live on the account rather than on the persona because they differ
+ * per account — the whole reason the six-a-day figure was wrong.
+ */
+export async function setAccountPosting(accountId: string, perDay: number) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+
+  if (!Number.isFinite(perDay) || perDay < 0 || perDay > 50) {
+    return { error: "Give a number between 0 and 50" };
+  }
+
+  const { error } = await supabase
+    .from("accounts")
+    .update({ posts_per_day: perDay, updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { error: null };
+}
+
+export async function setAccountManager(accountId: string, handle: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+
+  const clean = handle.trim().replace(/^@/, "");
+  const { error } = await supabase
+    .from("accounts")
+    .update({
+      manager_username: clean === "" ? null : clean,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { error: null };
+}

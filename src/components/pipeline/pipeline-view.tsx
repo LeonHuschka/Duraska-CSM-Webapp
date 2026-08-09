@@ -218,10 +218,10 @@ export function OldestWaiting({
 /** Live accounts, split by platform, with the platform marks in the middle. */
 export function AccountsPie({
   counts,
-  postsPerDay,
+  perDay,
 }: {
   counts: { platform: string; count: number }[];
-  postsPerDay: number;
+  perDay: number;
 }) {
   const total = counts.reduce((a, c) => a + c.count, 0);
   const TONE: Record<string, string> = {
@@ -241,7 +241,7 @@ export function AccountsPie({
   });
 
   return (
-    <Card title="Live accounts" hint={`${postsPerDay} posts a day on each`}>
+    <Card title="Live accounts" hint="Each one posts at its own rate">
       <div className="flex items-center gap-5">
         <div className="relative shrink-0">
           <svg viewBox="0 0 100 100" className="h-28 w-28 -rotate-90">
@@ -269,7 +269,7 @@ export function AccountsPie({
         <div className="min-w-0 flex-1">
           <p className="text-3xl font-semibold tabular-nums">{total}</p>
           <p className="text-xs text-muted-foreground">
-            {total * postsPerDay} reels needed a day
+            {perDay} reels needed a day
           </p>
         </div>
       </div>

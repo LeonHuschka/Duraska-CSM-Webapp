@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
+import { dailyDemand } from "@/lib/demand";
 import {
   checkInstagramAlive,
   deleteMessage,
@@ -56,7 +57,7 @@ export async function GET(req: Request) {
   const { data: configs } = await supabase
     .from("telegram_config")
     .select(
-      "persona_id, chat_id, talk_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
+      "persona_id, chat_id, talk_thread_id, model_username, va_username, manager_username, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
     );
 
   for (const cfg of configs ?? []) {
@@ -172,8 +173,9 @@ async function runForPersona(
   const unedited = (reqs ?? []).filter((r) => r.status === "shooted").length;
   const readyToPost = (reqs ?? []).filter((r) => r.status === "edited").length;
 
-  const perDay = Math.max(1, cfg.posts_per_day);
-  const runwayDays = Math.floor(readyToPost / perDay);
+  // What the accounts actually consume, summed from their own rates.
+  const { perDay } = await dailyDemand(supabase, cfg.persona_id);
+  const runwayDays = Math.floor(readyToPost / Math.max(1, perDay));
 
   const alert = buildAlert({
     cfg,

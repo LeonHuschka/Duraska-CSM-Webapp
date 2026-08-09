@@ -61,7 +61,6 @@ export function TelegramSettings({
     model_username: config?.model_username ?? "",
     va_username: config?.va_username ?? "",
     manager_username: config?.manager_username ?? "",
-    posts_per_day: config?.posts_per_day ?? 2,
     min_ready_to_post: config?.min_ready_to_post ?? 6,
     min_open_links: config?.min_open_links ?? 10,
     max_unedited: config?.max_unedited ?? 15,
@@ -77,7 +76,6 @@ export function TelegramSettings({
     try {
       const res = await saveTelegramConfig({
         ...f,
-        posts_per_day: Number(f.posts_per_day) || 2,
         min_ready_to_post: Number(f.min_ready_to_post) || 6,
         min_open_links: Number(f.min_open_links) || 10,
         max_unedited: Number(f.max_unedited) || 15,
@@ -432,7 +430,6 @@ export function TelegramSettings({
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-4">
-          <Field label="Posts / day" type="number" value={String(f.posts_per_day)} onChange={(v) => set("posts_per_day", v)} />
           <Field label="Min ready to post" type="number" value={String(f.min_ready_to_post)} onChange={(v) => set("min_ready_to_post", v)} />
           <Field label="Min open links" type="number" value={String(f.min_open_links)} onChange={(v) => set("min_open_links", v)} />
           <Field label="Max unedited" type="number" value={String(f.max_unedited)} onChange={(v) => set("max_unedited", v)} />

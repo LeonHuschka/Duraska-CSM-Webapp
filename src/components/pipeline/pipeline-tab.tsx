@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { dailyDemand } from "@/lib/demand";
 import {
   StageFunnel,
   ThroughputChart,
@@ -47,12 +48,13 @@ export async function PipelineTab({
       supabase
         .from("telegram_config")
         .select(
-          "posts_per_day, slow_inspo_days, slow_edit_days, slow_post_days"
+          "slow_inspo_days, slow_edit_days, slow_post_days"
         )
         .eq("persona_id", personaId)
         .maybeSingle(),
     ]);
 
+  const demand = await dailyDemand(supabase, personaId);
   const reqs = requests ?? [];
   // Assets carry no persona of their own — they belong to one through their
   // request, so they are fetched by the ids we just resolved.
@@ -298,7 +300,7 @@ export async function PipelineTab({
       <div className="grid gap-5 lg:grid-cols-2">
         <AccountsPie
           counts={platformCounts}
-          postsPerDay={cfg?.posts_per_day ?? 2}
+          perDay={demand.perDay}
         />
         <PostedCard total={postedCuts} last7={last7} previous7={previous7} />
       </div>

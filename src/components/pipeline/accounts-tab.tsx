@@ -1,5 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
-import { PipelineDonut, TrendChart } from "@/components/dashboard/pipeline-donut";
+import {
+  PipelineDonut,
+  TrendChart,
+  PlatformGlyph,
+  PLATFORM_STYLE,
+} from "@/components/dashboard/pipeline-donut";
+import { AccountControls } from "@/components/pipeline/account-controls";
 
 /**
  * Accounts tab: the whole operation summarised, then one card per account
@@ -12,12 +18,6 @@ import { PipelineDonut, TrendChart } from "@/components/dashboard/pipeline-donut
  * carries an id.
  */
 
-const PLATFORM_DOT: Record<string, string> = {
-  instagram: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400",
-  facebook: "bg-[#1877F2]",
-  tiktok: "bg-neutral-200",
-  x: "bg-neutral-500",
-};
 const SHARE_TONE = [
   "stroke-purple-400",
   "stroke-emerald-400",
@@ -28,14 +28,22 @@ const SHARE_TONE = [
 
 const nf = new Intl.NumberFormat("de-DE");
 
-export async function AccountsTab({ personaId }: { personaId: string }) {
+export async function AccountsTab({
+  personaId,
+  canEdit = false,
+}: {
+  personaId: string;
+  canEdit?: boolean;
+}) {
   const supabase = await createClient();
 
   const [{ data: accounts }, { data: metrics }, { data: reels }] =
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, handle, platform, status, telegram_thread_id")
+        .select(
+          "id, handle, platform, status, telegram_thread_id, posts_per_day, manager_username"
+        )
         .eq("persona_id", personaId)
         .order("platform"),
       supabase
@@ -337,10 +345,13 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <span
-                className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                  PLATFORM_DOT[r.platform] ?? "bg-muted"
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                  PLATFORM_STYLE[r.platform]?.bg ?? "bg-muted"
                 }`}
-              />
+                title={r.platform}
+              >
+                <PlatformGlyph platform={r.platform} className="h-4 w-4 fill-white" />
+              </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">@{r.handle}</p>
                 <p className="text-[11px] text-muted-foreground">
@@ -384,6 +395,13 @@ export async function AccountsTab({ personaId }: { personaId: string }) {
               </div>
             </div>
           </div>
+
+          <AccountControls
+            accountId={r.id}
+            perDay={Number(r.posts_per_day ?? 0)}
+            manager={r.manager_username}
+            editable={canEdit}
+          />
 
           {r.tiles.length === 0 ? (
             <p className="mt-4 text-xs text-muted-foreground">

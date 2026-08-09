@@ -13,6 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { headers } from "next/headers";
 import { buildAlert } from "@/lib/pipeline-alert";
 import { linkInspoToRequest, markInspoEdited } from "@/lib/content-links";
+import { dailyDemand } from "@/lib/demand";
 
 export async function saveTelegramConfig(data: {
   chat_id: string;
@@ -21,7 +22,6 @@ export async function saveTelegramConfig(data: {
   model_username: string;
   va_username: string;
   manager_username: string;
-  posts_per_day: number;
   min_ready_to_post: number;
   min_open_links: number;
   max_unedited: number;
@@ -57,7 +57,6 @@ export async function saveTelegramConfig(data: {
       model_username: str(data.model_username),
       va_username: str(data.va_username),
       manager_username: str(data.manager_username),
-      posts_per_day: data.posts_per_day,
       min_ready_to_post: data.min_ready_to_post,
       min_open_links: data.min_open_links,
       max_unedited: data.max_unedited,
@@ -256,7 +255,7 @@ export async function simulatePipeline() {
   const { data: cfg } = await supabase
     .from("telegram_config")
     .select(
-      "persona_id, chat_id, talk_thread_id, requests_thread_id, model_username, va_username, manager_username, posts_per_day, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
+      "persona_id, chat_id, talk_thread_id, requests_thread_id, model_username, va_username, manager_username, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
     )
     .eq("persona_id", personaId)
     .maybeSingle();
@@ -450,7 +449,9 @@ export async function simulatePipeline() {
       shotNotUploaded,
       unedited,
       readyToPost,
-      runwayDays: Math.floor(readyToPost / Math.max(1, cfg.posts_per_day)),
+      runwayDays: Math.floor(
+        readyToPost / Math.max(1, (await dailyDemand(supabase, personaId)).perDay)
+      ),
     });
     say(
       "Pipeline alert (not sent)",

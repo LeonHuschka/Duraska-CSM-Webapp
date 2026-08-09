@@ -126,15 +126,21 @@ export function PlatformBadges({
   );
 }
 
-const PLATFORM_STYLE: Record<string, { bg: string }> = {
+export const PLATFORM_STYLE: Record<string, { bg: string }> = {
   instagram: { bg: "bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400" },
   facebook: { bg: "bg-[#1877F2]" },
   tiktok: { bg: "bg-black" },
   x: { bg: "bg-neutral-800" },
 };
 
-function PlatformGlyph({ platform }: { platform: string }) {
-  const cls = "h-3.5 w-3.5 fill-white";
+export function PlatformGlyph({
+  platform,
+  className = "h-3.5 w-3.5 fill-white",
+}: {
+  platform: string;
+  className?: string;
+}) {
+  const cls = className;
   if (platform === "instagram") {
     return (
       <svg viewBox="0 0 24 24" className={cls} aria-label="Instagram">

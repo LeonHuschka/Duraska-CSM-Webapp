@@ -12,6 +12,7 @@ import {
 } from "@/components/dashboard/pipeline-donut";
 import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 import { AccountsTab } from "@/components/pipeline/accounts-tab";
+import { dailyDemand } from "@/lib/demand";
 
 // One colour per pipeline stage, used by the stat boxes and the donut alike
 // so a number and its slice always read as the same thing.
@@ -162,16 +163,19 @@ export default async function DashboardPage({
 
     const { data: tgCfg } = await supabase
       .from("telegram_config")
-      .select("posts_per_day, weekly_reel_target, chat_id, requests_thread_id")
+      .select("weekly_reel_target, chat_id, requests_thread_id")
       .eq("persona_id", personaId)
       .maybeSingle();
-    const postsPerDay = tgCfg?.posts_per_day ?? 2;
+    // Each account posts at its own rate, so demand is their sum — a single
+    // rate times the account count claimed six a day where the real answer
+    // is three.
+    const demand = await dailyDemand(supabase, personaId);
     // A manually set target wins over the account-derived one.
     const manualTarget = tgCfg?.weekly_reel_target ?? null;
     const weeklyTarget =
       manualTarget && manualTarget > 0
         ? manualTarget
-        : Math.max(1, liveAccounts * postsPerDay * 7);
+        : Math.max(1, Math.round(demand.perDay * 7));
 
     // Only the three stages she has any feel for.
     const pipeline = [
@@ -209,7 +213,7 @@ export default async function DashboardPage({
     // What the accounts actually consume — not what she is asked to shoot.
     // Those are different numbers whenever the weekly goal is set by hand,
     // and using the goal would report a healthy buffer while it drains.
-    const dailyOut = Math.max(1, liveAccounts * postsPerDay);
+    const dailyOut = Math.max(1, demand.perDay);
 
     // Deep link into the requests topic, so "to shoot" is one tap from the
     // list it comes from. Supergroup ids carry a -100 prefix t.me won't take.
@@ -293,7 +297,7 @@ export default async function DashboardPage({
               Live accounts
             </p>
             <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
-              {postsPerDay}× a day each
+              {demand.perDay} reels a day between them
             </p>
           </div>
         </div>
@@ -404,7 +408,10 @@ export default async function DashboardPage({
 
         <div className="mt-5">
           {tab === "accounts" ? (
-            <AccountsTab personaId={personaId} />
+            <AccountsTab
+              personaId={personaId}
+              canEdit={active.role === "owner" || active.role === "manager"}
+            />
           ) : (
             <PipelineTab
               personaId={personaId}
