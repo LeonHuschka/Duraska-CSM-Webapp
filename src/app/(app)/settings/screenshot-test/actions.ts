@@ -22,9 +22,14 @@ export type TileResult = {
   match: {
     title: string;
     method: "image" | "text" | "looked";
-    score: number;
-    ratio: number | null;
+    /** Written here, not in the browser: a stale bundle mislabelled a
+     *  match once, and the reader had no way to tell. */
+    explain: string;
     thumb: string | null;
+    /** For a text match, both sides of the comparison, so a wrong one is
+     *  obvious instead of arguable. */
+    tileText?: string | null;
+    cutText?: string | null;
   } | null;
   /** Why it refused, when it did — the number that made the decision. */
   nearest: { title: string; distance: number; ratio: number } | null;
@@ -127,8 +132,9 @@ export async function analyseScreenshot(form: FormData) {
           row.match = {
             title: titles.get(verdict.candidate.requestId) ?? "—",
             method: "image",
-            score: verdict.distance,
-            ratio: verdict.ratio,
+            explain: `by picture — ${verdict.distance} bits apart, ${Math.round(
+              verdict.ratio * 100
+            )}% of the runner-up`,
             thumb: t ?? null,
           };
           taken.add(verdict.candidate.id);
@@ -159,9 +165,10 @@ export async function analyseScreenshot(form: FormData) {
         row.match = {
           title: titles.get(byText.candidate.requestId) ?? "—",
           method: "text",
-          score: byText.score,
-          ratio: null,
+          explain: `by text — ${Math.round(byText.score * 100)}% alike`,
           thumb: t ?? null,
+          tileText: r.caption,
+          cutText: byText.candidate.text,
         };
         taken.add(byText.candidate.id);
       } else if (tileCrop && tileHash) {
@@ -230,8 +237,7 @@ export async function analyseScreenshot(form: FormData) {
         row.match = {
           title: titles.get(c.requestId) ?? "—",
           method: "looked",
-          score: v.confidence,
-          ratio: null,
+          explain: `by looking — ${Math.round(v.confidence * 100)}% sure, from a shortlist of ${kept.length}`,
           thumb: t ?? null,
         };
         taken.add(c.id);

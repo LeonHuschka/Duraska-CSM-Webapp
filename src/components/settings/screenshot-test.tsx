@@ -127,15 +127,12 @@ function Tile({ t }: { t: TileResult }) {
         {t.match ? (
           <>
             <p className="truncate font-medium text-emerald-400">{t.match.title}</p>
-            <p className="text-muted-foreground">
-              {t.match.method === "image"
-                ? `by picture — ${t.match.score} bits apart, ${(
-                    (t.match.ratio ?? 0) * 100
-                  ).toFixed(0)}% of the runner-up`
-                : t.match.method === "text"
-                  ? `by text — ${(t.match.score * 100).toFixed(0)}% alike`
-                  : `by looking — ${(t.match.score * 100).toFixed(0)}% sure`}
-            </p>
+            <p className="text-muted-foreground">{t.match.explain}</p>
+            {t.match.method === "text" && (
+              <p className="mt-1 text-[10px] leading-tight text-muted-foreground/70">
+                read “{t.match.tileText}” · stored “{t.match.cutText}”
+              </p>
+            )}
           </>
         ) : (
           <>

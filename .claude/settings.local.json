@@ -172,7 +172,8 @@
       "mcp__claude-in-chrome__file_upload",
       "Bash(git commit -q -m 'Let something look at what the fingerprint could not settle *)",
       "Bash(cat)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(cat > *)"
     ]
   }
 }
