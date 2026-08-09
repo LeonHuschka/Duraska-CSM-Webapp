@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fingerprint, fingerprintSet } from "@/lib/fingerprint";
+import { fingerprint } from "@/lib/fingerprint";
 import { readOverlayTexts } from "@/lib/vision";
 
 /**
@@ -18,10 +18,10 @@ export async function fingerprintPending(deadline: number) {
 
   const { data: pending, error } = await supabase
     .from("content_assets")
-    .select("id, thumbnail_path, overlay_text, fingerprinted_at")
+    .select("id, thumbnail_path")
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .or("fingerprinted_at.is.null,phashes.is.null")
+    .is("fingerprinted_at", null)
     .limit(HASH_BATCH);
 
   if (error) return { ok: false, error: error.message };
@@ -38,13 +38,7 @@ export async function fingerprintPending(deadline: number) {
     if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
   }
 
-  const loaded: {
-    id: string;
-    buf: Buffer;
-    hash: string;
-    hashes: string[];
-    textDone: boolean;
-  }[] = [];
+  const loaded: { id: string; buf: Buffer; hash: string }[] = [];
   for (const a of pending) {
     if (Date.now() > deadline) break;
     const url = a.thumbnail_path ? urlFor.get(a.thumbnail_path) : undefined;
@@ -53,17 +47,7 @@ export async function fingerprintPending(deadline: number) {
       const res = await fetch(url);
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
-      loaded.push({
-        id: a.id,
-        buf,
-        hash: await fingerprint(buf),
-        // One per window a platform might crop the frame to — a 3:4 tile
-        // cannot be recognised by a fingerprint of the whole 9:16 frame.
-        hashes: await fingerprintSet(buf),
-        // Its hook was read on an earlier run. Reading it again would cost
-        // the same as the first time and produce the same answer.
-        textDone: a.fingerprinted_at !== null,
-      });
+      loaded.push({ id: a.id, buf, hash: await fingerprint(buf) });
     } catch {
       // A thumbnail that won't load stays unfingerprinted and is retried,
       // rather than being marked done with nothing to show for it.
@@ -71,10 +55,9 @@ export async function fingerprintPending(deadline: number) {
   }
 
   const texts = new Map<string, string | null>();
-  const needText = loaded.filter((l) => !l.textDone);
-  for (let i = 0; i < needText.length; i += TEXT_BATCH) {
+  for (let i = 0; i < loaded.length; i += TEXT_BATCH) {
     if (Date.now() > deadline) break;
-    const slice = needText.slice(i, i + TEXT_BATCH);
+    const slice = loaded.slice(i, i + TEXT_BATCH);
     const { data, error: terr } = await readOverlayTexts(
       slice.map((l) => ({ base64: l.buf.toString("base64"), mime: "image/jpeg" }))
     );
@@ -89,20 +72,14 @@ export async function fingerprintPending(deadline: number) {
   for (const l of loaded) {
     // Only rows whose text was actually read are closed out — otherwise a
     // cut would be left permanently unmatchable by its text.
-    // A cut whose hook has not been read yet stays open, so a later run
-    // finishes it rather than leaving it unmatchable by text forever.
-    if (!l.textDone && !texts.has(l.id)) continue;
-    // Leave a text that was already read alone; only fill one we just read.
-    const base = {
-      phash: l.hash,
-      phashes: l.hashes,
-      fingerprinted_at: new Date().toISOString(),
-    };
+    if (!texts.has(l.id)) continue;
     const { error: uerr } = await supabase
       .from("content_assets")
-      .update(
-        l.textDone ? base : { ...base, overlay_text: texts.get(l.id) ?? null }
-      )
+      .update({
+        phash: l.hash,
+        overlay_text: texts.get(l.id),
+        fingerprinted_at: new Date().toISOString(),
+      })
       .eq("id", l.id);
     if (!uerr) written++;
   }
@@ -112,7 +89,7 @@ export async function fingerprintPending(deadline: number) {
     .select("id", { count: "exact", head: true })
     .eq("stage", "edited")
     .not("thumbnail_path", "is", null)
-    .or("fingerprinted_at.is.null,phashes.is.null");
+    .is("fingerprinted_at", null);
 
   return { ok: true, done: (left ?? 0) === 0, hashed: loaded.length, written, remaining: left ?? 0 };
 }
