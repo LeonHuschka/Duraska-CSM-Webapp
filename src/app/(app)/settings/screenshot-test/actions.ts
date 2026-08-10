@@ -7,6 +7,7 @@ import {
   describe,
   identifyByLandmarks,
   TILE_FEATURES,
+  SCAN_FEATURES,
   type LandmarkCandidate,
 } from "@/lib/orb";
 import {
@@ -233,15 +234,15 @@ export async function identifyTiles(input: {
       distance: distance(tileHash, c.hash),
     }));
 
-    // Landmarks first: the only stage that survives a crop, which is what
-    // separates Instagram's 9:16 grid from Meta's 3:4 library.
-    const short = shortlist(tileHash, hashPool.filter((c) => !taken.has(c.id)), 12)
-      .map((c) => landmarks.get(c.id))
-      .filter((c): c is LandmarkCandidate => !!c);
-    if (short.length > 0) {
-      const idx = await describe(tile, TILE_FEATURES);
-      if (idx) {
-        const v = await identifyByLandmarks(idx, short);
+    // Landmarks first, and over every cut — not over a shortlist the hash
+    // picked, which is what hid the right answer on exactly the tiles this
+    // was built for.
+    const open = Array.from(landmarks.values()).filter((c) => !taken.has(c.id));
+    if (open.length > 0) {
+      const scan = await describe(tile, SCAN_FEATURES);
+      const idx = scan ? await describe(tile, TILE_FEATURES) : null;
+      if (scan && idx) {
+        const v = await identifyByLandmarks(scan, idx, open);
         if (v.kind === "match") {
           const th = thumbOf.get(v.candidate.id);
           if (th) wantThumbs.add(th);
@@ -255,10 +256,14 @@ export async function identifyTiles(input: {
           out.push(row);
           continue;
         }
+        // Kept even when the cheaper stages run after it: this is the
+        // number that explains the refusal, and the hash's own verdict
+        // would otherwise paper over it.
         row.nearest = { title: "landmarks not decisive", distance: v.shared, ratio: v.lead };
       }
     }
 
+    const landmarkNearest = row.nearest;
     const verdict = identify(tileHash, hashPool.filter((c) => !taken.has(c.id)));
     if (verdict.kind === "match") {
       const th = thumbOf.get(verdict.candidate.id);
@@ -274,6 +279,7 @@ export async function identifyTiles(input: {
       continue;
     }
 
+    row.nearest = landmarkNearest ?? row.nearest;
     const byText = identifyByText(t.caption, textPool.filter((c) => !taken.has(c.id)));
     if (byText) {
       const th = thumbOf.get(byText.candidate.id);

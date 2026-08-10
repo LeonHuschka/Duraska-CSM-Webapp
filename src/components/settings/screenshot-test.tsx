@@ -13,7 +13,10 @@ type Head = Awaited<ReturnType<typeof readScreenshot>>;
 // candidate against a shortlist of twelve, so this leaves plenty of room
 // inside the minute a function gets — the whole screenshot at once is what
 // timed the page out.
-const BATCH = 3;
+// Two tiles per call. Scanning all 122 cuts costs roughly thirteen seconds
+// a tile, and the five finalists another four — three at a time would sit
+// too close to the limit.
+const BATCH = 2;
 
 /**
  * Drop a screenshot in, see exactly what the bot would make of it.
@@ -182,13 +185,15 @@ function Tile({ t }: { t: TileResult }) {
           <>
             <p className="font-medium text-amber-400">not identified</p>
             <p className="text-muted-foreground">
-              {t.box
-                ? t.nearest
-                  ? `closest was ${t.nearest.distance} bits at ${(
-                      t.nearest.ratio * 100
-                    ).toFixed(0)}% of the runner-up — not decisive`
-                  : "no clear picture or text match"
-                : "the model gave no position for this tile"}
+              {!t.crop
+                ? "no tile could be cut out of the screenshot"
+                : t.nearest
+                  ? t.nearest.title === "landmarks not decisive"
+                    ? `best landmark match shared ${t.nearest.distance}, only ${t.nearest.ratio.toFixed(1)}× the runner-up — not decisive`
+                    : `closest was ${t.nearest.distance} bits at ${(
+                        t.nearest.ratio * 100
+                      ).toFixed(0)}% of the runner-up — not decisive`
+                  : "no clear picture or text match"}
             </p>
           </>
         )}

@@ -47,6 +47,20 @@ const WIDTH = 520;
 export const TILE_FEATURES = 5000;
 export const INDEX_FEATURES = 3000;
 
+/**
+ * A first pass over every candidate, with few enough landmarks on the tile
+ * to be affordable.
+ *
+ * This replaces the perceptual hash as the shortlist. The hash was ranking
+ * the right answer outside the top twelve on the very tiles this was built
+ * for — it cannot survive a crop, which is the whole reason the landmarks
+ * exist — so it was quietly hiding the correct cut from the stage that
+ * could have recognised it. Measured over all 122 cuts, 600 landmarks on
+ * the tile put the right answer first for every tile tried.
+ */
+export const SCAN_FEATURES = 600;
+const SHORTLIST = 5;
+
 /** The landmarks of one picture, as bytes that can be stored and reloaded. */
 export async function describe(
   image: Buffer,
@@ -139,17 +153,30 @@ export type LandmarkVerdict =
   | { kind: "match"; candidate: LandmarkCandidate; shared: number; lead: number }
   | { kind: "unsure"; shared: number; lead: number; best: LandmarkCandidate | null };
 
-/** Which cut this tile shows, or a refusal. */
+/**
+ * Which cut this tile shows, or a refusal.
+ *
+ * Two passes: a cheap one over everything to find the few worth looking at,
+ * then the full comparison on those. Scanning everything at full detail
+ * would cost a minute per tile; letting a hash pick the shortlist is what
+ * hid the right answer.
+ */
 export async function identifyByLandmarks(
-  tile: { count: number; data: Buffer },
+  scan: { count: number; data: Buffer },
+  full: { count: number; data: Buffer },
   pool: LandmarkCandidate[]
 ): Promise<LandmarkVerdict> {
+  if (pool.length === 0) return { kind: "unsure", shared: 0, lead: 0, best: null };
+
+  const rough: { c: LandmarkCandidate; n: number }[] = [];
+  for (const c of pool) rough.push({ c, n: await sharedLandmarks(scan, c.index) });
+  rough.sort((a, b) => b.n - a.n);
+
   let best: LandmarkCandidate | null = null;
   let bestN = 0;
   let secondN = 0;
-
-  for (const c of pool) {
-    const n = await sharedLandmarks(tile, c.index);
+  for (const { c } of rough.slice(0, SHORTLIST)) {
+    const n = await sharedLandmarks(full, c.index);
     if (n > bestN) {
       secondN = bestN;
       bestN = n;
