@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
-import { extractMetricsFromImage, matchTilesToCandidates } from "@/lib/vision";
+import { extractMetricsFromImage } from "@/lib/vision";
 import {
   describe,
   identifyByLandmarks,
@@ -47,8 +47,12 @@ export type TileResult = {
 };
 
 /**
- * Run a screenshot through the exact path the Telegram handler uses, and
- * report every step.
+ * Step one: read the screenshot and cut the tiles out.
+ *
+ * Split from the identifying because the two together do not fit in the
+ * minute a function gets — the extraction call alone spends twenty seconds,
+ * and comparing landmarks costs about half a second per candidate. The same
+ * split is what the Telegram handler will need.
  *
  * The point is that the layout is not ours to control: each VA screenshots
  * a different surface, and hiring the next one changes it again. Nothing
@@ -56,7 +60,7 @@ export type TileResult = {
  * identified by their picture — so the only way to know a new format works
  * is to run one through and look. This is that.
  */
-export async function analyseScreenshot(form: FormData) {
+export async function readScreenshot(form: FormData) {
   const personaId = await requireActivePersonaId();
   const supabase = await createClient();
 
@@ -115,218 +119,23 @@ export async function analyseScreenshot(form: FormData) {
     }
   }
 
-  const tiles: TileResult[] = [];
-  let lastStage: { tiles: number; candidates: number; error: string | null } | null = null;
-  const taken = new Set<string>();
-  const wantThumbs = new Set<string>();
-  const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
-
-  // Landmark matching costs about half a second per candidate, and the
-  // extraction call has already spent twenty seconds of the minute this
-  // function gets. Whatever does not fit falls through to the cheaper
-  // stages, and the page says how far it got rather than timing out.
-  const landmarkDeadline = Date.now() + 28_000;
-  let landmarkTiles = 0;
 
   const boxes = await refineGrid(buf, metrics.reels.map((r) => r.box));
+  const cut: { position: number; views: number | null; caption: string | null; crop: string | null }[] = [];
 
   for (let i = 0; i < metrics.reels.length; i++) {
     const r = metrics.reels[i];
     const box = boxes[i];
-    const row: TileResult = {
-      position: r.position,
-      views: r.views,
-      caption: r.caption,
-      box,
-      crop: null,
-      match: null,
-      nearest: null,
-      closest: [],
-    };
-
-    let tileCrop: Buffer | null = null;
-    let tileHash: string | null = null;
-
+    let crop: string | null = null;
     if (box) {
       try {
-        const tile = await cropTile(buf, box);
-        tileCrop = tile;
-        // Small enough to inline, big enough to see what was cut out.
-        row.crop = `data:image/jpeg;base64,${tile.toString("base64")}`;
-        tileHash = await fingerprint(tile);
-        row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
-          title: titles.get(c.requestId) ?? "—",
-          distance: distance(tileHash!, c.hash),
-        }));
-        // The hash is a poor judge across crops but a good sorter — the
-        // right answer was never worse than rank six of 122 — so it picks
-        // the shortlist and the landmarks decide it.
-        const short = (Date.now() > landmarkDeadline ? [] : shortlist(tileHash, hashPool.filter((c) => !taken.has(c.id)), 12))
-          .map((c) => landmarks.get(c.id))
-          .filter((c): c is LandmarkCandidate => !!c);
-        if (short.length > 0) {
-          landmarkTiles++;
-          const tileIdx = await describe(tile, TILE_FEATURES);
-          if (tileIdx) {
-            const v = await identifyByLandmarks(tileIdx, short);
-            if (v.kind === "match") {
-              const t = thumbOf.get(v.candidate.id);
-              if (t) wantThumbs.add(t);
-              row.match = {
-                title: titles.get(v.candidate.requestId) ?? "—",
-                method: "landmarks",
-                explain: `by landmarks — ${v.shared} shared, ${v.lead.toFixed(1)}× the runner-up`,
-                thumb: t ?? null,
-              };
-              taken.add(v.candidate.id);
-              tiles.push(row);
-              continue;
-            }
-            row.nearest = {
-              title: "landmarks not decisive",
-              distance: v.shared,
-              ratio: v.lead,
-            };
-          }
-        }
-
-        const verdict = identify(
-          tileHash,
-          hashPool.filter((c) => !taken.has(c.id))
-        );
-        if (verdict.kind === "match") {
-          const t = thumbOf.get(verdict.candidate.id);
-          if (t) wantThumbs.add(t);
-          row.match = {
-            title: titles.get(verdict.candidate.requestId) ?? "—",
-            method: "image",
-            explain: `by picture — ${verdict.distance} bits apart, ${Math.round(
-              verdict.ratio * 100
-            )}% of the runner-up`,
-            thumb: t ?? null,
-          };
-          taken.add(verdict.candidate.id);
-        } else {
-          row.nearest = {
-            title: "closest was not decisive",
-            distance: verdict.distance,
-            ratio: verdict.ratio,
-          };
-        }
-      } catch (err) {
-        row.nearest = {
-          title: err instanceof Error ? err.message : "crop failed",
-          distance: -1,
-          ratio: -1,
-        };
-      }
-    }
-
-    if (!row.match) {
-      const byText = identifyByText(
-        r.caption,
-        textPool.filter((c) => !taken.has(c.id))
-      );
-      if (byText) {
-        const t = thumbOf.get(byText.candidate.id);
-        if (t) wantThumbs.add(t);
-        row.match = {
-          title: titles.get(byText.candidate.requestId) ?? "—",
-          method: "text",
-          explain: `by text — ${Math.round(byText.score * 100)}% alike`,
-          thumb: t ?? null,
-          tileText: r.caption,
-          cutText: byText.candidate.text,
-        };
-        taken.add(byText.candidate.id);
-      } else if (tileCrop && tileHash) {
-        unresolved.push({ position: r.position, crop: tileCrop, hash: tileHash });
-      }
-    }
-
-    tiles.push(row);
-  }
-
-  // The final look, on a shortlist the hash ranked rather than decided.
-  if (unresolved.length > 0 && hashPool.length > 0) {
-    const union: Candidate[] = [];
-    const seen = new Set<string>();
-    for (const u of unresolved) {
-      for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), 8)) {
-        if (!seen.has(c.id)) {
-          seen.add(c.id);
-          union.push(c);
-        }
-      }
-    }
-    const paths = union.map((c) => thumbOf.get(c.id)).filter((p): p is string => !!p);
-    const { data: signedThumbs } = await supabase.storage
-      .from("content-assets")
-      .createSignedUrls(paths, 600);
-    const urlFor = new Map<string, string>();
-    for (const s of signedThumbs ?? []) {
-      if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
-    }
-    const kept: Candidate[] = [];
-    const thumbs: { base64: string; mime: string }[] = [];
-    for (const c of union) {
-      const path = thumbOf.get(c.id);
-      const url = path ? urlFor.get(path) : undefined;
-      if (!url) continue;
-      try {
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        thumbs.push({
-          base64: Buffer.from(await r.arrayBuffer()).toString("base64"),
-          mime: "image/jpeg",
-        });
-        kept.push(c);
+        crop = (await cropTile(buf, box)).toString("base64");
       } catch {
-        // not offered
+        // A box the picture cannot support yields no tile, and the caller
+        // sees that as plainly as it sees a good one.
       }
     }
-    lastStage = { tiles: unresolved.length, candidates: kept.length, error: null };
-    if (kept.length > 0) {
-      const { data: verdicts, error: lerr } = await matchTilesToCandidates(
-        unresolved.map((u) => ({
-          position: u.position,
-          base64: u.crop.toString("base64"),
-          mime: "image/jpeg",
-        })),
-        thumbs
-      );
-      if (lerr) lastStage.error = lerr;
-      for (const v of verdicts ?? []) {
-        if (v.candidate === null) continue;
-        const c = kept[v.candidate - 1];
-        if (!c || taken.has(c.id)) continue;
-        const row = tiles.find((t) => t.position === v.position);
-        if (!row || row.match) continue;
-        const t = thumbOf.get(c.id);
-        if (t) wantThumbs.add(t);
-        row.match = {
-          title: titles.get(c.requestId) ?? "—",
-          method: "looked",
-          explain: `by looking — ${Math.round(v.confidence * 100)}% sure, from a shortlist of ${kept.length}`,
-          thumb: t ?? null,
-        };
-        taken.add(c.id);
-      }
-    }
-  }
-
-  // One signing call for every thumbnail we are about to show.
-  if (wantThumbs.size) {
-    const { data: signed } = await supabase.storage
-      .from("content-assets")
-      .createSignedUrls(Array.from(wantThumbs), 900);
-    const url = new Map<string, string>();
-    for (const s of signed ?? []) {
-      if (s.path && s.signedUrl) url.set(s.path, s.signedUrl);
-    }
-    for (const t of tiles) {
-      if (t.match?.thumb) t.match.thumb = url.get(t.match.thumb) ?? null;
-    }
+    cut.push({ position: r.position, views: r.views, caption: r.caption, crop });
   }
 
   return {
@@ -335,11 +144,163 @@ export async function analyseScreenshot(form: FormData) {
     handle: metrics.handle,
     followers: metrics.followers,
     confidence: metrics.confidence,
+    tiles: cut,
+  };
+}
+
+/**
+ * Step two: say which cut each tile shows.
+ *
+ * Called a few tiles at a time so each call stays well inside its minute.
+ * Landmarks decide first — they are the only stage that survives a crop —
+ * then the hash, then the hook text. Every stage may refuse, and refusing is
+ * the default.
+ */
+export async function identifyTiles(input: {
+  tiles: { position: number; caption: string | null; crop: string | null }[];
+  taken: string[];
+}) {
+  const personaId = await requireActivePersonaId();
+  const supabase = await createClient();
+
+  const { data: cuts } = await supabase
+    .from("content_assets")
+    .select("id, request_id, phash, orb_index, orb_count, overlay_text, thumbnail_path")
+    .eq("stage", "edited")
+    .not("phash", "is", null);
+
+  const requestIds = Array.from(
+    new Set((cuts ?? []).map((c) => c.request_id).filter(Boolean) as string[])
+  );
+  const titles = new Map<string, string>();
+  if (requestIds.length) {
+    const { data: reqs } = await supabase
+      .from("content_requests")
+      .select("id, title")
+      .eq("persona_id", personaId)
+      .in("id", requestIds);
+    for (const r of reqs ?? []) titles.set(r.id, r.title);
+  }
+
+  const hashPool: Candidate[] = [];
+  const textPool: TextCandidate[] = [];
+  const landmarks = new Map<string, LandmarkCandidate>();
+  const thumbOf = new Map<string, string>();
+  for (const c of cuts ?? []) {
+    if (!c.id || !c.request_id || !titles.has(c.request_id)) continue;
+    if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
+    if (c.overlay_text) textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
+    if (c.thumbnail_path) thumbOf.set(c.id, c.thumbnail_path);
+    if (c.orb_index && c.orb_count) {
+      landmarks.set(c.id, {
+        id: c.id,
+        requestId: c.request_id,
+        index: { count: c.orb_count, data: Buffer.from(c.orb_index, "base64") },
+      });
+    }
+  }
+
+  const taken = new Set(input.taken);
+  const out: TileResult[] = [];
+  const wantThumbs = new Set<string>();
+
+  for (const t of input.tiles) {
+    const row: TileResult = {
+      position: t.position,
+      views: null,
+      caption: t.caption,
+      box: null,
+      crop: null,
+      match: null,
+      nearest: null,
+      closest: [],
+    };
+    if (!t.crop) {
+      row.nearest = { title: "no tile was cut out", distance: -1, ratio: -1 };
+      out.push(row);
+      continue;
+    }
+
+    const tile = Buffer.from(t.crop, "base64");
+    const tileHash = await fingerprint(tile);
+    row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
+      title: titles.get(c.requestId) ?? "—",
+      distance: distance(tileHash, c.hash),
+    }));
+
+    // Landmarks first: the only stage that survives a crop, which is what
+    // separates Instagram's 9:16 grid from Meta's 3:4 library.
+    const short = shortlist(tileHash, hashPool.filter((c) => !taken.has(c.id)), 12)
+      .map((c) => landmarks.get(c.id))
+      .filter((c): c is LandmarkCandidate => !!c);
+    if (short.length > 0) {
+      const idx = await describe(tile, TILE_FEATURES);
+      if (idx) {
+        const v = await identifyByLandmarks(idx, short);
+        if (v.kind === "match") {
+          const th = thumbOf.get(v.candidate.id);
+          if (th) wantThumbs.add(th);
+          row.match = {
+            title: titles.get(v.candidate.requestId) ?? "—",
+            method: "landmarks",
+            explain: `by landmarks — ${v.shared} shared, ${v.lead.toFixed(1)}× the runner-up`,
+            thumb: th ?? null,
+          };
+          taken.add(v.candidate.id);
+          out.push(row);
+          continue;
+        }
+        row.nearest = { title: "landmarks not decisive", distance: v.shared, ratio: v.lead };
+      }
+    }
+
+    const verdict = identify(tileHash, hashPool.filter((c) => !taken.has(c.id)));
+    if (verdict.kind === "match") {
+      const th = thumbOf.get(verdict.candidate.id);
+      if (th) wantThumbs.add(th);
+      row.match = {
+        title: titles.get(verdict.candidate.requestId) ?? "—",
+        method: "image",
+        explain: `by picture — ${verdict.distance} bits apart, ${Math.round(verdict.ratio * 100)}% of the runner-up`,
+        thumb: th ?? null,
+      };
+      taken.add(verdict.candidate.id);
+      out.push(row);
+      continue;
+    }
+
+    const byText = identifyByText(t.caption, textPool.filter((c) => !taken.has(c.id)));
+    if (byText) {
+      const th = thumbOf.get(byText.candidate.id);
+      if (th) wantThumbs.add(th);
+      row.match = {
+        title: titles.get(byText.candidate.requestId) ?? "—",
+        method: "text",
+        explain: `by text — ${Math.round(byText.score * 100)}% alike`,
+        thumb: th ?? null,
+        tileText: t.caption,
+        cutText: byText.candidate.text,
+      };
+      taken.add(byText.candidate.id);
+    }
+    out.push(row);
+  }
+
+  if (wantThumbs.size) {
+    const { data: signed } = await supabase.storage
+      .from("content-assets")
+      .createSignedUrls(Array.from(wantThumbs), 900);
+    const url = new Map<string, string>();
+    for (const s of signed ?? []) if (s.path && s.signedUrl) url.set(s.path, s.signedUrl);
+    for (const r of out) if (r.match?.thumb) r.match.thumb = url.get(r.match.thumb) ?? null;
+  }
+
+  return {
+    error: null,
+    tiles: out,
+    taken: Array.from(taken),
     poolSize: hashPool.length,
     landmarkPool: landmarks.size,
-    landmarkTiles,
     textPoolSize: textPool.length,
-    lastStage,
-    tiles,
   };
 }
