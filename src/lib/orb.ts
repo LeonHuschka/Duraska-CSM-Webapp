@@ -38,28 +38,27 @@ async function getCv(): Promise<CV> {
 const WIDTH = 520;
 
 /**
- * How many landmarks to keep. The tile side is generous because it is read
- * once; the stored side is the one that costs time on every comparison, and
- * cutting it is what makes a screenshot fit in a function: 3000 landmarks
- * cost 527ms per comparison against 879ms at 5000, and still separate the
- * hardest measured case by two to one.
+ * How many landmarks to keep on each side.
+ *
+ * More is not better on the tile: at 1500 the correct answer beats the best
+ * wrong one by 2.8 to 1, at 5000 only by 2.3, because every extra landmark
+ * is another chance to resemble something it should not. It is also three
+ * times cheaper — a comparison costs 264ms here against 879ms — and the
+ * comparison is what a screenshot spends its time on.
  */
-export const TILE_FEATURES = 5000;
+export const TILE_FEATURES = 1500;
 export const INDEX_FEATURES = 3000;
 
 /**
- * A first pass over every candidate, with few enough landmarks on the tile
- * to be affordable.
+ * How deep the hash's shortlist goes.
  *
- * This replaces the perceptual hash as the shortlist. The hash was ranking
- * the right answer outside the top twelve on the very tiles this was built
- * for — it cannot survive a crop, which is the whole reason the landmarks
- * exist — so it was quietly hiding the correct cut from the stage that
- * could have recognised it. Measured over all 122 cuts, 600 landmarks on
- * the tile put the right answer first for every tile tried.
+ * The hash cannot judge a match across crops, but for a tile in the same
+ * shape as our thumbnails it sorts one to the front reliably: measured over
+ * all 122 cuts, the correct answer was never worse than sixth. Twenty
+ * leaves three times that much room, and keeps a screenshot inside its
+ * minute — comparing all 122 would take a quarter of an hour.
  */
-export const SCAN_FEATURES = 600;
-const SHORTLIST = 5;
+export const SHORTLIST = 20;
 
 /** The landmarks of one picture, as bytes that can be stored and reloaded. */
 export async function describe(
@@ -137,10 +136,11 @@ export async function sharedLandmarks(
   return good;
 }
 
-// Measured worst case: the correct answer scored 178 with the best wrong one
-// at 82. Below either bar nothing is claimed — a tile we cannot place is
-// worth far more as a gap than as a plausible wrong answer.
-const MIN_SHARED = 60;
+// Measured across all 122 cuts on tiles in our own 9:16 shape: correct
+// answers shared far more than this and led by at least 2.8 to 1. Below
+// either bar nothing is claimed — a tile we cannot place is worth more as a
+// gap than as a plausible wrong answer.
+const MIN_SHARED = 50;
 const MIN_LEAD = 1.6;
 
 export type LandmarkCandidate = {
@@ -153,30 +153,18 @@ export type LandmarkVerdict =
   | { kind: "match"; candidate: LandmarkCandidate; shared: number; lead: number }
   | { kind: "unsure"; shared: number; lead: number; best: LandmarkCandidate | null };
 
-/**
- * Which cut this tile shows, or a refusal.
- *
- * Two passes: a cheap one over everything to find the few worth looking at,
- * then the full comparison on those. Scanning everything at full detail
- * would cost a minute per tile; letting a hash pick the shortlist is what
- * hid the right answer.
- */
+/** Which cut this tile shows, or a refusal. */
 export async function identifyByLandmarks(
-  scan: { count: number; data: Buffer },
-  full: { count: number; data: Buffer },
+  tile: { count: number; data: Buffer },
   pool: LandmarkCandidate[]
 ): Promise<LandmarkVerdict> {
   if (pool.length === 0) return { kind: "unsure", shared: 0, lead: 0, best: null };
 
-  const rough: { c: LandmarkCandidate; n: number }[] = [];
-  for (const c of pool) rough.push({ c, n: await sharedLandmarks(scan, c.index) });
-  rough.sort((a, b) => b.n - a.n);
-
   let best: LandmarkCandidate | null = null;
   let bestN = 0;
   let secondN = 0;
-  for (const { c } of rough.slice(0, SHORTLIST)) {
-    const n = await sharedLandmarks(full, c.index);
+  for (const c of pool) {
+    const n = await sharedLandmarks(tile, c.index);
     if (n > bestN) {
       secondN = bestN;
       bestN = n;

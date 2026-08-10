@@ -188,7 +188,8 @@
       "Bash(node --experimental-strip-types test/rank.mts)",
       "Bash(timeout 180 node --experimental-strip-types test/wasmprobe.mts)",
       "Bash(node --experimental-strip-types test/wasmprobe.mts)",
-      "Bash(node test/wasmprobe.mjs)"
+      "Bash(node test/wasmprobe.mjs)",
+      "Bash(node --experimental-strip-types test/final.mts)"
     ]
   }
 }

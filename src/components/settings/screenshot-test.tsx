@@ -13,10 +13,10 @@ type Head = Awaited<ReturnType<typeof readScreenshot>>;
 // candidate against a shortlist of twelve, so this leaves plenty of room
 // inside the minute a function gets — the whole screenshot at once is what
 // timed the page out.
-// Two tiles per call. Scanning all 122 cuts costs roughly thirteen seconds
-// a tile, and the five finalists another four — three at a time would sit
-// too close to the limit.
-const BATCH = 2;
+// Four tiles per call. A tile is compared against the twenty the hash puts
+// in front, at about a quarter of a second each, so this sits at roughly
+// twenty seconds a call.
+const BATCH = 4;
 
 /**
  * Drop a screenshot in, see exactly what the bot would make of it.
