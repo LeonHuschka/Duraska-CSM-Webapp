@@ -30,6 +30,7 @@ export function ScreenshotTest() {
   const [head, setHead] = useState<Head | null>(null);
   const [rows, setRows] = useState<TileResult[]>([]);
   const [pool, setPool] = useState<{ hash: number; landmarks: number; text: number } | null>(null);
+  const [by, setBy] = useState({ landmarks: 0, image: 0, text: 0 });
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -39,6 +40,7 @@ export function ScreenshotTest() {
     setHead(null);
     setRows([]);
     setPool(null);
+    setBy({ landmarks: 0, image: 0, text: 0 });
     try {
       setStep("Reading the screenshot…");
       const read = await readScreenshot(form);
@@ -62,6 +64,11 @@ export function ScreenshotTest() {
           ...res.tiles.map((t) => ({ ...t, views: views.get(t.position) ?? null })),
         ]);
         setPool({ hash: res.poolSize, landmarks: res.landmarkPool, text: res.textPoolSize });
+        setBy((b) => ({
+          landmarks: b.landmarks + res.byMethod.landmarks,
+          image: b.image + res.byMethod.image,
+          text: b.text + res.byMethod.text,
+        }));
       }
       setStep("");
     } catch (err) {
@@ -131,6 +138,8 @@ export function ScreenshotTest() {
           <p className="text-xs text-muted-foreground">
             {rows.filter((t) => t.match).length} of {rows.length} tiles identified
             {head?.tiles && rows.length < head.tiles.length && " so far"}
+            {" — "}
+            {by.landmarks} by landmarks, {by.image} by picture, {by.text} by text
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {rows.map((t) => (

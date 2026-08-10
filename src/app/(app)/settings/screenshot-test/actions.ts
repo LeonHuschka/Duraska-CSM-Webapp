@@ -221,6 +221,11 @@ export async function identifyTiles(input: {
       continue;
     }
 
+    // Hand the cut-out back so the page can show what was actually
+    // compared. Splitting the work dropped it, and a verdict you cannot see
+    // the input of is not checkable.
+    row.crop = `data:image/jpeg;base64,${t.crop}`;
+
     const tile = Buffer.from(t.crop, "base64");
     const tileHash = await fingerprint(tile);
     row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
@@ -299,6 +304,13 @@ export async function identifyTiles(input: {
     error: null,
     tiles: out,
     taken: Array.from(taken),
+    // How each verdict was reached, so one run says which stage is carrying
+    // the work and which is dead weight.
+    byMethod: {
+      landmarks: out.filter((r) => r.match?.method === "landmarks").length,
+      image: out.filter((r) => r.match?.method === "image").length,
+      text: out.filter((r) => r.match?.method === "text").length,
+    },
     poolSize: hashPool.length,
     landmarkPool: landmarks.size,
     textPoolSize: textPool.length,
