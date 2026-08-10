@@ -4,6 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { extractMetricsFromImage, matchTilesToCandidates } from "@/lib/vision";
 import {
+  describe,
+  identifyByLandmarks,
+  TILE_FEATURES,
+  type LandmarkCandidate,
+} from "@/lib/orb";
+import {
   fingerprint,
   cropTile,
   identify,
@@ -23,7 +29,7 @@ export type TileResult = {
   crop: string | null;
   match: {
     title: string;
-    method: "image" | "text" | "looked";
+    method: "landmarks" | "image" | "text" | "looked";
     /** Written here, not in the browser: a stale bundle mislabelled a
      *  match once, and the reader had no way to tell. */
     explain: string;
@@ -71,7 +77,7 @@ export async function analyseScreenshot(form: FormData) {
 
   const { data: cuts } = await supabase
     .from("content_assets")
-    .select("id, request_id, phash, overlay_text, thumbnail_path")
+    .select("id, request_id, phash, orb_index, orb_count, overlay_text, thumbnail_path")
     .eq("stage", "edited")
     .not("phash", "is", null);
 
@@ -89,6 +95,7 @@ export async function analyseScreenshot(form: FormData) {
   }
 
   const hashPool: Candidate[] = [];
+  const landmarks = new Map<string, LandmarkCandidate>();
   const textPool: TextCandidate[] = [];
   const thumbOf = new Map<string, string>();
   for (const c of cuts ?? []) {
@@ -99,6 +106,13 @@ export async function analyseScreenshot(form: FormData) {
       textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
     }
     if (c.thumbnail_path) thumbOf.set(c.id, c.thumbnail_path);
+    if (c.orb_index && c.orb_count) {
+      landmarks.set(c.id, {
+        id: c.id,
+        requestId: c.request_id,
+        index: { count: c.orb_count, data: Buffer.from(c.orb_index, "base64") },
+      });
+    }
   }
 
   const tiles: TileResult[] = [];
@@ -106,6 +120,13 @@ export async function analyseScreenshot(form: FormData) {
   const taken = new Set<string>();
   const wantThumbs = new Set<string>();
   const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
+
+  // Landmark matching costs about half a second per candidate, and the
+  // extraction call has already spent twenty seconds of the minute this
+  // function gets. Whatever does not fit falls through to the cheaper
+  // stages, and the page says how far it got rather than timing out.
+  const landmarkDeadline = Date.now() + 28_000;
+  let landmarkTiles = 0;
 
   const boxes = await refineGrid(buf, metrics.reels.map((r) => r.box));
 
@@ -137,6 +158,38 @@ export async function analyseScreenshot(form: FormData) {
           title: titles.get(c.requestId) ?? "—",
           distance: distance(tileHash!, c.hash),
         }));
+        // The hash is a poor judge across crops but a good sorter — the
+        // right answer was never worse than rank six of 122 — so it picks
+        // the shortlist and the landmarks decide it.
+        const short = (Date.now() > landmarkDeadline ? [] : shortlist(tileHash, hashPool.filter((c) => !taken.has(c.id)), 12))
+          .map((c) => landmarks.get(c.id))
+          .filter((c): c is LandmarkCandidate => !!c);
+        if (short.length > 0) {
+          landmarkTiles++;
+          const tileIdx = await describe(tile, TILE_FEATURES);
+          if (tileIdx) {
+            const v = await identifyByLandmarks(tileIdx, short);
+            if (v.kind === "match") {
+              const t = thumbOf.get(v.candidate.id);
+              if (t) wantThumbs.add(t);
+              row.match = {
+                title: titles.get(v.candidate.requestId) ?? "—",
+                method: "landmarks",
+                explain: `by landmarks — ${v.shared} shared, ${v.lead.toFixed(1)}× the runner-up`,
+                thumb: t ?? null,
+              };
+              taken.add(v.candidate.id);
+              tiles.push(row);
+              continue;
+            }
+            row.nearest = {
+              title: "landmarks not decisive",
+              distance: v.shared,
+              ratio: v.lead,
+            };
+          }
+        }
+
         const verdict = identify(
           tileHash,
           hashPool.filter((c) => !taken.has(c.id))
@@ -283,6 +336,8 @@ export async function analyseScreenshot(form: FormData) {
     followers: metrics.followers,
     confidence: metrics.confidence,
     poolSize: hashPool.length,
+    landmarkPool: landmarks.size,
+    landmarkTiles,
     textPoolSize: textPool.length,
     lastStage,
     tiles,

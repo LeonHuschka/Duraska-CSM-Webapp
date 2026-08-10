@@ -79,6 +79,12 @@ export function ScreenshotTest() {
               </span>
             </span>
             <span>
+              landmarks on{" "}
+              <span className="text-foreground">{res.landmarkPool}</span> cuts,
+              used for{" "}
+              <span className="text-foreground">{res.landmarkTiles}</span> tiles
+            </span>
+            <span>
               compared against{" "}
               <span className="text-foreground">{res.poolSize}</span> hashed cuts,{" "}
               <span className="text-foreground">{res.textPoolSize}</span> with text

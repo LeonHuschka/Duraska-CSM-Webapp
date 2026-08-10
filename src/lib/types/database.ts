@@ -240,6 +240,8 @@ export type Database = {
           notes: string | null;
           deleted_at: string | null;
           phash: string | null;
+          orb_index: string | null;
+          orb_count: number | null;
           overlay_text: string | null;
           fingerprinted_at: string | null;
         };
@@ -260,6 +262,8 @@ export type Database = {
           notes?: string | null;
           deleted_at?: string | null;
           phash?: string | null;
+          orb_index?: string | null;
+          orb_count?: number | null;
           overlay_text?: string | null;
           fingerprinted_at?: string | null;
         };
@@ -280,6 +284,8 @@ export type Database = {
           notes?: string | null;
           deleted_at?: string | null;
           phash?: string | null;
+          orb_index?: string | null;
+          orb_count?: number | null;
           overlay_text?: string | null;
           fingerprinted_at?: string | null;
         };
