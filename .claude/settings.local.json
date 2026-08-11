@@ -199,7 +199,9 @@
       "Bash(node --experimental-strip-types test/ladder.mts)",
       "Bash(node --experimental-strip-types test/ladder3.mts)",
       "Bash(git checkout *)",
-      "Bash(python3 gridfind.py)"
+      "Bash(python3 gridfind.py)",
+      "Bash(python3 -c \"from PIL import Image; print\\('clean:', Image.open\\('test/clean.jpg'\\).size\\)\")",
+      "Bash(node --experimental-strip-types test/gridts2.mts)"
     ]
   }
 }

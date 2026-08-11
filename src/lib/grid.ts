@@ -15,9 +15,10 @@ import sharp from "sharp";
  * grid. An earlier attempt looked for single strong lines and found the
  * app's buttons, which is a different question with a different answer.
  *
- * Measured against hand-measured tile positions on four screenshots of two
- * different surfaces, photographed off a phone screen: columns land within
- * 1–5px and rows within 8–10px, on tiles of about 190×345 and 277×371.
+ * Measured on five screenshots across two surfaces — four photographed off a
+ * phone screen, one taken with the screenshot key — columns land within
+ * 1–5px and rows within 7–10px of hand-measured positions, on tiles from
+ * 190×345 to 277×371.
  */
 
 export type Cell = { x: number; y: number; w: number; h: number };
@@ -59,21 +60,41 @@ export async function findGrid(image: Buffer): Promise<Cell[]> {
     return s / (n + 1);
   };
 
-  // Three columns, so four borders. Trying every spacing and every start
-  // keeps this off the harmonics that a plain autocorrelation falls into.
-  let bestCol = { score: -1, origin: 0, pitch: Math.round(w / 3) };
-  for (let pitch = Math.round(w * 0.15); pitch < Math.round(w * 0.45); pitch++) {
-    for (let origin = 0; origin + 3 * pitch < w; origin += 2) {
-      const s = comb(colEdge, origin, pitch, 3);
-      if (s > bestCol.score) bestCol = { score: s, origin, pitch };
+  const bestComb = (sig: Float64Array, lo: number, hi: number, n: number, limit: number) => {
+    let best = { score: -1, origin: 0, pitch: lo };
+    for (let pitch = lo; pitch < hi; pitch++) {
+      for (let origin = 0; origin + n * pitch < limit; origin += 2) {
+        const s = comb(sig, origin, pitch, n);
+        if (s > best.score) best = { score: s, origin, pitch };
+      }
     }
+    return best;
+  };
+
+  // Three columns, so four borders.
+  let bestCol = bestComb(colEdge, Math.round(w * 0.12), Math.round(w * 0.45), 3, w);
+
+  // A comb at half the true spacing hits every real border and two extra
+  // lines through the middle of each tile — and on busy tiles those score.
+  // That is how a full-width grid came back with cells half a tile wide. If
+  // twice the spacing is nearly as good, it is the honest answer: the same
+  // borders explained without the invented ones.
+  for (let mult = 2; mult <= 3; mult++) {
+    const doubled = bestCol.pitch * mult;
+    if (doubled * 3 >= w) break;
+    let alt = { score: -1, origin: 0, pitch: doubled };
+    for (let origin = 0; origin + 3 * doubled < w; origin += 2) {
+      const s = comb(colEdge, origin, doubled, 3);
+      if (s > alt.score) alt = { score: s, origin, pitch: doubled };
+    }
+    if (alt.score >= bestCol.score * 0.8) bestCol = alt;
   }
 
   // Rows: the height sits between one and two column widths — 3:4 tiles at
   // 1.33, 9:16 at 1.78 — so both surfaces are covered without being told
   // which one this is.
   let bestRow = { score: -1, origin: 0, pitch: bestCol.pitch };
-  for (let pitch = bestCol.pitch; pitch < bestCol.pitch * 2; pitch++) {
+  for (let pitch = Math.round(bestCol.pitch * 0.95); pitch < bestCol.pitch * 2; pitch++) {
     for (let origin = 0; origin < pitch; origin += 2) {
       let s = 0;
       let n = 0;
