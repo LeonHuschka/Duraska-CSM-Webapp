@@ -1,5 +1,6 @@
 "use server";
 
+import sharp from "sharp";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { extractMetricsFromImage } from "@/lib/vision";
@@ -70,7 +71,12 @@ export async function readScreenshot(form: FormData) {
   const { data: metrics, error } = await extractMetricsFromImage(base64, mime);
   if (error || !metrics) return { error: error ?? "extraction failed" };
 
-  const boxes = await refineGrid(buf, metrics.reels.map((r) => r.box));
+  const raw = metrics.reels.map((r) => r.box);
+  const boxes = await refineGrid(buf, raw);
+
+  // Both sets drawn onto the screenshot, because four attempts at correcting
+  // these were made without anyone ever looking at what was being corrected.
+  const overlay = await drawBoxes(buf, raw, boxes);
   const cut: { position: number; views: number | null; caption: string | null; crop: string | null }[] = [];
 
   for (let i = 0; i < metrics.reels.length; i++) {
@@ -90,12 +96,49 @@ export async function readScreenshot(form: FormData) {
 
   return {
     error: null,
+    overlay,
     kind: metrics.metric_kind,
     handle: metrics.handle,
     followers: metrics.followers,
     confidence: metrics.confidence,
     tiles: cut,
   };
+}
+
+/**
+ * The model's rectangles in red, what they were turned into in green.
+ * One look answers what a page of numbers cannot.
+ */
+async function drawBoxes(
+  image: Buffer,
+  raw: ({ x: number; y: number; w: number; h: number } | null)[],
+  fixed: ({ x: number; y: number; w: number; h: number } | null)[]
+): Promise<string | null> {
+  try {
+    const meta = await sharp(image).metadata();
+    const w = meta.width ?? 0;
+    const h = meta.height ?? 0;
+    if (!w || !h) return null;
+    const rect = (
+      b: { x: number; y: number; w: number; h: number },
+      colour: string,
+      dash: string
+    ) =>
+      `<rect x="${(b.x * w).toFixed(0)}" y="${(b.y * h).toFixed(0)}" width="${(b.w * w).toFixed(0)}" height="${(b.h * h).toFixed(0)}" fill="none" stroke="${colour}" stroke-width="4" stroke-dasharray="${dash}"/>`;
+    const svg =
+      `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
+      raw.map((b) => (b ? rect(b, "#ff3b30", "10 6") : "")).join("") +
+      fixed.map((b) => (b ? rect(b, "#34c759", "0") : "")).join("") +
+      `</svg>`;
+    const out = await sharp(image)
+      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .resize(520, null)
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${out.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
 
 /**

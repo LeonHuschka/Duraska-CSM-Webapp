@@ -133,6 +133,20 @@ export function ScreenshotTest() {
         </div>
       )}
 
+      {head?.overlay && (
+        <div>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Rot gestrichelt: was das Modell vorschlägt. Grün: woraus geschnitten wird.
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={head.overlay}
+            alt="tile boxes"
+            className="max-h-[520px] rounded-lg border border-border/50"
+          />
+        </div>
+      )}
+
       {rows.length > 0 && (
         <>
           <p className="text-xs text-muted-foreground">
