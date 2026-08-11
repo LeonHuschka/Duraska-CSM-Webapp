@@ -9,14 +9,10 @@ import {
 
 type Head = Awaited<ReturnType<typeof readScreenshot>>;
 
-// Three tiles per call. Landmark matching costs about half a second per
-// candidate against a shortlist of twelve, so this leaves plenty of room
-// inside the minute a function gets — the whole screenshot at once is what
-// timed the page out.
-// Four tiles per call. A tile is compared against the twenty the hash puts
-// in front, at about a quarter of a second each, so this sits at roughly
-// twenty seconds a call.
-const BATCH = 4;
+// Six tiles per call. A tile costs about a second now — twelve candidates
+// at 88ms each — so this sits well inside the minute a function gets, and
+// results still appear in waves rather than all at the end.
+const BATCH = 6;
 
 /**
  * Drop a screenshot in, see exactly what the bot would make of it.

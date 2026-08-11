@@ -506,6 +506,8 @@ export type Database = {
           confidence: number | null;
           needs_review: boolean;
           match_method: string | null;
+          match_confirmed: boolean;
+          tile_path: string | null;
           match_score: number | null;
           created_at: string;
         };
@@ -526,6 +528,8 @@ export type Database = {
           confidence?: number | null;
           needs_review?: boolean;
           match_method?: string | null;
+          match_confirmed?: boolean;
+          tile_path?: string | null;
           match_score?: number | null;
           created_at?: string;
         };
@@ -545,6 +549,8 @@ export type Database = {
           confidence?: number | null;
           needs_review?: boolean;
           match_method?: string | null;
+          match_confirmed?: boolean;
+          tile_path?: string | null;
           match_score?: number | null;
           created_at?: string;
         };
@@ -608,6 +614,8 @@ export type Database = {
           confidence?: number | null;
           needs_review?: boolean;
           match_method?: string | null;
+          match_confirmed?: boolean;
+          tile_path?: string | null;
           match_score?: number | null;
           created_at?: string;
         };

@@ -10,17 +10,9 @@ import {
   parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
-import { extractMetricsFromImage, matchTilesToCandidates } from "@/lib/vision";
-import {
-  fingerprint,
-  cropTile,
-  identify,
-  identifyByText,
-  shortlist,
-  refineGrid,
-  type Candidate,
-  type TextCandidate,
-} from "@/lib/fingerprint";
+import { extractMetricsFromImage } from "@/lib/vision";
+import { cropTile, refineGrid } from "@/lib/fingerprint";
+import { matchTiles } from "@/lib/match-tile";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -341,205 +333,49 @@ async function handleScreenshot(msg: TgMessage) {
   // A grid is a list, not a measurement: one row per tile, keyed on the
   // message so Telegram redelivering the same photo changes nothing.
   if (metrics.reels.length > 0) {
-    // Which of our reels is on each tile.
+    // The tile is a frame of a video we hold, so which reel it shows is
+    // decided by comparing pictures, not by counting positions. Position
+    // was never identity: an unrecorded posting, a pinned reel or a deleted
+    // one shifts every tile after it, and the old logic had no way to
+    // notice.
     //
-    // The tile is a frame of a video we hold, so this is decided by
-    // comparing pictures, not by counting positions. Position was never
-    // identity: an unrecorded posting, a pinned reel or a deleted one shifts
-    // every tile after it, and the old logic had no way to notice.
-    //
-    // Two independent tests, each able to refuse. Nothing is written unless
-    // one of them is clearly decided — a tile we cannot place is far more
-    // useful as a gap than as a plausible wrong answer.
-    const { data: cuts } = await supabase
-      .from("content_assets")
-      .select("id, request_id, phash, overlay_text, thumbnail_path")
-      .eq("stage", "edited")
-      .not("phash", "is", null)
-      .lte("uploaded_at", capturedAt);
-
-    const hashPool: Candidate[] = [];
-    const textPool: TextCandidate[] = [];
-    const thumbPath = new Map<string, string>();
-    for (const c of cuts ?? []) {
-      if (!c.id || !c.request_id) continue;
-      if (c.thumbnail_path) thumbPath.set(c.id, c.thumbnail_path);
-      if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
-      if (c.overlay_text) {
-        textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
-      }
-    }
-
-    // A proposal is written like any other reading so no number is lost,
-    // but it is flagged for a human and — importantly — it does not spend
-    // the cut: otherwise a guess takes the reel the next tile needed.
-    type Hit = {
-      assetId: string;
-      requestId: string;
-      method: string;
-      score: number;
-      needsCheck?: boolean;
-    };
-    const cutForPosition = new Map<number, Hit>();
-    const taken = new Set<string>();
-    const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
-    let cropped = 0;
-    let noBox = 0;
-
-    // One lattice for all of them, before a single pixel is cut: a model
-    // asked for nine rectangles gives nine roughly-right rectangles, and
+    // The boxes are straightened against the grid they came from first: a
+    // model asked for nine rectangles gives nine roughly-right ones, and
     // cropping on those yields fragments spanning two tiles.
-    const boxes = await refineGrid(
-      Buffer.from(file.base64, "base64"),
-      metrics.reels.map((r) => r.box)
-    );
-
+    const image = Buffer.from(file.base64, "base64");
+    const boxes = await refineGrid(image, metrics.reels.map((r) => r.box));
+    const crops: (Buffer | null)[] = [];
     for (let i = 0; i < metrics.reels.length; i++) {
-      const r = metrics.reels[i];
       const box = boxes[i];
-      // Picture first. It is free, it is the same answer every time, and it
-      // tells two takes from one session apart — which the text cannot.
-      let tileHash: string | null = null;
-      let tileCrop: Buffer | null = null;
-
-      if (box) {
-        try {
-          tileCrop = await cropTile(Buffer.from(file.base64, "base64"), box);
-          cropped++;
-          tileHash = await fingerprint(tileCrop);
-          const verdict = identify(
-            tileHash,
-            hashPool.filter((c) => !taken.has(c.id))
-          );
-          if (verdict.kind === "match") {
-            cutForPosition.set(r.position, {
-              assetId: verdict.candidate.id,
-              requestId: verdict.candidate.requestId,
-              method: "image",
-              score: verdict.distance,
-            });
-            taken.add(verdict.candidate.id);
-            continue;
-          }
-          if (verdict.best) {
-            cutForPosition.set(r.position, {
-              assetId: verdict.best.id,
-              requestId: verdict.best.requestId,
-              method: "image?",
-              score: verdict.distance,
-              needsCheck: true,
-            });
-          }
-        } catch (err) {
-          console.warn("[telegram] tile crop failed", err);
-        }
-      } else {
-        noBox++;
-      }
-
-      // The hook burnt into the clip. This is what carries the cases the
-      // picture cannot: Instagram showing a tighter crop, or a cover frame
-      // from a different moment.
-      const byText = identifyByText(
-        r.caption,
-        textPool.filter((c) => !taken.has(c.id))
-      );
-      if (byText) {
-        cutForPosition.set(r.position, {
-          assetId: byText.candidate.id,
-          requestId: byText.candidate.requestId,
-          method: "text",
-          score: byText.score,
-        });
-        taken.add(byText.candidate.id);
+      if (!box) {
+        crops.push(null);
         continue;
       }
-
-      if (tileHash && tileCrop) {
-        unresolved.push({ position: r.position, crop: tileCrop, hash: tileHash });
+      try {
+        crops.push(await cropTile(image, box));
+      } catch {
+        crops.push(null);
       }
     }
 
-    // Last stage: a look at what neither test could settle.
-    //
-    // Only this can recognise a reel across a genuinely different frame,
-    // which is the case Instagram's cover picker and Meta's tighter crop
-    // both produce. It sees a shortlist, not the vault: the hash is a poor
-    // judge here but a good sorter, and the right answer sat at rank 12 of
-    // 122 in the case that motivated this.
-    if (unresolved.length > 0 && hashPool.length > 0) {
-      const SHORTLIST = 12;
-      const union: Candidate[] = [];
-      const seen = new Set<string>();
-      for (const u of unresolved) {
-        for (const c of shortlist(u.hash, hashPool.filter((c) => !taken.has(c.id)), SHORTLIST)) {
-          if (!seen.has(c.id)) {
-            seen.add(c.id);
-            union.push(c);
-          }
-        }
-      }
-
-      const thumbs: { base64: string; mime: string }[] = [];
-      const kept: Candidate[] = [];
-      const paths = union
-        .map((c) => thumbPath.get(c.id))
-        .filter((p): p is string => !!p);
-      const { data: signedThumbs } = await supabase.storage
-        .from("content-assets")
-        .createSignedUrls(paths, 600);
-      const urlFor = new Map<string, string>();
-      for (const s of signedThumbs ?? []) {
-        if (s.path && s.signedUrl) urlFor.set(s.path, s.signedUrl);
-      }
-      for (const c of union) {
-        const path = thumbPath.get(c.id);
-        const url = path ? urlFor.get(path) : undefined;
-        if (!url) continue;
-        try {
-          const res = await fetch(url);
-          if (!res.ok) continue;
-          thumbs.push({
-            base64: Buffer.from(await res.arrayBuffer()).toString("base64"),
-            mime: "image/jpeg",
-          });
-          kept.push(c);
-        } catch {
-          // A thumbnail that won't load is simply not offered.
-        }
-      }
-
-      if (kept.length > 0) {
-        const { data: verdicts, error: mErr } = await matchTilesToCandidates(
-          unresolved.map((u) => ({
-            position: u.position,
-            base64: u.crop.toString("base64"),
-            mime: "image/jpeg",
-          })),
-          thumbs
-        );
-        if (mErr) {
-          console.warn("[telegram] final comparison failed", mErr);
-        }
-        for (const v of verdicts ?? []) {
-          if (v.candidate === null) continue;
-          if (cutForPosition.has(v.position)) continue;
-          const c = kept[v.candidate - 1];
-          if (!c || taken.has(c.id)) continue;
-          cutForPosition.set(v.position, {
-            assetId: c.id,
-            requestId: c.requestId,
-            method: "looked",
-            score: v.confidence,
-          });
-          taken.add(c.id);
-        }
-      }
-    }
-
+    // One matcher for the bot and for the check page. Keeping two of them
+    // in step failed: the page matched by landmarks for hours while this
+    // path was still deciding with a perceptual hash.
+    const result = await matchTiles(supabase, {
+      personaId: account.persona_id,
+      accountId: account.id,
+      tiles: metrics.reels.map((r, i) => ({
+        position: r.position,
+        caption: r.caption,
+        crop: crops[i],
+      })),
+    });
+    const byPosition = new Map(result.tiles.map((t) => [t.position, t]));
+    const confirmed = result.tiles.filter((t) => t.assetId && !t.needsCheck).length;
+    const proposed = result.tiles.filter((t) => t.assetId && t.needsCheck).length;
     console.log(
-      `[telegram] @${account.handle}: identified ${cutForPosition.size}/${metrics.reels.length} tiles ` +
-        `(${cropped} cropped, ${noBox} without a box) against ${hashPool.length} hashed cuts`
+      `[telegram] @${account.handle}: ${confirmed} confirmed, ${proposed} to check, ` +
+        `of ${metrics.reels.length} tiles against ${result.landmarkPool} indexed cuts`
     );
 
     const { error: gridErr } = await supabase.from("reel_metrics").upsert(
@@ -548,10 +384,11 @@ async function handleScreenshot(msg: TgMessage) {
         account_id: account.id,
         captured_at: capturedAt,
         position: r.position,
-        asset_id: cutForPosition.get(r.position)?.assetId ?? null,
-        request_id: cutForPosition.get(r.position)?.requestId ?? null,
-        match_method: cutForPosition.get(r.position)?.method ?? null,
-        match_score: cutForPosition.get(r.position)?.score ?? null,
+        asset_id: byPosition.get(r.position)?.assetId ?? null,
+        request_id: byPosition.get(r.position)?.requestId ?? null,
+        match_method: byPosition.get(r.position)?.method ?? null,
+        match_score: byPosition.get(r.position)?.score ?? null,
+        match_confirmed: byPosition.get(r.position)?.needsCheck === false,
         views: r.views,
         likes: r.likes,
         caption: r.caption,
@@ -560,8 +397,7 @@ async function handleScreenshot(msg: TgMessage) {
         source_file_id: photo.file_id,
         confidence: metrics.confidence,
         needs_review:
-          metrics.confidence < 0.6 ||
-          cutForPosition.get(r.position)?.needsCheck === true,
+          metrics.confidence < 0.6 || byPosition.get(r.position)?.needsCheck !== false,
       })),
       { onConflict: "source_chat_id,source_message_id,position" }
     );

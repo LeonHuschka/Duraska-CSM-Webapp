@@ -40,25 +40,26 @@ const WIDTH = 520;
 /**
  * How many landmarks to keep on each side.
  *
- * More is not better on the tile: at 1500 the correct answer beats the best
- * wrong one by 2.8 to 1, at 5000 only by 2.3, because every extra landmark
- * is another chance to resemble something it should not. It is also three
- * times cheaper — a comparison costs 264ms here against 879ms — and the
- * comparison is what a screenshot spends its time on.
+ * More is not better. On the tile, 1500 beats the best wrong candidate by
+ * 2.8 to 1 where 5000 manages only 2.3 — every extra landmark is another
+ * chance to resemble something it should not. On the stored side, 1000
+ * still leads by 2.2 while costing a third of what 3000 does: a comparison
+ * drops from 264ms to 88ms, and comparisons are what a screenshot spends
+ * its time on.
  */
 export const TILE_FEATURES = 1500;
-export const INDEX_FEATURES = 3000;
+export const INDEX_FEATURES = 1000;
 
 /**
  * How deep the hash's shortlist goes.
  *
  * The hash cannot judge a match across crops, but for a tile in the same
  * shape as our thumbnails it sorts one to the front reliably: measured over
- * all 122 cuts, the correct answer was never worse than sixth. Twenty
- * leaves three times that much room, and keeps a screenshot inside its
- * minute — comparing all 122 would take a quarter of an hour.
+ * all 122 cuts, the correct answer was never worse than sixth. Twelve
+ * leaves twice that much room, and keeps a tile near a second — comparing
+ * all 122 would take ten.
  */
-export const SHORTLIST = 20;
+export const SHORTLIST = 12;
 
 /** The landmarks of one picture, as bytes that can be stored and reloaded. */
 export async function describe(

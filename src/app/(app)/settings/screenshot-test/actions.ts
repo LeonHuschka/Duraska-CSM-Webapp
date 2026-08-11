@@ -3,24 +3,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { extractMetricsFromImage } from "@/lib/vision";
-import {
-  describe,
-  identifyByLandmarks,
-  TILE_FEATURES,
-  SHORTLIST,
-  type LandmarkCandidate,
-} from "@/lib/orb";
-import {
-  fingerprint,
-  cropTile,
-  identify,
-  identifyByText,
-  shortlist,
-  distance,
-  refineGrid,
-  type Candidate,
-  type TextCandidate,
-} from "@/lib/fingerprint";
+import { matchTiles } from "@/lib/match-tile";
+
+import { cropTile, refineGrid } from "@/lib/fingerprint";
 
 export type TileResult = {
   position: number;
@@ -116,10 +101,9 @@ export async function readScreenshot(form: FormData) {
 /**
  * Step two: say which cut each tile shows.
  *
- * Called a few tiles at a time so each call stays well inside its minute.
- * Landmarks decide first — they are the only stage that survives a crop —
- * then the hash, then the hook text. Every stage may refuse, and refusing is
- * the default.
+ * A thin wrapper on the matcher the Telegram handler uses, so the page can
+ * never drift from what the bot actually does — it did, for hours, and the
+ * page looked healthy while the bot was still deciding with a hash.
  */
 export async function identifyTiles(input: {
   tiles: { position: number; caption: string | null; crop: string | null }[];
@@ -128,195 +112,66 @@ export async function identifyTiles(input: {
   const personaId = await requireActivePersonaId();
   const supabase = await createClient();
 
-  const { data: cuts } = await supabase
-    .from("content_assets")
-    .select("id, request_id, phash, orb_index, orb_count, overlay_text, thumbnail_path")
-    .eq("stage", "edited")
-    .not("phash", "is", null);
-
-  const requestIds = Array.from(
-    new Set((cuts ?? []).map((c) => c.request_id).filter(Boolean) as string[])
-  );
-  const titles = new Map<string, string>();
-  if (requestIds.length) {
-    const { data: reqs } = await supabase
-      .from("content_requests")
-      .select("id, title")
-      .eq("persona_id", personaId)
-      .in("id", requestIds);
-    for (const r of reqs ?? []) titles.set(r.id, r.title);
-  }
-
-  const hashPool: Candidate[] = [];
-  const textPool: TextCandidate[] = [];
-  const hasLandmarks = new Set<string>();
-  const thumbOf = new Map<string, string>();
-  for (const c of cuts ?? []) {
-    if (!c.id || !c.request_id || !titles.has(c.request_id)) continue;
-    if (c.phash) hashPool.push({ id: c.id, requestId: c.request_id, hash: c.phash });
-    if (c.overlay_text) textPool.push({ id: c.id, requestId: c.request_id, text: c.overlay_text });
-    if (c.thumbnail_path) thumbOf.set(c.id, c.thumbnail_path);
-    if (c.orb_count) hasLandmarks.add(c.id);
-  }
-
-  const taken = new Set(input.taken);
-  const out: TileResult[] = [];
-  const wantThumbs = new Set<string>();
-
-  for (const t of input.tiles) {
-    const row: TileResult = {
+  const res = await matchTiles(supabase, {
+    personaId,
+    tiles: input.tiles.map((t) => ({
       position: t.position,
-      views: null,
       caption: t.caption,
-      box: null,
-      crop: null,
-      match: null,
-      nearest: null,
-      closest: [],
-    };
-    if (!t.crop) {
-      row.nearest = { title: "no tile was cut out", distance: -1, ratio: -1 };
-      out.push(row);
-      continue;
-    }
+      crop: t.crop ? Buffer.from(t.crop, "base64") : null,
+    })),
+    taken: input.taken,
+  });
 
-    // Hand the cut-out back so the page can show what was actually
-    // compared. Splitting the work dropped it, and a verdict you cannot see
-    // the input of is not checkable.
-    row.crop = `data:image/jpeg;base64,${t.crop}`;
-
-    const tile = Buffer.from(t.crop, "base64");
-    const tileHash = await fingerprint(tile);
-    row.closest = shortlist(tileHash, hashPool, 3).map((c) => ({
-      title: titles.get(c.requestId) ?? "—",
-      distance: distance(tileHash, c.hash),
-    }));
-
-    // The hash sorts, the landmarks decide. For a tile in our own 9:16
-    // shape the hash puts the right cut in the first handful — measured,
-    // never worse than sixth of 122 — so twenty candidates is ample, and
-    // only those twenty indexes are ever loaded.
-    const short = shortlist(
-      tileHash,
-      hashPool.filter((c) => !taken.has(c.id) && hasLandmarks.has(c.id)),
-      SHORTLIST
-    );
-    if (short.length > 0) {
-      const idx = await describe(tile, TILE_FEATURES);
-      const { data: rows } = await supabase
-        .from("content_assets")
-        .select("id, request_id, orb_index, orb_count")
-        .in("id", short.map((c) => c.id));
-      const pool: LandmarkCandidate[] = [];
-      for (const r of rows ?? []) {
-        if (!r.orb_index || !r.orb_count || !r.request_id) continue;
-        pool.push({
-          id: r.id,
-          requestId: r.request_id,
-          index: { count: r.orb_count, data: Buffer.from(r.orb_index, "base64") },
-        });
-      }
-      if (idx && pool.length) {
-        const v = await identifyByLandmarks(idx, pool);
-        if (v.kind === "match") {
-          const th = thumbOf.get(v.candidate.id);
-          if (th) wantThumbs.add(th);
-          row.match = {
-            title: titles.get(v.candidate.requestId) ?? "—",
-            method: "landmarks",
-            explain: `by landmarks — ${v.shared} shared, ${v.lead.toFixed(1)}× the runner-up`,
-            thumb: th ?? null,
-          };
-          taken.add(v.candidate.id);
-          out.push(row);
-          continue;
-        }
-        // Kept even when the cheaper stages run after it: this is the
-        // number that explains the refusal, and the hash's own verdict
-        // would otherwise paper over it.
-        row.nearest = { title: "landmarks not decisive", distance: v.shared, ratio: v.lead };
-        if (v.best) {
-          const th = thumbOf.get(v.best.id);
-          if (th) wantThumbs.add(th);
-          row.match = {
-            title: titles.get(v.best.requestId) ?? "—",
-            method: "landmarks",
-            needsCheck: true,
-            explain: `probably — ${v.shared} shared landmarks, only ${v.lead.toFixed(1)}× the runner-up`,
-            thumb: th ?? null,
-          };
-        }
-      }
-    }
-
-    const landmarkNearest = row.nearest;
-    const verdict = identify(tileHash, hashPool.filter((c) => !taken.has(c.id)));
-    if (verdict.kind === "match") {
-      const th = thumbOf.get(verdict.candidate.id);
-      if (th) wantThumbs.add(th);
-      row.match = {
-        title: titles.get(verdict.candidate.requestId) ?? "—",
-        method: "image",
-        explain: `by picture — ${verdict.distance} bits apart, ${Math.round(verdict.ratio * 100)}% of the runner-up`,
-        thumb: th ?? null,
-      };
-      taken.add(verdict.candidate.id);
-      out.push(row);
-      continue;
-    }
-
-    if (!row.match && verdict.best) {
-      const th = thumbOf.get(verdict.best.id);
-      if (th) wantThumbs.add(th);
-      row.match = {
-        title: titles.get(verdict.best.requestId) ?? "—",
-        method: "image",
-        needsCheck: true,
-        explain: `probably — ${verdict.distance} bits apart, ${Math.round(verdict.ratio * 100)}% of the runner-up`,
-        thumb: th ?? null,
-      };
-    }
-    row.nearest = landmarkNearest ?? row.nearest;
-    const byText = identifyByText(t.caption, textPool.filter((c) => !taken.has(c.id)));
-    if (byText) {
-      const th = thumbOf.get(byText.candidate.id);
-      if (th) wantThumbs.add(th);
-      row.match = {
-        title: titles.get(byText.candidate.requestId) ?? "—",
-        method: "text",
-        explain: `by text — ${Math.round(byText.score * 100)}% alike`,
-        thumb: th ?? null,
-        tileText: t.caption,
-        cutText: byText.candidate.text,
-      };
-      taken.add(byText.candidate.id);
-    }
-    out.push(row);
-  }
-
-  if (wantThumbs.size) {
+  // One signing call for every thumbnail about to be shown.
+  const paths = res.tiles
+    .map((t) => t.thumbPath)
+    .filter((p): p is string => !!p);
+  const url = new Map<string, string>();
+  if (paths.length) {
     const { data: signed } = await supabase.storage
       .from("content-assets")
-      .createSignedUrls(Array.from(wantThumbs), 900);
-    const url = new Map<string, string>();
+      .createSignedUrls(Array.from(new Set(paths)), 900);
     for (const s of signed ?? []) if (s.path && s.signedUrl) url.set(s.path, s.signedUrl);
-    for (const r of out) if (r.match?.thumb) r.match.thumb = url.get(r.match.thumb) ?? null;
   }
+
+  const cropOf = new Map(input.tiles.map((t) => [t.position, t.crop]));
+  const captionOf = new Map(input.tiles.map((t) => [t.position, t.caption]));
+  const tiles: TileResult[] = res.tiles.map((t) => ({
+    position: t.position,
+    views: null,
+    caption: captionOf.get(t.position) ?? null,
+    box: null,
+    crop: cropOf.get(t.position) ? `data:image/jpeg;base64,${cropOf.get(t.position)}` : null,
+    match: t.assetId
+      ? {
+          title: t.title ?? "—",
+          method: t.method === "text" ? "text" : "landmarks",
+          needsCheck: t.needsCheck,
+          explain:
+            t.method === "text"
+              ? `by text — ${Math.round(t.score * 100)}% alike`
+              : `${t.needsCheck ? "probably" : "by landmarks"} — ${t.score} shared, ${t.lead.toFixed(1)}× the runner-up`,
+          thumb: t.thumbPath ? (url.get(t.thumbPath) ?? null) : null,
+        }
+      : null,
+    nearest: t.assetId
+      ? null
+      : { title: "nothing plausible", distance: t.score, ratio: t.lead },
+    closest: t.closest.map((c) => ({ title: c.title, distance: c.score })),
+  }));
 
   return {
     error: null,
-    tiles: out,
-    taken: Array.from(taken),
-    // How each verdict was reached, so one run says which stage is carrying
-    // the work and which is dead weight.
+    tiles,
+    taken: res.taken,
+    poolSize: res.poolSize,
+    landmarkPool: res.landmarkPool,
+    textPoolSize: res.poolSize,
     byMethod: {
-      landmarks: out.filter((r) => r.match?.method === "landmarks" && !r.match.needsCheck).length,
-      image: out.filter((r) => r.match?.method === "image" && !r.match.needsCheck).length,
-      text: out.filter((r) => r.match?.method === "text" && !r.match.needsCheck).length,
-      toCheck: out.filter((r) => r.match?.needsCheck).length,
+      landmarks: tiles.filter((t) => t.match?.method === "landmarks" && !t.match.needsCheck).length,
+      image: 0,
+      text: tiles.filter((t) => t.match?.method === "text").length,
+      toCheck: tiles.filter((t) => t.match?.needsCheck).length,
     },
-    poolSize: hashPool.length,
-    landmarkPool: hasLandmarks.size,
-    textPoolSize: textPool.length,
   };
 }
