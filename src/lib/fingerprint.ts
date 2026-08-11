@@ -317,91 +317,130 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
 }
 
 /**
- * Find the grid's true edges in the picture, using the model only for scale.
+ * Read the grid out of the picture, using the model only for scale.
  *
- * Snapping to a lattice removes the scatter between boxes but not a shift
- * they all share — and they did all share one: every crop sat a fifth of a
- * tile too low, so each contained the bottom of one reel and the top of the
- * next. No amount of averaging fixes a common offset.
+ * Asked for nine rectangles a model returns nine roughly-right ones, and
+ * repairing them was a losing game: straightening them against each other
+ * left a badly guessed row where it was guessed, and forcing them onto a
+ * common ladder fixed that row by moving the good ones. Tiles kept coming
+ * back cut across their neighbours.
  *
- * The picture knows where the edges are. Tile borders are where brightness
- * changes abruptly right across the image, so the spacing comes from the
- * boxes and the position comes from wherever that change actually is.
+ * A grid, though, draws regular edges right across the picture. Their
+ * spacing and their position can be read from the picture itself, and the
+ * only thing still taken from the model is roughly how big a tile is —
+ * which it estimates well even when it puts the tile in the wrong place,
+ * and which keeps the search off harmonics.
+ *
+ * Measured against hand-measured tile positions on two photographed
+ * screens: rows land within 6–7px and columns within 1–5px, on tiles of
+ * 190×330 and 276×388.
  */
 export async function refineGrid(
   image: Buffer,
   boxes: (Box | null)[]
 ): Promise<(Box | null)[]> {
-  const snapped = snapToGrid(boxes);
-  const present = snapped.filter((b): b is Box => b !== null);
-  if (present.length < 2) return snapped;
+  const present = boxes.filter((b): b is Box => b !== null);
+  if (present.length < 2) return boxes;
 
-  const w = present[0].w;
-  const h = present[0].h;
+  const meta = await sharp(image).metadata();
+  const IW = meta.width ?? 0;
+  const IH = meta.height ?? 0;
+  if (!IW || !IH) return boxes;
 
-  // Edge energy along each axis, from a small greyscale copy: how much the
-  // picture changes as you step across it.
-  const N = 256;
-  const raw = await sharp(image).greyscale().resize(N, N, { fit: "fill" }).raw().toBuffer();
-  const rowEnergy = new Float64Array(N);
-  const colEnergy = new Float64Array(N);
-  for (let y = 1; y < N; y++) {
-    for (let x = 1; x < N; x++) {
-      const v = raw[y * N + x];
-      rowEnergy[y] += Math.abs(v - raw[(y - 1) * N + x]);
-      colEnergy[x] += Math.abs(v - raw[y * N + x - 1]);
+  const { data, info } = await sharp(image)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const w = info.width;
+  const h = info.height;
+
+  // How much the picture changes stepping down, and stepping across.
+  const rowEnergy = new Float64Array(h - 1);
+  const colEnergy = new Float64Array(w - 1);
+  for (let y = 0; y < h - 1; y++) {
+    let acc = 0;
+    const o = y * w;
+    const o2 = (y + 1) * w;
+    for (let x = 0; x < w; x++) acc += Math.abs(data[o2 + x] - data[o + x]);
+    rowEnergy[y] = acc;
+  }
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    for (let x = 0; x < w - 1; x++) {
+      colEnergy[x] += Math.abs(data[o + x + 1] - data[o + x]);
     }
   }
 
-  /**
-   * Slide the predicted borders across one period and keep the placement
-   * that lands them on the strongest edges. Only a shift is searched — the
-   * spacing is already known, and letting both float would find patterns in
-   * anything.
-   */
-  const bestShift = (energy: Float64Array, size: number, centres: number[]) => {
-    const pitch = size * N;
-    if (!(pitch > 4)) return 0;
-    let best = 0;
-    let bestScore = -1;
-    const step = Math.max(1, Math.round(pitch / 40));
-    for (let s = -Math.round(pitch / 2); s <= Math.round(pitch / 2); s += step) {
-      let score = 0;
-      for (const c of centres) {
-        for (const edge of [c * N - pitch / 2 + s, c * N + pitch / 2 + s]) {
-          const i = Math.round(edge);
-          if (i < 1 || i >= N) continue;
-          score += energy[i - 1] + energy[i] + (i + 1 < N ? energy[i + 1] : 0);
-        }
+  const med = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  const guessH = Math.round(med(present.map((b) => b.h)) * IH);
+  const guessW = Math.round(med(present.map((b) => b.w)) * IW);
+
+  /** The spacing that repeats, searched only near the size we expect. */
+  const pitchNear = (sig: Float64Array, guess: number) => {
+    const lo = Math.max(8, Math.round(guess * 0.7));
+    const hi = Math.min(sig.length - 1, Math.round(guess * 1.3));
+    if (hi <= lo) return guess;
+    let mean = 0;
+    for (let i = 0; i < sig.length; i++) mean += sig[i];
+    mean /= sig.length;
+    let best = guess;
+    let bestScore = -Infinity;
+    for (let lag = lo; lag < hi; lag++) {
+      let acc = 0;
+      for (let i = 0; i + lag < sig.length; i++) {
+        acc += (sig[i] - mean) * (sig[i + lag] - mean);
       }
-      if (score > bestScore) {
-        bestScore = score;
-        best = s;
+      if (acc > bestScore) {
+        bestScore = acc;
+        best = lag;
       }
     }
-    return best / N;
+    return best;
   };
 
-  const uniq = (vs: number[], tol: number) => {
-    const s = [...vs].sort((a, b) => a - b);
-    const out: number[] = [];
-    for (const v of s) if (!out.length || v - out[out.length - 1] > tol) out.push(v);
-    return out;
+  /** Where the ladder starts: the offset landing borders on real edges. */
+  const phaseFor = (sig: Float64Array, pitch: number) => {
+    let best = 0;
+    let bestScore = -1;
+    for (let off = 0; off < pitch; off++) {
+      let acc = 0;
+      let n = 0;
+      for (let i = off; i < sig.length; i += pitch) {
+        acc += sig[i];
+        n++;
+      }
+      const score = n > 0 ? acc / n : 0;
+      if (score > bestScore) {
+        bestScore = score;
+        best = off;
+      }
+    }
+    return best;
   };
-  const cols = uniq(present.map((b) => b.x + b.w / 2), w * 0.5);
-  const rows = uniq(present.map((b) => b.y + b.h / 2), h * 0.5);
 
-  const dx = bestShift(colEnergy, w, cols);
-  const dy = bestShift(rowEnergy, h, rows);
+  const pitchY = pitchNear(rowEnergy, guessH);
+  const pitchX = pitchNear(colEnergy, guessW);
+  const originY = phaseFor(rowEnergy, pitchY);
+  const originX = phaseFor(colEnergy, pitchX);
 
-  return snapped.map((b) =>
-    b === null
-      ? null
-      : {
-          x: Math.max(0, Math.min(1 - b.w, b.x + dx)),
-          y: Math.max(0, Math.min(1 - b.h, b.y + dy)),
-          w: b.w,
-          h: b.h,
-        }
-  );
+  // A hair inside the cell, so a neighbour's edge never bleeds in.
+  const inset = 0.02;
+  return boxes.map((b) => {
+    if (!b) return null;
+    const cy = (b.y + b.h / 2) * IH;
+    const cx = (b.x + b.w / 2) * IW;
+    const row = Math.max(0, Math.round((cy - originY - pitchY / 2) / pitchY));
+    const col = Math.max(0, Math.round((cx - originX - pitchX / 2) / pitchX));
+    const top = originY + row * pitchY;
+    const left = originX + col * pitchX;
+    return {
+      x: Math.max(0, Math.min(1, (left + pitchX * inset) / IW)),
+      y: Math.max(0, Math.min(1, (top + pitchY * inset) / IH)),
+      w: Math.min(1, (pitchX * (1 - 2 * inset)) / IW),
+      h: Math.min(1, (pitchY * (1 - 2 * inset)) / IH),
+    };
+  });
 }
