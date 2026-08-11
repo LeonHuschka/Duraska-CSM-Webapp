@@ -68,7 +68,12 @@ export async function cropTile(
   const top = Math.max(0, Math.min(ih - 1, Math.round(box.y * ih)));
   const width = Math.max(8, Math.min(iw - left, Math.round(box.w * iw)));
   const height = Math.max(8, Math.min(ih - top, Math.round(box.h * ih)));
-  return sharp(image).extract({ left, top, width, height }).toBuffer();
+  // Re-encoded at the default quality, a crop of a photographed screen
+  // loses exactly the fine detail the landmarks are looking for.
+  return sharp(image)
+    .extract({ left, top, width, height })
+    .jpeg({ quality: 95 })
+    .toBuffer();
 }
 
 const HEX_BITS: Record<string, number> = {};
@@ -313,63 +318,82 @@ export async function refineGrid(
   const present = snapped.filter((b): b is Box => b !== null);
   if (present.length < 2) return snapped;
 
+  const meta = await sharp(image).metadata();
+  const IW = meta.width ?? 0;
+  const IH = meta.height ?? 0;
+  if (!IW || !IH) return snapped;
+
+  // Search only where the boxes say the grid is. Across the whole picture
+  // the strongest edges belong to the app's own toolbar, not to any tile
+  // border — an earlier attempt aligned the tiles to the buttons.
+  const pad = 0.06;
+  const x0 = Math.max(0, Math.round((Math.min(...present.map((b) => b.x)) - pad) * IW));
+  const x1 = Math.min(IW, Math.round((Math.max(...present.map((b) => b.x + b.w)) + pad) * IW));
+  const y0 = Math.max(0, Math.round((Math.min(...present.map((b) => b.y)) - pad) * IH));
+  const y1 = Math.min(IH, Math.round((Math.max(...present.map((b) => b.y + b.h)) + pad) * IH));
+  if (x1 - x0 < 32 || y1 - y0 < 32) return snapped;
+
+  const { data, info } = await sharp(image)
+    .extract({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const rw = info.width;
+  const rh = info.height;
+
+  const rowEnergy = new Float64Array(Math.max(1, rh - 1));
+  const colEnergy = new Float64Array(Math.max(1, rw - 1));
+  for (let y = 0; y < rh - 1; y++) {
+    let acc = 0;
+    const o = y * rw;
+    const o2 = (y + 1) * rw;
+    for (let x = 0; x < rw; x++) acc += Math.abs(data[o2 + x] - data[o + x]);
+    rowEnergy[y] = acc;
+  }
+  for (let y = 0; y < rh; y++) {
+    const o = y * rw;
+    for (let x = 0; x < rw - 1; x++) colEnergy[x] += Math.abs(data[o + x + 1] - data[o + x]);
+  }
+
   const w = present[0].w;
   const h = present[0].h;
 
-  // Edge energy along each axis, from a small greyscale copy: how much the
-  // picture changes as you step across it.
-  const N = 256;
-  const raw = await sharp(image).greyscale().resize(N, N, { fit: "fill" }).raw().toBuffer();
-  const rowEnergy = new Float64Array(N);
-  const colEnergy = new Float64Array(N);
-  for (let y = 1; y < N; y++) {
-    for (let x = 1; x < N; x++) {
-      const v = raw[y * N + x];
-      rowEnergy[y] += Math.abs(v - raw[(y - 1) * N + x]);
-      colEnergy[x] += Math.abs(v - raw[y * N + x - 1]);
-    }
-  }
-
-  /**
-   * Slide the predicted borders across one period and keep the placement
-   * that lands them on the strongest edges. Only a shift is searched — the
-   * spacing is already known, and letting both float would find patterns in
-   * anything.
-   */
-  const bestShift = (energy: Float64Array, size: number, centres: number[]) => {
-    const pitch = size * N;
+  /** Slide the predicted borders over one period; keep the best placement. */
+  const bestShift = (energy: Float64Array, size: number, centres: number[], origin: number, span: number) => {
+    const pitch = size * (energy === rowEnergy ? IH : IW);
     if (!(pitch > 4)) return 0;
     let best = 0;
     let bestScore = -1;
-    const step = Math.max(1, Math.round(pitch / 40));
-    for (let s = -Math.round(pitch / 2); s <= Math.round(pitch / 2); s += step) {
+    const step = Math.max(1, Math.round(pitch / 60));
+    for (let sft = -Math.round(pitch / 2); sft <= Math.round(pitch / 2); sft += step) {
       let score = 0;
       for (const c of centres) {
-        for (const edge of [c * N - pitch / 2 + s, c * N + pitch / 2 + s]) {
+        const abs = c * span;
+        for (const edge of [abs - pitch / 2 + sft - origin, abs + pitch / 2 + sft - origin]) {
           const i = Math.round(edge);
-          if (i < 1 || i >= N) continue;
-          score += energy[i - 1] + energy[i] + (i + 1 < N ? energy[i + 1] : 0);
+          if (i < 1 || i >= energy.length) continue;
+          score += energy[i - 1] + energy[i] + energy[i + 1 < energy.length ? i + 1 : i];
         }
       }
       if (score > bestScore) {
         bestScore = score;
-        best = s;
+        best = sft;
       }
     }
-    return best / N;
+    return best / (energy === rowEnergy ? IH : IW);
   };
 
   const uniq = (vs: number[], tol: number) => {
-    const s = [...vs].sort((a, b) => a - b);
+    const s2 = [...vs].sort((a, b) => a - b);
     const out: number[] = [];
-    for (const v of s) if (!out.length || v - out[out.length - 1] > tol) out.push(v);
+    for (const v of s2) if (!out.length || v - out[out.length - 1] > tol) out.push(v);
     return out;
   };
   const cols = uniq(present.map((b) => b.x + b.w / 2), w * 0.5);
   const rows = uniq(present.map((b) => b.y + b.h / 2), h * 0.5);
 
-  const dx = bestShift(colEnergy, w, cols);
-  const dy = bestShift(rowEnergy, h, rows);
+  const dx = bestShift(colEnergy, w, cols, x0, IW);
+  const dy = bestShift(rowEnergy, h, rows, y0, IH);
 
   return snapped.map((b) =>
     b === null

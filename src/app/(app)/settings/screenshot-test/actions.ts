@@ -106,8 +106,14 @@ export async function readScreenshot(form: FormData) {
 }
 
 /**
- * The model's rectangles in red, what they were turned into in green.
- * One look answers what a page of numbers cannot.
+ * The model's rectangles in red, the cells cut from in green.
+ *
+ * Drawn straight into the pixels rather than composited from SVG: sharp is
+ * usually built without SVG support on a serverless host, and the failure is
+ * silent — the picture simply never appears.
+ *
+ * This exists because four attempts at correcting these rectangles were made
+ * without anyone ever looking at them.
  */
 async function drawBoxes(
   image: Buffer,
@@ -115,28 +121,54 @@ async function drawBoxes(
   fixed: ({ x: number; y: number; w: number; h: number } | null)[]
 ): Promise<string | null> {
   try {
-    const meta = await sharp(image).metadata();
-    const w = meta.width ?? 0;
-    const h = meta.height ?? 0;
-    if (!w || !h) return null;
-    const rect = (
-      b: { x: number; y: number; w: number; h: number },
-      colour: string,
-      dash: string
-    ) =>
-      `<rect x="${(b.x * w).toFixed(0)}" y="${(b.y * h).toFixed(0)}" width="${(b.w * w).toFixed(0)}" height="${(b.h * h).toFixed(0)}" fill="none" stroke="${colour}" stroke-width="4" stroke-dasharray="${dash}"/>`;
-    const svg =
-      `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">` +
-      raw.map((b) => (b ? rect(b, "#ff3b30", "10 6") : "")).join("") +
-      fixed.map((b) => (b ? rect(b, "#34c759", "0") : "")).join("") +
-      `</svg>`;
-    const out = await sharp(image)
-      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .resize(520, null)
-      .jpeg({ quality: 82 })
+    const { data, info } = await sharp(image)
+      .resize(560, null)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const w = info.width;
+    const h = info.height;
+    const px = Buffer.from(data);
+
+    const dot = (x: number, y: number, c: [number, number, number]) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const i = (y * w + x) * 3;
+      px[i] = c[0];
+      px[i + 1] = c[1];
+      px[i + 2] = c[2];
+    };
+    const outline = (
+      box: { x: number; y: number; w: number; h: number },
+      colour: [number, number, number],
+      dashed: boolean
+    ) => {
+      const x0 = Math.round(box.x * w);
+      const y0 = Math.round(box.y * h);
+      const x1 = Math.round((box.x + box.w) * w);
+      const y1 = Math.round((box.y + box.h) * h);
+      for (let t = 0; t < 3; t++) {
+        for (let x = x0; x <= x1; x++) {
+          if (dashed && Math.floor(x / 7) % 2 === 0) continue;
+          dot(x, y0 + t, colour);
+          dot(x, y1 - t, colour);
+        }
+        for (let y = y0; y <= y1; y++) {
+          if (dashed && Math.floor(y / 7) % 2 === 0) continue;
+          dot(x0 + t, y, colour);
+          dot(x1 - t, y, colour);
+        }
+      }
+    };
+
+    for (const b of raw) if (b) outline(b, [255, 59, 48], true);
+    for (const b of fixed) if (b) outline(b, [52, 199, 89], false);
+
+    const out = await sharp(px, { raw: { width: w, height: h, channels: 3 } })
+      .jpeg({ quality: 85 })
       .toBuffer();
     return `data:image/jpeg;base64,${out.toString("base64")}`;
-  } catch {
+  } catch (err) {
+    console.warn("[screenshot-test] overlay failed", err);
     return null;
   }
 }
