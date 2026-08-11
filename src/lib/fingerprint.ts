@@ -317,130 +317,93 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
 }
 
 /**
- * Read the grid out of the picture, using the model only for scale.
+ * Rebuild the tiles on one ladder, sized by the model and placed by vote.
  *
- * Asked for nine rectangles a model returns nine roughly-right ones, and
- * repairing them was a losing game: straightening them against each other
- * left a badly guessed row where it was guessed, and forcing them onto a
- * common ladder fixed that row by moving the good ones. Tiles kept coming
- * back cut across their neighbours.
+ * Three approaches failed before this one, and each failed for the same
+ * reason: they trusted something they should not have. Straightening the
+ * model's rectangles against each other left a badly guessed row where it
+ * was guessed. Forcing them onto a shared ladder fixed that row by moving
+ * the good ones. Reading the spacing out of the picture locked onto the
+ * app's own toolbar, whose edges are stronger than any tile border.
  *
- * A grid, though, draws regular edges right across the picture. Their
- * spacing and their position can be read from the picture itself, and the
- * only thing still taken from the model is roughly how big a tile is —
- * which it estimates well even when it puts the tile in the wrong place,
- * and which keeps the search off harmonics.
+ * What the model is reliably right about is size — a tile's width and
+ * height, even when it puts the tile in the wrong place. A grid is even, so
+ * size gives the spacing, and the position is then whatever most of the
+ * rows agree on. A row guessed badly implies a different starting point
+ * from all the others and is simply outvoted.
  *
- * Measured against hand-measured tile positions on two photographed
- * screens: rows land within 6–7px and columns within 1–5px, on tiles of
- * 190×330 and 276×388.
+ * If the result disagrees with the model by more than half a tile, the
+ * model's own box is kept: the worst case is then what it was before this
+ * function existed, rather than something worse.
  */
 export async function refineGrid(
   image: Buffer,
   boxes: (Box | null)[]
 ): Promise<(Box | null)[]> {
   const present = boxes.filter((b): b is Box => b !== null);
-  if (present.length < 2) return boxes;
-
-  const meta = await sharp(image).metadata();
-  const IW = meta.width ?? 0;
-  const IH = meta.height ?? 0;
-  if (!IW || !IH) return boxes;
-
-  const { data, info } = await sharp(image)
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const w = info.width;
-  const h = info.height;
-
-  // How much the picture changes stepping down, and stepping across.
-  const rowEnergy = new Float64Array(h - 1);
-  const colEnergy = new Float64Array(w - 1);
-  for (let y = 0; y < h - 1; y++) {
-    let acc = 0;
-    const o = y * w;
-    const o2 = (y + 1) * w;
-    for (let x = 0; x < w; x++) acc += Math.abs(data[o2 + x] - data[o + x]);
-    rowEnergy[y] = acc;
-  }
-  for (let y = 0; y < h; y++) {
-    const o = y * w;
-    for (let x = 0; x < w - 1; x++) {
-      colEnergy[x] += Math.abs(data[o + x + 1] - data[o + x]);
-    }
-  }
+  if (present.length < 4) return boxes;
 
   const med = (xs: number[]) => {
     const s = [...xs].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   };
-  const guessH = Math.round(med(present.map((b) => b.h)) * IH);
-  const guessW = Math.round(med(present.map((b) => b.w)) * IW);
+  const w = med(present.map((b) => b.w));
+  const h = med(present.map((b) => b.h));
 
-  /** The spacing that repeats, searched only near the size we expect. */
-  const pitchNear = (sig: Float64Array, guess: number) => {
-    const lo = Math.max(8, Math.round(guess * 0.7));
-    const hi = Math.min(sig.length - 1, Math.round(guess * 1.3));
-    if (hi <= lo) return guess;
-    let mean = 0;
-    for (let i = 0; i < sig.length; i++) mean += sig[i];
-    mean /= sig.length;
-    let best = guess;
-    let bestScore = -Infinity;
-    for (let lag = lo; lag < hi; lag++) {
-      let acc = 0;
-      for (let i = 0; i + lag < sig.length; i++) {
-        acc += (sig[i] - mean) * (sig[i + lag] - mean);
-      }
-      if (acc > bestScore) {
-        bestScore = acc;
-        best = lag;
-      }
+  /** How many distinct lines the centres fall on. */
+  const lines = (values: number[], tolerance: number) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const groups: number[][] = [];
+    for (const v of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && v - last[last.length - 1] <= tolerance) last.push(v);
+      else groups.push([v]);
     }
-    return best;
+    return groups.map(med);
   };
+  const colLines = lines(present.map((b) => b.x + b.w / 2), w * 0.5);
+  const rowLines = lines(present.map((b) => b.y + b.h / 2), h * 0.5);
+  if (colLines.length < 1 || rowLines.length < 1) return boxes;
 
-  /** Where the ladder starts: the offset landing borders on real edges. */
-  const phaseFor = (sig: Float64Array, pitch: number) => {
-    let best = 0;
-    let bestScore = -1;
-    for (let off = 0; off < pitch; off++) {
-      let acc = 0;
-      let n = 0;
-      for (let i = off; i < sig.length; i += pitch) {
-        acc += sig[i];
-        n++;
-      }
-      const score = n > 0 ? acc / n : 0;
-      if (score > bestScore) {
-        bestScore = score;
-        best = off;
-      }
-    }
-    return best;
-  };
+  // Spacing comes from the tile size, not from the region: a single row
+  // displaced far enough drags the region's edge with it and corrupts the
+  // spacing too, which then compounds across every row after it. Size is
+  // the one thing the model estimates well.
+  const pitchX = w;
+  const pitchY = h;
 
-  const pitchY = pitchNear(rowEnergy, guessH);
-  const pitchX = pitchNear(colEnergy, guessW);
-  const originY = phaseFor(rowEnergy, pitchY);
-  const originX = phaseFor(colEnergy, pitchX);
+  /**
+   * Where the ladder starts, decided by vote.
+   *
+   * Each line implies an origin. A line that was guessed badly implies a
+   * wrong one and is outvoted by the rest — which is exactly the failure
+   * that kept cutting tiles across their neighbours.
+   */
+  const originFrom = (centres: number[], pitch: number) =>
+    med(centres.map((c, i) => c - i * pitch - pitch / 2));
+  const left = originFrom(colLines, pitchX);
+  const top = originFrom(rowLines, pitchY);
+  if (!(pitchX > 0) || !(pitchY > 0)) return boxes;
 
-  // A hair inside the cell, so a neighbour's edge never bleeds in.
-  const inset = 0.02;
+  // A hair inside the cell, so a neighbour never bleeds in.
+  const inset = 0.03;
   return boxes.map((b) => {
     if (!b) return null;
-    const cy = (b.y + b.h / 2) * IH;
-    const cx = (b.x + b.w / 2) * IW;
-    const row = Math.max(0, Math.round((cy - originY - pitchY / 2) / pitchY));
-    const col = Math.max(0, Math.round((cx - originX - pitchX / 2) / pitchX));
-    const top = originY + row * pitchY;
-    const left = originX + col * pitchX;
-    return {
-      x: Math.max(0, Math.min(1, (left + pitchX * inset) / IW)),
-      y: Math.max(0, Math.min(1, (top + pitchY * inset) / IH)),
-      w: Math.min(1, (pitchX * (1 - 2 * inset)) / IW),
-      h: Math.min(1, (pitchY * (1 - 2 * inset)) / IH),
+    const col = Math.max(
+      0,
+      Math.min(colLines.length - 1, Math.round((b.x + b.w / 2 - left - pitchX / 2) / pitchX))
+    );
+    const row = Math.max(
+      0,
+      Math.min(rowLines.length - 1, Math.round((b.y + b.h / 2 - top - pitchY / 2) / pitchY))
+    );
+    const cell = {
+      x: left + col * pitchX + pitchX * inset,
+      y: top + row * pitchY + pitchY * inset,
+      w: pitchX * (1 - 2 * inset),
+      h: pitchY * (1 - 2 * inset),
     };
+    const moved = Math.hypot(cell.x - b.x, cell.y - b.y);
+    return moved > Math.max(pitchX, pitchY) * 0.5 ? b : cell;
   });
 }
