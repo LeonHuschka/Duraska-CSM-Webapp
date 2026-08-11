@@ -269,8 +269,31 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
     }
     return groups.map(med);
   };
-  const cols = lines(present.map((b) => b.x + b.w / 2), w * 0.5);
-  const rows = lines(present.map((b) => b.y + b.h / 2), h * 0.5);
+  /**
+   * Force the lines onto one ladder.
+   *
+   * Grouping them independently leaves a row that was guessed badly sitting
+   * where it was guessed — which is how two tiles of one screenshot came
+   * back cut across their neighbours while the rest were perfect. A grid has
+   * one spacing, so the spacing is measured once and every line is placed by
+   * it, from the row that agrees with the others.
+   */
+  const regular = (ls: number[]) => {
+    if (ls.length < 3) return ls;
+    const gaps = ls.slice(1).map((v, i) => v - ls[i]);
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const pitch = sorted[Math.floor(sorted.length / 2)];
+    if (!(pitch > 0)) return ls;
+    // Index each line on the ladder, then take the offset they agree on.
+    const idx = ls.map((v) => Math.round((v - ls[0]) / pitch));
+    const offsets = ls.map((v, i) => v - idx[i] * pitch);
+    const so = [...offsets].sort((a, b) => a - b);
+    const origin = so[Math.floor(so.length / 2)];
+    return idx.map((i) => origin + i * pitch);
+  };
+
+  const cols = regular(lines(present.map((b) => b.x + b.w / 2), w * 0.5));
+  const rows = regular(lines(present.map((b) => b.y + b.h / 2), h * 0.5));
 
   const nearest = (v: number, ls: number[]) =>
     ls.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), ls[0]);
