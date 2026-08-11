@@ -112,11 +112,10 @@ export async function findGrid(image: Buffer): Promise<Cell[]> {
   const gx0 = bestCol.origin;
   const gx1 = Math.min(w, bestCol.origin + 3 * bestCol.pitch);
 
-  // Per row: how much picture there is, and how bright it is — both measured
-  // only inside the grid's own columns, because what lies beside a
-  // photographed phone is a dark room and says nothing.
+  // How much picture there is in each row of pixels, measured only inside
+  // the grid's own columns, because what lies beside a photographed phone is
+  // a dark room and says nothing.
   const busy = new Float64Array(h);
-  const bright = new Float64Array(h);
   for (let y = 0; y < h; y++) {
     let sum = 0;
     let sumSq = 0;
@@ -128,7 +127,6 @@ export async function findGrid(image: Buffer): Promise<Cell[]> {
       n++;
     }
     const mean = n ? sum / n : 0;
-    bright[y] = mean;
     busy[y] = n ? Math.sqrt(Math.max(0, sumSq / n - mean * mean)) : 0;
   }
 
@@ -147,17 +145,58 @@ export async function findGrid(image: Buffer): Promise<Cell[]> {
   /** A row of tiles is busy across its width; a toolbar is flat with buttons. */
   const isGridRow = (top: number) => bandMean(busy, top, 0.2, 0.8) >= peak * 0.5;
 
+  /** How far the two column seams stand out inside a horizontal band. */
+  const seams = (y0: number, y1: number) => {
+    const lo = Math.max(0, Math.round(y0));
+    const hi = Math.min(h, Math.round(y1));
+    if (hi - lo < 3) return 0;
+    const e = new Float64Array(Math.max(1, w - 1));
+    for (let y = lo; y < hi; y++) {
+      for (let x = 0; x < w - 1; x++) e[x] += Math.abs(at(x + 1, y) - at(x, y));
+    }
+    let base = 0;
+    let n = 0;
+    for (let x = gx0; x < gx1 - 1; x++) {
+      base += e[x];
+      n++;
+    }
+    base = n ? base / n : 0;
+    if (base <= 0) return 0;
+    // The border is a couple of pixels wide and the lattice sits a pixel or
+    // two off, so take the strongest line in a small neighbourhood.
+    let s = 0;
+    for (const c of [1, 2]) {
+      const x = Math.round(gx0 + c * bestCol.pitch);
+      let peakE = 0;
+      for (let d = -2; d <= 2; d++) {
+        if (x + d >= 0 && x + d < w - 1) peakE = Math.max(peakE, e[x + d]);
+      }
+      s += peakE;
+    }
+    return s / 2 / base;
+  };
+
   /**
    * Is the whole tile in the picture, or is its foot cut off?
    *
    * The last row of a phone screenshot often still shows reel in its middle
-   * while its lower part is already the navigation bar — which is bright,
-   * where reel content is not. Measured across every row of four
-   * screenshots, complete rows sat between 68 grey levels darker and 19
-   * brighter at the foot than in the middle; the one cut-off row jumped 49.
+   * while its lower part is already the navigation bar. Brightness used to
+   * answer this — a pale bar under darker content — and it was wrong about
+   * as often as it was right, because a row of bright reels reads the same
+   * way. A row whose foot was an orange "Create reel" block and two sunlit
+   * rooms was thrown out for it.
+   *
+   * What a system bar is not, is three tiles. The seams between the columns
+   * run the whole height of a complete row and stop dead where the grid
+   * stops. Measured over seven screenshots and twenty rows, complete rows
+   * kept between 36% and 144% of the seam strength they had at mid-height;
+   * the one truncated row kept 0.7%.
    */
-  const isComplete = (top: number) =>
-    bandMean(bright, top, 0.82, 0.99) - bandMean(bright, top, 0.2, 0.8) < 30;
+  const isComplete = (top: number) => {
+    const mid = seams(top + bestRow.pitch * 0.25, top + bestRow.pitch * 0.75);
+    if (mid <= 0) return true;
+    return seams(top + bestRow.pitch * 0.84, top + bestRow.pitch * 0.99) / mid >= 0.25;
+  };
 
   const candidates: number[] = [];
   for (let i = -1; i < 9; i++) {
