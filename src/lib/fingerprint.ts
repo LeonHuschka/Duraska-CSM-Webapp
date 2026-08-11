@@ -269,31 +269,8 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
     }
     return groups.map(med);
   };
-  /**
-   * Force the lines onto one ladder.
-   *
-   * Grouping them independently leaves a row that was guessed badly sitting
-   * where it was guessed — which is how two tiles of one screenshot came
-   * back cut across their neighbours while the rest were perfect. A grid has
-   * one spacing, so the spacing is measured once and every line is placed by
-   * it, from the row that agrees with the others.
-   */
-  const regular = (ls: number[]) => {
-    if (ls.length < 3) return ls;
-    const gaps = ls.slice(1).map((v, i) => v - ls[i]);
-    const sorted = [...gaps].sort((a, b) => a - b);
-    const pitch = sorted[Math.floor(sorted.length / 2)];
-    if (!(pitch > 0)) return ls;
-    // Index each line on the ladder, then take the offset they agree on.
-    const idx = ls.map((v) => Math.round((v - ls[0]) / pitch));
-    const offsets = ls.map((v, i) => v - idx[i] * pitch);
-    const so = [...offsets].sort((a, b) => a - b);
-    const origin = so[Math.floor(so.length / 2)];
-    return idx.map((i) => origin + i * pitch);
-  };
-
-  const cols = regular(lines(present.map((b) => b.x + b.w / 2), w * 0.5));
-  const rows = regular(lines(present.map((b) => b.y + b.h / 2), h * 0.5));
+  const cols = lines(present.map((b) => b.x + b.w / 2), w * 0.5);
+  const rows = lines(present.map((b) => b.y + b.h / 2), h * 0.5);
 
   const nearest = (v: number, ls: number[]) =>
     ls.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), ls[0]);
@@ -317,93 +294,91 @@ export function snapToGrid(boxes: (Box | null)[]): (Box | null)[] {
 }
 
 /**
- * Rebuild the tiles on one ladder, sized by the model and placed by vote.
+ * Find the grid's true edges in the picture, using the model only for scale.
  *
- * Three approaches failed before this one, and each failed for the same
- * reason: they trusted something they should not have. Straightening the
- * model's rectangles against each other left a badly guessed row where it
- * was guessed. Forcing them onto a shared ladder fixed that row by moving
- * the good ones. Reading the spacing out of the picture locked onto the
- * app's own toolbar, whose edges are stronger than any tile border.
+ * Snapping to a lattice removes the scatter between boxes but not a shift
+ * they all share — and they did all share one: every crop sat a fifth of a
+ * tile too low, so each contained the bottom of one reel and the top of the
+ * next. No amount of averaging fixes a common offset.
  *
- * What the model is reliably right about is size — a tile's width and
- * height, even when it puts the tile in the wrong place. A grid is even, so
- * size gives the spacing, and the position is then whatever most of the
- * rows agree on. A row guessed badly implies a different starting point
- * from all the others and is simply outvoted.
- *
- * If the result disagrees with the model by more than half a tile, the
- * model's own box is kept: the worst case is then what it was before this
- * function existed, rather than something worse.
+ * The picture knows where the edges are. Tile borders are where brightness
+ * changes abruptly right across the image, so the spacing comes from the
+ * boxes and the position comes from wherever that change actually is.
  */
 export async function refineGrid(
   image: Buffer,
   boxes: (Box | null)[]
 ): Promise<(Box | null)[]> {
-  const present = boxes.filter((b): b is Box => b !== null);
-  if (present.length < 4) return boxes;
+  const snapped = snapToGrid(boxes);
+  const present = snapped.filter((b): b is Box => b !== null);
+  if (present.length < 2) return snapped;
 
-  const med = (xs: number[]) => {
-    const s = [...xs].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-  };
-  const w = med(present.map((b) => b.w));
-  const h = med(present.map((b) => b.h));
+  const w = present[0].w;
+  const h = present[0].h;
 
-  /** How many distinct lines the centres fall on. */
-  const lines = (values: number[], tolerance: number) => {
-    const sorted = [...values].sort((a, b) => a - b);
-    const groups: number[][] = [];
-    for (const v of sorted) {
-      const last = groups[groups.length - 1];
-      if (last && v - last[last.length - 1] <= tolerance) last.push(v);
-      else groups.push([v]);
+  // Edge energy along each axis, from a small greyscale copy: how much the
+  // picture changes as you step across it.
+  const N = 256;
+  const raw = await sharp(image).greyscale().resize(N, N, { fit: "fill" }).raw().toBuffer();
+  const rowEnergy = new Float64Array(N);
+  const colEnergy = new Float64Array(N);
+  for (let y = 1; y < N; y++) {
+    for (let x = 1; x < N; x++) {
+      const v = raw[y * N + x];
+      rowEnergy[y] += Math.abs(v - raw[(y - 1) * N + x]);
+      colEnergy[x] += Math.abs(v - raw[y * N + x - 1]);
     }
-    return groups.map(med);
-  };
-  const colLines = lines(present.map((b) => b.x + b.w / 2), w * 0.5);
-  const rowLines = lines(present.map((b) => b.y + b.h / 2), h * 0.5);
-  if (colLines.length < 1 || rowLines.length < 1) return boxes;
-
-  // Spacing comes from the tile size, not from the region: a single row
-  // displaced far enough drags the region's edge with it and corrupts the
-  // spacing too, which then compounds across every row after it. Size is
-  // the one thing the model estimates well.
-  const pitchX = w;
-  const pitchY = h;
+  }
 
   /**
-   * Where the ladder starts, decided by vote.
-   *
-   * Each line implies an origin. A line that was guessed badly implies a
-   * wrong one and is outvoted by the rest — which is exactly the failure
-   * that kept cutting tiles across their neighbours.
+   * Slide the predicted borders across one period and keep the placement
+   * that lands them on the strongest edges. Only a shift is searched — the
+   * spacing is already known, and letting both float would find patterns in
+   * anything.
    */
-  const originFrom = (centres: number[], pitch: number) =>
-    med(centres.map((c, i) => c - i * pitch - pitch / 2));
-  const left = originFrom(colLines, pitchX);
-  const top = originFrom(rowLines, pitchY);
-  if (!(pitchX > 0) || !(pitchY > 0)) return boxes;
+  const bestShift = (energy: Float64Array, size: number, centres: number[]) => {
+    const pitch = size * N;
+    if (!(pitch > 4)) return 0;
+    let best = 0;
+    let bestScore = -1;
+    const step = Math.max(1, Math.round(pitch / 40));
+    for (let s = -Math.round(pitch / 2); s <= Math.round(pitch / 2); s += step) {
+      let score = 0;
+      for (const c of centres) {
+        for (const edge of [c * N - pitch / 2 + s, c * N + pitch / 2 + s]) {
+          const i = Math.round(edge);
+          if (i < 1 || i >= N) continue;
+          score += energy[i - 1] + energy[i] + (i + 1 < N ? energy[i + 1] : 0);
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    return best / N;
+  };
 
-  // A hair inside the cell, so a neighbour never bleeds in.
-  const inset = 0.03;
-  return boxes.map((b) => {
-    if (!b) return null;
-    const col = Math.max(
-      0,
-      Math.min(colLines.length - 1, Math.round((b.x + b.w / 2 - left - pitchX / 2) / pitchX))
-    );
-    const row = Math.max(
-      0,
-      Math.min(rowLines.length - 1, Math.round((b.y + b.h / 2 - top - pitchY / 2) / pitchY))
-    );
-    const cell = {
-      x: left + col * pitchX + pitchX * inset,
-      y: top + row * pitchY + pitchY * inset,
-      w: pitchX * (1 - 2 * inset),
-      h: pitchY * (1 - 2 * inset),
-    };
-    const moved = Math.hypot(cell.x - b.x, cell.y - b.y);
-    return moved > Math.max(pitchX, pitchY) * 0.5 ? b : cell;
-  });
+  const uniq = (vs: number[], tol: number) => {
+    const s = [...vs].sort((a, b) => a - b);
+    const out: number[] = [];
+    for (const v of s) if (!out.length || v - out[out.length - 1] > tol) out.push(v);
+    return out;
+  };
+  const cols = uniq(present.map((b) => b.x + b.w / 2), w * 0.5);
+  const rows = uniq(present.map((b) => b.y + b.h / 2), h * 0.5);
+
+  const dx = bestShift(colEnergy, w, cols);
+  const dy = bestShift(rowEnergy, h, rows);
+
+  return snapped.map((b) =>
+    b === null
+      ? null
+      : {
+          x: Math.max(0, Math.min(1 - b.w, b.x + dx)),
+          y: Math.max(0, Math.min(1 - b.h, b.y + dy)),
+          w: b.w,
+          h: b.h,
+        }
+  );
 }
