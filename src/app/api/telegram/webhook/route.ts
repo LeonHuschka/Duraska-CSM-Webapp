@@ -11,7 +11,7 @@ import {
   REACTION,
 } from "@/lib/telegram";
 import { extractMetricsFromImage } from "@/lib/vision";
-import { cropTile, refineGrid } from "@/lib/fingerprint";
+import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
 
 export const dynamic = "force-dynamic";
@@ -339,20 +339,35 @@ async function handleScreenshot(msg: TgMessage) {
     // one shifts every tile after it, and the old logic had no way to
     // notice.
     //
-    // The boxes are straightened against the grid they came from first: a
-    // model asked for nine rectangles gives nine roughly-right ones, and
-    // cropping on those yields fragments spanning two tiles.
+    // The grid is read out of the picture; the model is asked only which
+    // tiles are reels and what numbers they carry.
     const image = Buffer.from(file.base64, "base64");
-    const boxes = await refineGrid(image, metrics.reels.map((r) => r.box));
+    const cells = await findGrid(image);
+    const used = new Set<number>();
     const crops: (Buffer | null)[] = [];
-    for (let i = 0; i < metrics.reels.length; i++) {
-      const box = boxes[i];
-      if (!box) {
+    for (const r of metrics.reels) {
+      let idx = -1;
+      if (r.box && cells.length) {
+        const rc = { x: r.box.x + r.box.w / 2, y: r.box.y + r.box.h / 2 };
+        let bestD = Infinity;
+        cells.forEach((c: Cell, i: number) => {
+          if (used.has(i)) return;
+          const d = Math.hypot(c.x + c.w / 2 - rc.x, c.y + c.h / 2 - rc.y);
+          if (d < bestD) {
+            bestD = d;
+            idx = i;
+          }
+        });
+        // Further than a tile away is not a pairing, it is a coincidence.
+        if (idx >= 0 && bestD >= Math.max(cells[0].w, cells[0].h)) idx = -1;
+      }
+      if (idx < 0) {
         crops.push(null);
         continue;
       }
+      used.add(idx);
       try {
-        crops.push(await cropTile(image, box));
+        crops.push(await cutCell(image, cells[idx]));
       } catch {
         crops.push(null);
       }

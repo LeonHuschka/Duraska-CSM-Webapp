@@ -6,7 +6,7 @@ import { requireActivePersonaId } from "@/lib/persona";
 import { extractMetricsFromImage } from "@/lib/vision";
 import { matchTiles } from "@/lib/match-tile";
 
-import { cropTile, refineGrid } from "@/lib/fingerprint";
+import { findGrid, cutCell, type Cell } from "@/lib/grid";
 
 export type TileResult = {
   position: number;
@@ -71,23 +71,49 @@ export async function readScreenshot(form: FormData) {
   const { data: metrics, error } = await extractMetricsFromImage(base64, mime);
   if (error || !metrics) return { error: error ?? "extraction failed" };
 
-  const raw = metrics.reels.map((r) => r.box);
-  const boxes = await refineGrid(buf, raw);
+  // The grid is read out of the picture; the model is asked only which
+  // tiles are reels and what numbers they carry. Five attempts at using its
+  // rectangles for geometry failed — they come back a tile and a half wide
+  // and displaced, and no repair made them usable.
+  const cells = await findGrid(buf);
 
-  // Both sets drawn onto the screenshot, because four attempts at correcting
-  // these were made without anyone ever looking at what was being corrected.
-  const overlay = await drawBoxes(buf, raw, boxes);
+  /** Pair each reel the model found with the cell it sits in. */
+  const centre = (c: Cell) => ({ x: c.x + c.w / 2, y: c.y + c.h / 2 });
+  const used = new Set<number>();
+  const cellFor = metrics.reels.map((r) => {
+    if (!r.box || cells.length === 0) return -1;
+    const rc = { x: r.box.x + r.box.w / 2, y: r.box.y + r.box.h / 2 };
+    let best = -1;
+    let bestD = Infinity;
+    cells.forEach((c, i) => {
+      if (used.has(i)) return;
+      const cc = centre(c);
+      const d = Math.hypot(cc.x - rc.x, cc.y - rc.y);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    // Further than a tile away is not a pairing, it is a coincidence.
+    if (best >= 0 && bestD < Math.max(cells[0].w, cells[0].h)) {
+      used.add(best);
+      return best;
+    }
+    return -1;
+  });
+
+  const overlay = await drawBoxes(buf, cells, cellFor);
+
   const cut: { position: number; views: number | null; caption: string | null; crop: string | null }[] = [];
-
   for (let i = 0; i < metrics.reels.length; i++) {
     const r = metrics.reels[i];
-    const box = boxes[i];
+    const idx = cellFor[i];
     let crop: string | null = null;
-    if (box) {
+    if (idx >= 0) {
       try {
-        crop = (await cropTile(buf, box)).toString("base64");
+        crop = (await cutCell(buf, cells[idx])).toString("base64");
       } catch {
-        // A box the picture cannot support yields no tile, and the caller
+        // A cell the picture cannot support yields no tile, and the caller
         // sees that as plainly as it sees a good one.
       }
     }
@@ -117,8 +143,8 @@ export async function readScreenshot(form: FormData) {
  */
 async function drawBoxes(
   image: Buffer,
-  raw: ({ x: number; y: number; w: number; h: number } | null)[],
-  fixed: ({ x: number; y: number; w: number; h: number } | null)[]
+  cells: Cell[],
+  cellFor: number[]
 ): Promise<string | null> {
   try {
     const { data, info } = await sharp(image)
@@ -129,6 +155,7 @@ async function drawBoxes(
     const w = info.width;
     const h = info.height;
     const px = Buffer.from(data);
+    const paired = new Set(cellFor.filter((i) => i >= 0));
 
     const dot = (x: number, y: number, c: [number, number, number]) => {
       if (x < 0 || y < 0 || x >= w || y >= h) return;
@@ -137,31 +164,27 @@ async function drawBoxes(
       px[i + 1] = c[1];
       px[i + 2] = c[2];
     };
-    const outline = (
-      box: { x: number; y: number; w: number; h: number },
-      colour: [number, number, number],
-      dashed: boolean
-    ) => {
+    cells.forEach((box, i) => {
+      // Green where a reel was paired with the cell, grey where the cell
+      // holds a photo or the "create reel" button.
+      const colour: [number, number, number] = paired.has(i)
+        ? [52, 199, 89]
+        : [150, 150, 150];
       const x0 = Math.round(box.x * w);
       const y0 = Math.round(box.y * h);
       const x1 = Math.round((box.x + box.w) * w);
       const y1 = Math.round((box.y + box.h) * h);
       for (let t = 0; t < 3; t++) {
         for (let x = x0; x <= x1; x++) {
-          if (dashed && Math.floor(x / 7) % 2 === 0) continue;
           dot(x, y0 + t, colour);
           dot(x, y1 - t, colour);
         }
         for (let y = y0; y <= y1; y++) {
-          if (dashed && Math.floor(y / 7) % 2 === 0) continue;
           dot(x0 + t, y, colour);
           dot(x1 - t, y, colour);
         }
       }
-    };
-
-    for (const b of raw) if (b) outline(b, [255, 59, 48], true);
-    for (const b of fixed) if (b) outline(b, [52, 199, 89], false);
+    });
 
     const out = await sharp(px, { raw: { width: w, height: h, channels: 3 } })
       .jpeg({ quality: 85 })

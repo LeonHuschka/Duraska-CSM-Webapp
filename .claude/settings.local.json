@@ -198,7 +198,8 @@
       "Bash(mv /Users/leon/Desktop/fansly_CSM/final_sheet.py /Users/leon/Desktop/fansly_CSM/test/)",
       "Bash(node --experimental-strip-types test/ladder.mts)",
       "Bash(node --experimental-strip-types test/ladder3.mts)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(python3 gridfind.py)"
     ]
   }
 }
