@@ -95,7 +95,9 @@ const MAX_RATIO = 0.8;
 export type Candidate = { id: string; requestId: string; hash: string };
 export type Verdict =
   | { kind: "match"; candidate: Candidate; distance: number; ratio: number }
-  | { kind: "unsure"; distance: number; ratio: number };
+  // The nearest is carried even when it is not trusted: it becomes a
+  // proposal for someone to confirm, which is worth more than a blank.
+  | { kind: "unsure"; distance: number; ratio: number; best: Candidate | null };
 
 /**
  * Which cut this tile is — or a refusal.
@@ -106,7 +108,7 @@ export type Verdict =
  * was rebuilt is that the old matching always produced something.
  */
 export function identify(tileHash: string, pool: Candidate[]): Verdict {
-  if (pool.length === 0) return { kind: "unsure", distance: HASH_BITS, ratio: 1 };
+  if (pool.length === 0) return { kind: "unsure", distance: HASH_BITS, ratio: 1, best: null };
 
   let best: Candidate | null = null;
   let bestD = Infinity;
@@ -124,7 +126,7 @@ export function identify(tileHash: string, pool: Candidate[]): Verdict {
 
   const ratio = secondD === Infinity ? 0 : bestD / secondD;
   if (!best || bestD > MAX_DISTANCE || ratio > MAX_RATIO) {
-    return { kind: "unsure", distance: bestD, ratio };
+    return { kind: "unsure", distance: bestD, ratio, best };
   }
   return { kind: "match", candidate: best, distance: bestD, ratio };
 }

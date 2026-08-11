@@ -1,0 +1,10 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Traceback (most recent call last):
+  File "/Users/leon/Desktop/fansly_CSM/final_sheet.py", line 24, in <module>
+    byname=dict(zip(names,files)); V=embed(files)
+  File "/Users/leon/Desktop/fansly_CSM/final_sheet.py", line 11, in embed
+    return np.vstack(out)
+  File "/Users/leon/Library/Python/3.9/lib/python/site-packages/numpy/_core/shape_base.py", line 287, in vstack
+    return _nx.concatenate(arrs, 0, dtype=dtype, casting=casting)
+ValueError: need at least one array to concatenate

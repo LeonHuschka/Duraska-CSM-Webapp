@@ -370,7 +370,16 @@ async function handleScreenshot(msg: TgMessage) {
       }
     }
 
-    type Hit = { assetId: string; requestId: string; method: string; score: number };
+    // A proposal is written like any other reading so no number is lost,
+    // but it is flagged for a human and — importantly — it does not spend
+    // the cut: otherwise a guess takes the reel the next tile needed.
+    type Hit = {
+      assetId: string;
+      requestId: string;
+      method: string;
+      score: number;
+      needsCheck?: boolean;
+    };
     const cutForPosition = new Map<number, Hit>();
     const taken = new Set<string>();
     const unresolved: { position: number; crop: Buffer; hash: string }[] = [];
@@ -411,6 +420,15 @@ async function handleScreenshot(msg: TgMessage) {
             });
             taken.add(verdict.candidate.id);
             continue;
+          }
+          if (verdict.best) {
+            cutForPosition.set(r.position, {
+              assetId: verdict.best.id,
+              requestId: verdict.best.requestId,
+              method: "image?",
+              score: verdict.distance,
+              needsCheck: true,
+            });
           }
         } catch (err) {
           console.warn("[telegram] tile crop failed", err);
@@ -541,7 +559,9 @@ async function handleScreenshot(msg: TgMessage) {
         source_message_id: msg.message_id,
         source_file_id: photo.file_id,
         confidence: metrics.confidence,
-        needs_review: metrics.confidence < 0.6,
+        needs_review:
+          metrics.confidence < 0.6 ||
+          cutForPosition.get(r.position)?.needsCheck === true,
       })),
       { onConflict: "source_chat_id,source_message_id,position" }
     );

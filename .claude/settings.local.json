@@ -189,7 +189,13 @@
       "Bash(timeout 180 node --experimental-strip-types test/wasmprobe.mts)",
       "Bash(node --experimental-strip-types test/wasmprobe.mts)",
       "Bash(node test/wasmprobe.mjs)",
-      "Bash(node --experimental-strip-types test/final.mts)"
+      "Bash(node --experimental-strip-types test/final.mts)",
+      "Bash(python3 -m pip install --quiet open_clip_torch torch)",
+      "Bash(python3 -c \"import open_clip, torch; print\\('ok', torch.__version__\\)\")",
+      "Bash(nohup python3 clip_test.py)",
+      "Bash(break)",
+      "Bash(nohup python3 final_sheet.py)",
+      "Bash(mv /Users/leon/Desktop/fansly_CSM/final_sheet.py /Users/leon/Desktop/fansly_CSM/test/)"
     ]
   }
 }

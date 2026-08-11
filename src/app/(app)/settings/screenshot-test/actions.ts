@@ -31,6 +31,12 @@ export type TileResult = {
   match: {
     title: string;
     method: "landmarks" | "image" | "text" | "looked";
+    /**
+     * A proposal nobody has confirmed. It is written like any other match
+     * so no reading is lost, but it is marked, and it does not spend the
+     * cut — otherwise a guess would take the reel the next tile needed.
+     */
+    needsCheck?: boolean;
     /** Written here, not in the browser: a stale bundle mislabelled a
      *  match once, and the reader had no way to tell. */
     explain: string;
@@ -229,6 +235,17 @@ export async function identifyTiles(input: {
         // number that explains the refusal, and the hash's own verdict
         // would otherwise paper over it.
         row.nearest = { title: "landmarks not decisive", distance: v.shared, ratio: v.lead };
+        if (v.best) {
+          const th = thumbOf.get(v.best.id);
+          if (th) wantThumbs.add(th);
+          row.match = {
+            title: titles.get(v.best.requestId) ?? "—",
+            method: "landmarks",
+            needsCheck: true,
+            explain: `probably — ${v.shared} shared landmarks, only ${v.lead.toFixed(1)}× the runner-up`,
+            thumb: th ?? null,
+          };
+        }
       }
     }
 
@@ -248,6 +265,17 @@ export async function identifyTiles(input: {
       continue;
     }
 
+    if (!row.match && verdict.best) {
+      const th = thumbOf.get(verdict.best.id);
+      if (th) wantThumbs.add(th);
+      row.match = {
+        title: titles.get(verdict.best.requestId) ?? "—",
+        method: "image",
+        needsCheck: true,
+        explain: `probably — ${verdict.distance} bits apart, ${Math.round(verdict.ratio * 100)}% of the runner-up`,
+        thumb: th ?? null,
+      };
+    }
     row.nearest = landmarkNearest ?? row.nearest;
     const byText = identifyByText(t.caption, textPool.filter((c) => !taken.has(c.id)));
     if (byText) {
@@ -282,9 +310,10 @@ export async function identifyTiles(input: {
     // How each verdict was reached, so one run says which stage is carrying
     // the work and which is dead weight.
     byMethod: {
-      landmarks: out.filter((r) => r.match?.method === "landmarks").length,
-      image: out.filter((r) => r.match?.method === "image").length,
-      text: out.filter((r) => r.match?.method === "text").length,
+      landmarks: out.filter((r) => r.match?.method === "landmarks" && !r.match.needsCheck).length,
+      image: out.filter((r) => r.match?.method === "image" && !r.match.needsCheck).length,
+      text: out.filter((r) => r.match?.method === "text" && !r.match.needsCheck).length,
+      toCheck: out.filter((r) => r.match?.needsCheck).length,
     },
     poolSize: hashPool.length,
     landmarkPool: hasLandmarks.size,

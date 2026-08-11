@@ -33,7 +33,7 @@ export function ScreenshotTest() {
   const [head, setHead] = useState<Head | null>(null);
   const [rows, setRows] = useState<TileResult[]>([]);
   const [pool, setPool] = useState<{ hash: number; landmarks: number; text: number } | null>(null);
-  const [by, setBy] = useState({ landmarks: 0, image: 0, text: 0 });
+  const [by, setBy] = useState({ landmarks: 0, image: 0, text: 0, toCheck: 0 });
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -43,7 +43,7 @@ export function ScreenshotTest() {
     setHead(null);
     setRows([]);
     setPool(null);
-    setBy({ landmarks: 0, image: 0, text: 0 });
+    setBy({ landmarks: 0, image: 0, text: 0, toCheck: 0 });
     try {
       setStep("Reading the screenshot…");
       const read = await readScreenshot(form);
@@ -71,6 +71,7 @@ export function ScreenshotTest() {
           landmarks: b.landmarks + res.byMethod.landmarks,
           image: b.image + res.byMethod.image,
           text: b.text + res.byMethod.text,
+          toCheck: b.toCheck + res.byMethod.toCheck,
         }));
       }
       setStep("");
@@ -139,10 +140,14 @@ export function ScreenshotTest() {
       {rows.length > 0 && (
         <>
           <p className="text-xs text-muted-foreground">
-            {rows.filter((t) => t.match).length} of {rows.length} tiles identified
+            {rows.filter((t) => t.match && !t.match.needsCheck).length} of {rows.length}{" "}
+            confirmed
             {head?.tiles && rows.length < head.tiles.length && " so far"}
             {" — "}
             {by.landmarks} by landmarks, {by.image} by picture, {by.text} by text
+            {by.toCheck > 0 && (
+              <span className="text-amber-400"> · {by.toCheck} to check</span>
+            )}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {rows.map((t) => (
@@ -173,7 +178,14 @@ function Tile({ t }: { t: TileResult }) {
       <div className="mt-2 text-xs">
         {t.match ? (
           <>
-            <p className="truncate font-medium text-emerald-400">{t.match.title}</p>
+            <p
+              className={`truncate font-medium ${
+                t.match.needsCheck ? "text-amber-400" : "text-emerald-400"
+              }`}
+            >
+              {t.match.needsCheck ? "check: " : ""}
+              {t.match.title}
+            </p>
             <p className="text-muted-foreground">{t.match.explain}</p>
             {t.match.method === "text" && (
               <p className="mt-1 text-[10px] leading-tight text-muted-foreground/70">
