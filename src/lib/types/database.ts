@@ -666,6 +666,8 @@ export type Database = {
           request_id: string | null;
           link_ok: boolean | null;
           checked_at: string | null;
+          unreachable_since: string | null;
+          unreachable_runs: number;
           created_at: string;
           updated_at: string;
         };
@@ -684,6 +686,8 @@ export type Database = {
           request_id?: string | null;
           link_ok?: boolean | null;
           checked_at?: string | null;
+          unreachable_since?: string | null;
+          unreachable_runs?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -702,6 +706,8 @@ export type Database = {
           request_id?: string | null;
           link_ok?: boolean | null;
           checked_at?: string | null;
+          unreachable_since?: string | null;
+          unreachable_runs?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -722,6 +728,7 @@ export type Database = {
           min_open_links: number;
           max_unedited: number;
           last_alert_at: string | null;
+          last_link_check_at: string | null;
           weekly_reel_target: number | null;
           slow_inspo_days: number;
           slow_edit_days: number;
@@ -746,6 +753,7 @@ export type Database = {
           min_open_links?: number;
           max_unedited?: number;
           last_alert_at?: string | null;
+          last_link_check_at?: string | null;
           weekly_reel_target?: number | null;
           slow_inspo_days?: number;
           slow_edit_days?: number;
@@ -770,6 +778,7 @@ export type Database = {
           min_open_links?: number;
           max_unedited?: number;
           last_alert_at?: string | null;
+          last_link_check_at?: string | null;
           weekly_reel_target?: number | null;
           slow_inspo_days?: number;
           slow_edit_days?: number;

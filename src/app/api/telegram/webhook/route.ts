@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   extractInstagramLinks,
@@ -56,6 +57,11 @@ type TgReactionUpdate = {
   date: number;
   new_reaction: { type: string; emoji?: string }[];
 };
+type TgUpdate = {
+  message?: TgMessage;
+  edited_message?: TgMessage;
+  message_reaction?: TgReactionUpdate;
+};
 
 export async function POST(req: Request) {
   // Telegram echoes back the secret we set with setWebhook — reject anything
@@ -68,11 +74,7 @@ export async function POST(req: Request) {
     }
   }
 
-  let update: {
-    message?: TgMessage;
-    edited_message?: TgMessage;
-    message_reaction?: TgReactionUpdate;
-  };
+  let update: TgUpdate;
   try {
     update = await req.json();
   } catch {
@@ -95,6 +97,10 @@ export async function POST(req: Request) {
   );
 
   try {
+    // A slash command is not content and must never be filed as a link.
+    if (msg && (await handleCommand(req, msg))) {
+      return NextResponse.json({ ok: true });
+    }
     // An edited message carries the same payload as a fresh one. Telegram
     // sends it whenever the sender fixes a typo — or when a client rewrites
     // the message after posting — and dropping it silently loses the link.
@@ -105,7 +111,134 @@ export async function POST(req: Request) {
     console.error("[telegram] handler failed", err);
   }
 
+  // Whatever the update was, it is also a heartbeat: see below.
+  try {
+    await maybeRunDailyCheck(req, update);
+  } catch (err) {
+    console.error("[telegram] daily check trigger failed", err);
+  }
+
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * `/check` in the requests topic — run the link check now.
+ *
+ * The command message itself is deleted straight away. The topic is the
+ * model's work queue and Leon wants it to hold links and nothing else, so
+ * the bot answers in TALK rather than here, and tidies up after the person
+ * who typed the command.
+ *
+ * Returns true when the message was a command and has been dealt with.
+ */
+const COMMANDS = new Set(["check", "links", "linkcheck"]);
+
+async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
+  const text = (msg.text ?? "").trim();
+  if (!text.startsWith("/")) return false;
+
+  // "/check@DuraskaBot extra words" → "check"
+  const word = text.slice(1).split(/\s+/)[0] ?? "";
+  const name = word.split("@")[0].toLowerCase();
+  if (!COMMANDS.has(name)) return false;
+
+  const supabase = createAdminClient();
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("persona_id, requests_thread_id")
+    .eq("chat_id", msg.chat.id)
+    .maybeSingle();
+  if (!cfg) return false;
+
+  // Only from the requests topic, so the command means one thing.
+  if (
+    cfg.requests_thread_id != null &&
+    msg.message_thread_id != null &&
+    Number(cfg.requests_thread_id) !== Number(msg.message_thread_id)
+  ) {
+    return false;
+  }
+
+  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    console.error("[telegram] /check without CRON_SECRET");
+    return true;
+  }
+  fireLinkCheck(req, cfg.persona_id, `von @${msg.from?.username ?? "?"}`, secret);
+  return true;
+}
+
+/**
+ * The daily link check, without a scheduler.
+ *
+ * The plan allows two cron jobs and both are spoken for, so the group's own
+ * traffic stands in for one: every delivery asks whether a day has passed
+ * since the last check, and the first message after that fires it. The
+ * group is used every day — screenshots, links, reactions — so in practice
+ * this runs at the first sign of life each morning. If the group ever falls
+ * silent for a week, nothing is checked, which is the correct behaviour:
+ * with nobody working the topic, nothing is piling up either.
+ *
+ * The work goes to its own request. Telegram replays any update it does not
+ * get an answer to within seconds, and a scraper run would earn us the same
+ * check three times over.
+ */
+const CHECK_EVERY_H = 20;
+
+async function maybeRunDailyCheck(req: Request, update: TgUpdate) {
+  const chatId =
+    update.message?.chat?.id ??
+    update.edited_message?.chat?.id ??
+    update.message_reaction?.chat?.id ??
+    null;
+  if (!chatId) return;
+
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return;
+
+  const supabase = createAdminClient();
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("persona_id, last_link_check_at")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (!cfg) return;
+
+  const last = cfg.last_link_check_at ? new Date(cfg.last_link_check_at).getTime() : 0;
+  if (Date.now() - last < CHECK_EVERY_H * 3600_000) return;
+
+  // Claim the slot before the request goes out. Two updates arriving
+  // together would otherwise both find the check due and both start one.
+  await supabase
+    .from("telegram_config")
+    .update({ last_link_check_at: new Date().toISOString() })
+    .eq("persona_id", cfg.persona_id);
+
+  fireLinkCheck(req, cfg.persona_id, "täglich", secret);
+}
+
+/** Hand the job to its own invocation and stop caring about the answer. */
+function fireLinkCheck(
+  req: Request,
+  personaId: string,
+  trigger: string,
+  secret: string
+) {
+  const host = req.headers.get("host");
+  if (!host) return;
+  const url =
+    `https://${host}/api/links/check` +
+    `?persona=${encodeURIComponent(personaId)}&trigger=${encodeURIComponent(trigger)}`;
+  // waitUntil keeps this function alive past the response long enough for
+  // the request to actually leave; without it Vercel may freeze us first.
+  waitUntil(
+    fetch(url, {
+      method: "POST",
+      headers: { "x-link-check-secret": secret },
+    }).catch((err) => console.error("[telegram] link check call failed", err))
+  );
 }
 
 async function handleMessage(msg: TgMessage) {
@@ -195,7 +328,10 @@ async function handleMessage(msg: TgMessage) {
         sender_name: senderName,
         status: "open",
       },
-      { onConflict: "chat_id,message_id", ignoreDuplicates: true }
+      // Keyed on the post, not just the message: a message with two links
+      // used to store only the first, and once dead links get their message
+      // deleted that would take an unrecorded live link down with it.
+      { onConflict: "chat_id,message_id,url_key", ignoreDuplicates: true }
     );
   }
 }
@@ -478,13 +614,15 @@ async function handleReaction(r: TgReactionUpdate) {
 
   const supabase = createAdminClient();
 
-  const { data: link } = await supabase
+  // A message can carry several links and a reaction applies to the
+  // message, so it applies to all of them.
+  const { data: links } = await supabase
     .from("content_links")
     .select("id, status")
     .eq("chat_id", r.chat.id)
-    .eq("message_id", r.message_id)
-    .maybeSingle();
-  if (!link) return;
+    .eq("message_id", r.message_id);
+  if (!links || links.length === 0) return;
+  const ids = links.map((l) => l.id);
 
   // 💔 means "I opened this and the post is gone".
   //
@@ -494,9 +632,9 @@ async function handleReaction(r: TgReactionUpdate) {
   // clicked the link knows for certain, and this turns that knowledge into
   // the cleanup — no dashboard, no ticket, one reaction.
   if (r.new_reaction.some((x) => x.emoji === REACTION.dead)) {
-    // Only while nothing has been produced from it. Once takes exist the
-    // message is the trail back to them and must stay.
-    if (link.status !== "open" && link.status !== "shot") return;
+    // Only while nothing has been produced from any of them. Once takes
+    // exist the message is the trail back to them and must stay.
+    if (links.some((l) => l.status !== "open" && l.status !== "shot")) return;
 
     await supabase
       .from("content_links")
@@ -506,7 +644,7 @@ async function handleReaction(r: TgReactionUpdate) {
         checked_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", link.id);
+      .in("id", ids);
 
     const res = await deleteMessage({
       chat_id: r.chat.id,
@@ -520,7 +658,8 @@ async function handleReaction(r: TgReactionUpdate) {
 
   // Any other reaction means the model has filmed it.
   // Don't walk the status backwards once it's further along.
-  if (link.status !== "open") return;
+  const open = links.filter((l) => l.status === "open").map((l) => l.id);
+  if (open.length === 0) return;
 
   await supabase
     .from("content_links")
@@ -529,5 +668,5 @@ async function handleReaction(r: TgReactionUpdate) {
       shot_at: new Date(r.date * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", link.id);
+    .in("id", open);
 }
