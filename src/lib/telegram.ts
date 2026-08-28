@@ -116,6 +116,21 @@ export async function getWebhookInfo() {
   return call("getWebhookInfo", {});
 }
 
+/**
+ * The command list Telegram offers when someone types "/".
+ *
+ * A command works whether or not it is registered — this only populates the
+ * autocomplete. Without it the feature exists and nobody can find it.
+ */
+export async function setMyCommands() {
+  return call("setMyCommands", {
+    commands: [
+      { command: "check", description: "Tote Inspo-Links jetzt aufräumen" },
+      { command: "id", description: "Chat- und Topic-ID anzeigen" },
+    ],
+  });
+}
+
 /** Verify the configured token actually belongs to a live bot. */
 export async function getMe() {
   return call<{ id: number; username?: string; first_name?: string }>("getMe", {});

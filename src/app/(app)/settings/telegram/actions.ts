@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import {
   setWebhook,
+  setMyCommands,
   getWebhookInfo,
   getMe,
   checkInstagramAlive,
@@ -95,6 +96,10 @@ export async function registerWebhook(baseUrl: string) {
     }
     return { error: res.error ?? "setWebhook failed" };
   }
+  // Same trip: publish the slash commands so "/" offers them. Best-effort —
+  // the commands work regardless, this only fills the autocomplete.
+  const cmds = await setMyCommands();
+  if (!cmds.ok) console.warn("[telegram] setMyCommands failed", cmds.error);
   return { error: null, url };
 }
 

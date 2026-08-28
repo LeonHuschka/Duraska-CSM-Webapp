@@ -60,6 +60,24 @@ const RECHECK_AFTER_H = 16;
 const MIN_STRIKES = 3;
 const MIN_AGE_H = 48;
 
+/**
+ * A link nobody has reacted to in a month is dropped without asking anyone.
+ *
+ * This needs no Instagram at all, and it is the only part of the cleanup
+ * that cannot be wrong about the world: whether the post still exists is
+ * irrelevant once the model has walked past it for four weeks. It is also
+ * what actually keeps the topic short — the availability check only ever
+ * catches the few that were taken down.
+ *
+ * A reaction of any kind moves a link to `shot` and it stops being eligible
+ * forever, which is exactly the case Leon asked me to protect: she films it
+ * today, Instagram loses the original next week, the message stays.
+ */
+const EXPIRE_AFTER_DAYS = 30;
+
+/** Enough to clear a backlog in a few days without emptying a topic at once. */
+const MAX_EXPIRE_DELETIONS = 30;
+
 /** Real attrition is a couple of links. More than this in one run is a bug. */
 const MAX_DELETIONS = 8;
 
@@ -71,6 +89,12 @@ export type LinkCheckResult = {
   deleted: number;
   watching: number;
   skipped: number;
+  /** Dropped for age alone, no Instagram involved. */
+  expired: number;
+  /** Still older than the cutoff after this run's cap. */
+  expiredLeft: number;
+  /** Deletions Telegram would not carry out. */
+  refused: number;
   trusted: boolean;
   note: string | null;
 };
@@ -113,9 +137,19 @@ async function runForPersona(
     deleted: 0,
     watching: 0,
     skipped: 0,
+    expired: 0,
+    expiredLeft: 0,
+    refused: 0,
     trusted: true,
     note: null,
   };
+
+  // Age first: it costs nothing, needs no verdict, and takes those links out
+  // of the batch the scraper would otherwise be paid to look at.
+  const aged = await expireOldLinks(supabase, cfg.persona_id, now);
+  base.expired = aged.deleted;
+  base.expiredLeft = aged.left;
+  base.refused = aged.refused;
 
   const staleBefore = new Date(now - RECHECK_AFTER_H * 3600_000).toISOString();
   const { data: due, error: dueErr } = await supabase
@@ -276,6 +310,92 @@ async function runForPersona(
 }
 
 /**
+ * Drop links nobody reacted to within EXPIRE_AFTER_DAYS.
+ *
+ * No scraper, no verdict, no strikes — the only question is whether the
+ * model has touched it, and a month of silence answers that. Rows are kept
+ * as `skipped`, the status the schema already has for "dismissed without
+ * being produced", so the history stays intact and they are never looked at
+ * again.
+ */
+async function expireOldLinks(
+  supabase: SupabaseClient<Database>,
+  personaId: string,
+  now: number
+): Promise<{ deleted: number; left: number; refused: number }> {
+  const cutoff = new Date(now - EXPIRE_AFTER_DAYS * 86_400_000).toISOString();
+  const { data: old, error } = await supabase
+    .from("content_links")
+    .select("id, chat_id, message_id")
+    .eq("persona_id", personaId)
+    .eq("status", "open")
+    .lt("posted_at", cutoff)
+    .order("posted_at", { ascending: true });
+  if (error || !old || old.length === 0) return { deleted: 0, left: 0, refused: 0 };
+
+  // A message goes only when everything it carries has expired. Two links in
+  // one message, one of them posted later or already reacted to, and the
+  // message stays.
+  const chatIds = Array.from(new Set(old.map((l) => Number(l.chat_id))));
+  const messageIds = Array.from(new Set(old.map((l) => Number(l.message_id))));
+  const { data: siblings } = await supabase
+    .from("content_links")
+    .select("id, chat_id, message_id, status")
+    .in("chat_id", chatIds)
+    .in("message_id", messageIds);
+
+  const expiring = new Set(old.map((l) => l.id));
+  const byMessage = new Map<string, { id: string; status: string }[]>();
+  for (const s of siblings ?? []) {
+    const key = `${s.chat_id}:${s.message_id}`;
+    byMessage.set(key, [...(byMessage.get(key) ?? []), { id: s.id, status: s.status }]);
+  }
+
+  let deleted = 0;
+  let refused = 0;
+  let left = 0;
+  const seen = new Set<string>();
+
+  for (const l of old) {
+    const key = `${l.chat_id}:${l.message_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const rows = byMessage.get(key) ?? [];
+    const stillOpen = rows.filter((r) => r.status === "open");
+    if (stillOpen.length === 0 || !stillOpen.every((r) => expiring.has(r.id))) continue;
+
+    if (deleted >= MAX_EXPIRE_DELETIONS) {
+      left++;
+      continue;
+    }
+
+    const res = await deleteMessage({
+      chat_id: l.chat_id,
+      message_id: Number(l.message_id),
+    });
+    if (!res.ok) {
+      // Telegram refuses some deletions. Worth counting rather than
+      // swallowing: if it refuses everything, the bot is missing the
+      // can_delete_messages right and no amount of retrying will help.
+      console.warn("[links] expiry deletion refused", l.message_id, res.error);
+      refused++;
+      continue;
+    }
+    deleted++;
+    await supabase
+      .from("content_links")
+      .update({ status: "skipped", updated_at: new Date().toISOString() })
+      .in(
+        "id",
+        rows.map((r) => r.id)
+      );
+  }
+
+  return { deleted, left, refused };
+}
+
+/**
  * Delete the Telegram message behind each dead link — but only messages in
  * which nothing is still worth reading.
  */
@@ -360,30 +480,46 @@ async function stamp(supabase: SupabaseClient<Database>, personaId: string) {
 async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
   if (!cfg.chat_id) return;
 
-  let text: string;
+  const lines = [`🔗 <b>Link-Check</b> (${trigger})`];
+
+  // The age sweep runs whatever the scraper did, so it is reported first.
+  if (r.expired > 0) {
+    lines.push(
+      `🗑 ${r.expired} ohne Reaktion seit über ${EXPIRE_AFTER_DAYS} Tagen — gelöscht`
+    );
+  }
+  if (r.expiredLeft > 0) {
+    lines.push(`   ${r.expiredLeft} weitere folgen beim nächsten Lauf`);
+  }
+  if (r.refused > 0) {
+    lines.push(
+      `⚠️ ${r.refused} konnte Telegram nicht löschen — dem Bot fehlt vermutlich das Recht „Nachrichten löschen"`
+    );
+  }
+
   if (!r.trusted) {
-    text =
-      `🔗 <b>Link-Check — nichts gelöscht</b> (${trigger})\n` +
-      (r.checked > 0
-        ? `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar\n`
-        : "") +
-      `Grund: ${r.note}`;
+    if (r.checked > 0) {
+      lines.push(
+        `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar`
+      );
+    }
+    lines.push(`Nichts wegen Nichterreichbarkeit gelöscht. Grund: ${r.note}`);
   } else if (r.checked === 0) {
-    text = `🔗 <b>Link-Check</b> (${trigger})\nNichts fällig, alle Links wurden vor Kurzem geprüft.`;
+    if (r.expired === 0) lines.push("Nichts fällig.");
   } else {
-    const lines = [
-      `🔗 <b>Link-Check</b> (${trigger})`,
-      `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar`,
-    ];
+    lines.push(
+      `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar`
+    );
     if (r.deleted > 0) {
-      lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Link" : "Links"} aus den Content Requests gelöscht`);
+      lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Post" : "Posts"} nicht mehr vorhanden — gelöscht`);
     }
     if (r.watching > 0) {
-      lines.push(`👁 ${r.watching} unter Beobachtung (erst nach ${MIN_STRIKES} Läufen und ${MIN_AGE_H} h wird gelöscht)`);
+      lines.push(
+        `👁 ${r.watching} unter Beobachtung (erst nach ${MIN_STRIKES} Läufen und ${MIN_AGE_H} h)`
+      );
     }
-    if (r.deleted === 0 && r.watching === 0) lines.push("Nichts zu tun.");
-    text = lines.join("\n");
   }
+  const text = lines.join("\n");
 
   await sendMessage({
     chat_id: cfg.chat_id,
