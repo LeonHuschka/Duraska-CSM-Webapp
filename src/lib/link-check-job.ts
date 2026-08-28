@@ -1,7 +1,13 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
-import { checkPosts, CONTROL_SHORTCODE, CONTROL_URL } from "@/lib/apify";
+import {
+  checkPosts,
+  checkPostsDetailed,
+  CONTROL_SHORTCODE,
+  CONTROL_URL,
+  DETAIL_BATCH,
+} from "@/lib/apify";
 import { deleteMessage, sendMessage } from "@/lib/telegram";
 
 /**
@@ -22,9 +28,11 @@ import { deleteMessage, sendMessage } from "@/lib/telegram";
  *     the seconds between the check and the deletion.
  *   - only when every link in that message is also gone. Messages can
  *     carry several.
- *   - only after the post has been unreachable on separate runs across
- *     days. "Not found" also means private, suspended or age-restricted,
- *     and those come back; deleted ones never do.
+ *   - only when the second pass says the post does not exist, never on the
+ *     cheap pass alone. The cheap one's "not found" also covers private,
+ *     suspended and age-restricted, which is how the earlier version came
+ *     to condemn 59 of 106 links, one of them verified alive by hand.
+ *   - only after that verdict has held across separate runs and days.
  *   - only while the run itself looks trustworthy — see below.
  */
 
@@ -36,22 +44,16 @@ import { deleteMessage, sendMessage } from "@/lib/telegram";
 const MAX_LINKS = 200;
 
 /**
- * Above this share of unreachable links, the run describes the vantage
- * point rather than the posts, and nothing is deleted.
+ * A runaway brake, not a judgment.
  *
- * Measured on 2026-08-28 against the real backlog: 59 of 106 came back
- * "not found" — 56%. Instagram does not lose half a topic's worth of posts
- * in a few weeks. What it does do is hide age-restricted and restricted
- * accounts from anyone not logged in, and the one link in that set Leon had
- * verified by hand as live was among the 59. So a high share is proof that
- * the check cannot see what the model sees, and the correct response is to
- * delete nothing and say so.
- *
- * This is not a switch anybody has to remember to flip: give the scraper a
- * session and the share drops to whatever is genuinely gone, and deletion
- * starts working on its own.
+ * The second pass tells a deleted post from a hidden one, so a quarter of a
+ * months-old backlog being gone is ordinary — measured against the real
+ * links, 28 of 106. What is not ordinary is nearly all of them, which is
+ * what a blocked or broken scraper looks like from here. The sharper guards
+ * are the control post and yesterday's reachable links; this one only
+ * catches the case where everything goes at once.
  */
-const MAX_UNREACHABLE_SHARE = 0.25;
+const MAX_UNREACHABLE_SHARE = 0.7;
 
 /** Don't spend money re-checking something we looked at this morning. */
 const RECHECK_AFTER_H = 16;
@@ -182,12 +184,28 @@ async function runForPersona(
     return idle;
   }
 
-  // The control travels in the same run as the links, so it is answered
-  // under the same conditions they are.
+  // ── First pass: cheap, and only ever trusted when it says "alive" ──
   const { states, error } = await checkPosts([
     ...links.map((l) => l.url),
     CONTROL_URL,
   ]);
+
+  // ── Second pass: what the first could not see ──
+  //
+  // The cheap scraper's "not found" covers deleted, private, suspended and
+  // age-restricted alike. This one tells those apart, at nine times the
+  // price, so it is asked only about the leftovers — and only about as many
+  // as fit in the minute the function gets. The control goes with them:
+  // it must still come back missing here, where "missing" decides things.
+  const unsure = links.filter((l) => states.get(l.url_key) !== "alive");
+  const detailUrls = unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
+  const detail = await checkPostsDetailed(
+    detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : []
+  );
+  detail.states.forEach((state, code) => states.set(code, state));
+  // Beyond the batch there is no verdict at all, rather than a cheap one.
+  for (const l of unsure.slice(DETAIL_BATCH)) states.delete(l.url_key);
+
   if (error) {
     await stamp(supabase, cfg.persona_id);
     const failed = { ...base, trusted: false, note: error };
@@ -197,10 +215,20 @@ async function runForPersona(
 
   // ── Is this run worth believing? ──
   //
-  // Three ways it can be wrong, and all three look like "everything died".
+  // Every way this can go wrong looks the same from the inside: everything
+  // reads as gone. So each of these has to hold before a single message is
+  // touched.
   const reasons: string[] = [];
   if (states.get(CONTROL_SHORTCODE) !== "unreachable") {
     reasons.push("the control post came back as reachable");
+  }
+  if (detail.error) {
+    // Only the second pass can tell gone from hidden, so without it there is
+    // no deletable verdict at all — whatever the cheap one said.
+    reasons.push(detail.error);
+  }
+  if (detailUrls.length > 0 && !detail.states.size) {
+    reasons.push("the second pass answered nothing");
   }
   const answered = links.filter((l) => states.has(l.url_key));
   if (answered.length === 0) {
@@ -500,15 +528,15 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
   if (!r.trusted) {
     if (r.checked > 0) {
       lines.push(
-        `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar`
+        `${r.checked} geprüft · ${r.alive} vorhanden · ${r.unreachable} nicht mehr vorhanden`
       );
     }
-    lines.push(`Nichts wegen Nichterreichbarkeit gelöscht. Grund: ${r.note}`);
+    lines.push(`Nichts wegen Löschung entfernt. Grund: ${r.note}`);
   } else if (r.checked === 0) {
     if (r.expired === 0) lines.push("Nichts fällig.");
   } else {
     lines.push(
-      `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar`
+      `${r.checked} geprüft · ${r.alive} vorhanden · ${r.unreachable} nicht mehr vorhanden`
     );
     if (r.deleted > 0) {
       lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Post" : "Posts"} nicht mehr vorhanden — gelöscht`);

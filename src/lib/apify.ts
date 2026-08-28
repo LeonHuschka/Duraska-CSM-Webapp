@@ -124,3 +124,74 @@ export async function checkPosts(
  */
 export const CONTROL_SHORTCODE = "CzZzZzZzZzZ";
 export const CONTROL_URL = `https://www.instagram.com/p/${CONTROL_SHORTCODE}/`;
+
+/**
+ * The second opinion, for links the cheap pass could not see.
+ *
+ * Apify's own Instagram scraper answers a question the cheap one cannot:
+ * it separates a post that is gone from one that exists but is hidden.
+ *
+ *   not_found        the post does not exist
+ *   restricted_page  it exists; the scraper may not see all of it
+ *
+ * Measured against the 58 links the cheap pass called missing: 30 came back
+ * restricted and 28 not found — and the one link in that set Leon had
+ * opened and confirmed alive was among the restricted. That is the whole
+ * difference between this working and the August incident.
+ *
+ * It costs $0.0017 a post against $0.00018, roughly nine times as much,
+ * which is why it only ever sees what the first pass could not settle.
+ */
+const DETAIL_ACTOR = "apify~instagram-post-scraper";
+const DETAIL_ENDPOINT = `https://api.apify.com/v2/acts/${DETAIL_ACTOR}/run-sync-get-dataset-items`;
+
+/** 58 links took 44 seconds, so this many keeps a run inside the minute. */
+export const DETAIL_BATCH = 35;
+
+export async function checkPostsDetailed(
+  urls: string[]
+): Promise<{ states: Map<string, PostState>; error: string | null }> {
+  const states = new Map<string, PostState>();
+  if (urls.length === 0) return { states, error: null };
+
+  const token = process.env.APIFY_TOKEN;
+  if (!token) return { states, error: "APIFY_TOKEN is not set" };
+
+  let rows: (Row & { error?: string; url?: string; type?: string })[];
+  try {
+    const res = await fetch(`${DETAIL_ENDPOINT}?token=${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: urls, resultsLimit: urls.length }),
+      signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+    });
+    if (!res.ok) return { states, error: `apify detail http ${res.status}` };
+    const body: unknown = await res.json();
+    if (!Array.isArray(body)) return { states, error: "apify detail returned no rows" };
+    rows = body as typeof rows;
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    return {
+      states,
+      error: timedOut
+        ? `detail pass gave no answer within ${RUN_TIMEOUT_MS / 1000}s`
+        : err instanceof Error
+          ? err.message
+          : "apify detail call failed",
+    };
+  }
+
+  for (const row of rows) {
+    const code =
+      row.shortCode ??
+      (row.url ? instagramKey(row.url) : null) ??
+      (row.inputUrl ? instagramKey(row.inputUrl) : null);
+    if (!code) continue;
+    if (row.error === "not_found") states.set(code, "unreachable");
+    // Restricted, or an actual row of post data: either way it exists.
+    else if (!row.error || row.error === "restricted_page") states.set(code, "alive");
+    // Anything else is the scraper having a bad day, not a verdict.
+  }
+
+  return { states, error: null };
+}
