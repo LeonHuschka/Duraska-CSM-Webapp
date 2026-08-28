@@ -316,23 +316,34 @@ async function handleMessage(msg: TgMessage) {
   for (const url of links) {
     const key = instagramKey(url);
     if (!key) continue;
-    await supabase.from("content_links").upsert(
-      {
-        persona_id: config.persona_id,
-        chat_id: msg.chat.id,
-        message_thread_id: msg.message_thread_id ?? null,
-        message_id: msg.message_id,
-        url,
-        url_key: key,
-        posted_at: postedAt.toISOString(),
-        sender_name: senderName,
-        status: "open",
-      },
-      // Keyed on the post, not just the message: a message with two links
-      // used to store only the first, and once dead links get their message
-      // deleted that would take an unrecorded live link down with it.
-      { onConflict: "chat_id,message_id,url_key", ignoreDuplicates: true }
-    );
+    const row = {
+      persona_id: config.persona_id,
+      chat_id: msg.chat.id,
+      message_thread_id: msg.message_thread_id ?? null,
+      message_id: msg.message_id,
+      url,
+      url_key: key,
+      posted_at: postedAt.toISOString(),
+      sender_name: senderName,
+      status: "open",
+    };
+    // Keyed on the post, not just the message: a message with two links
+    // used to store only the first, and once dead links get their message
+    // deleted that would take an unrecorded live link down with it.
+    const { error } = await supabase
+      .from("content_links")
+      .upsert(row, { onConflict: "chat_id,message_id,url_key", ignoreDuplicates: true });
+    if (error) {
+      // Until the migration that creates that key has run, Postgres has
+      // nothing to resolve the conflict against and rejects the whole
+      // insert. Falling back keeps links being recorded in the meantime —
+      // losing them silently would be much worse than storing one per
+      // message for a day.
+      console.warn("[telegram] link upsert fell back to the old key:", error.message);
+      await supabase
+        .from("content_links")
+        .upsert(row, { onConflict: "chat_id,message_id", ignoreDuplicates: true });
+    }
   }
 }
 

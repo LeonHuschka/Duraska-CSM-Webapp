@@ -96,7 +96,7 @@ async function runForPersona(
   };
 
   const staleBefore = new Date(now - RECHECK_AFTER_H * 3600_000).toISOString();
-  const { data: due } = await supabase
+  const { data: due, error: dueErr } = await supabase
     .from("content_links")
     .select(
       "id, url, url_key, chat_id, message_id, link_ok, unreachable_since, unreachable_runs"
@@ -106,6 +106,15 @@ async function runForPersona(
     .or(`checked_at.is.null,checked_at.lt.${staleBefore}`)
     .order("checked_at", { ascending: true, nullsFirst: true })
     .limit(MAX_LINKS);
+
+  // Without the columns this asks for there is nothing to run, and saying
+  // "nothing due" would read as a clean bill of health.
+  if (dueErr) {
+    await stamp(supabase, cfg.persona_id);
+    const broken = { ...base, trusted: false, note: `Datenbank: ${dueErr.message}` };
+    await report(cfg, broken, trigger);
+    return broken;
+  }
 
   const links = due ?? [];
   if (links.length === 0) {
