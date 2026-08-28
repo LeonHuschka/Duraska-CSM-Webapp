@@ -28,8 +28,30 @@ import { deleteMessage, sendMessage } from "@/lib/telegram";
  *   - only while the run itself looks trustworthy — see below.
  */
 
-/** Links per run. Whatever is left keeps its old checked_at and goes first next time. */
-const MAX_LINKS = 40;
+/**
+ * Links per run. The whole backlog of 106 came back in nine seconds, so
+ * there is no reason to sweep it in slices — and doing it in one go is what
+ * makes a run's unreachable share meaningful.
+ */
+const MAX_LINKS = 200;
+
+/**
+ * Above this share of unreachable links, the run describes the vantage
+ * point rather than the posts, and nothing is deleted.
+ *
+ * Measured on 2026-08-28 against the real backlog: 59 of 106 came back
+ * "not found" — 56%. Instagram does not lose half a topic's worth of posts
+ * in a few weeks. What it does do is hide age-restricted and restricted
+ * accounts from anyone not logged in, and the one link in that set Leon had
+ * verified by hand as live was among the 59. So a high share is proof that
+ * the check cannot see what the model sees, and the correct response is to
+ * delete nothing and say so.
+ *
+ * This is not a switch anybody has to remember to flip: give the scraper a
+ * session and the share drops to whatever is genuinely gone, and deletion
+ * starts working on its own.
+ */
+const MAX_UNREACHABLE_SHARE = 0.25;
 
 /** Don't spend money re-checking something we looked at this morning. */
 const RECHECK_AFTER_H = 16;
@@ -161,6 +183,14 @@ async function runForPersona(
       `${wereAlive.length - stillAlive.length} of ${wereAlive.length} previously reachable links went at once`
     );
   }
+  // And the share itself: see MAX_UNREACHABLE_SHARE.
+  const missing = answered.filter((l) => states.get(l.url_key) === "unreachable");
+  const share = answered.length > 0 ? missing.length / answered.length : 0;
+  if (answered.length >= 10 && share > MAX_UNREACHABLE_SHARE) {
+    reasons.push(
+      `${missing.length} of ${answered.length} links (${Math.round(share * 100)}%) are unreachable from here — that is the vantage point, not the posts`
+    );
+  }
   const trusted = reasons.length === 0;
 
   // ── Write what we saw ──
@@ -188,6 +218,17 @@ async function runForPersona(
     if (state !== "unreachable") continue; // no verdict — leave it for next run
 
     unreachable++;
+    // A run we don't believe must not build a case for deleting anything.
+    // Otherwise the day the vantage point is fixed, every link that was only
+    // ever invisible would already have its three strikes and go at once.
+    if (!trusted) {
+      await supabase
+        .from("content_links")
+        .update({ checked_at: new Date().toISOString() })
+        .eq("id", l.id);
+      continue;
+    }
+
     const since = l.unreachable_since ?? new Date().toISOString();
     const runs = (l.unreachable_runs ?? 0) + 1;
     await supabase
@@ -322,8 +363,11 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
   let text: string;
   if (!r.trusted) {
     text =
-      `🔗 <b>Link-Check abgebrochen</b> (${trigger})\n` +
-      `${r.note}. Nichts gelöscht — die Antworten sind nicht vertrauenswürdig.`;
+      `🔗 <b>Link-Check — nichts gelöscht</b> (${trigger})\n` +
+      (r.checked > 0
+        ? `${r.checked} geprüft · ${r.alive} erreichbar · ${r.unreachable} nicht erreichbar\n`
+        : "") +
+      `Grund: ${r.note}`;
   } else if (r.checked === 0) {
     text = `🔗 <b>Link-Check</b> (${trigger})\nNichts fällig, alle Links wurden vor Kurzem geprüft.`;
   } else {

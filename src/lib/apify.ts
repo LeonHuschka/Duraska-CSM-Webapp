@@ -35,6 +35,32 @@ type Row = {
 };
 
 /**
+ * An Instagram session for the scraper to use, as exported cookies.
+ *
+ * Without one this cannot do the job it was brought in for. Measured on the
+ * real backlog, 59 of 106 links came back "not found" logged out, and the
+ * one link in that set we had verified by hand was live — Instagram hides
+ * age-restricted posts and restricted accounts from anyone not signed in,
+ * and most of what these models re-shoot is exactly that. Logged in, "not
+ * found" means what it says.
+ *
+ * Set INSTAGRAM_SESSION_COOKIES to the cookie array as JSON. Malformed
+ * content is ignored rather than thrown, because a bad paste must not stop
+ * the check from running at all.
+ */
+function sessionCookies(): unknown[] | null {
+  const raw = process.env.INSTAGRAM_SESSION_COOKIES;
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch {
+    console.warn("[apify] INSTAGRAM_SESSION_COOKIES is not valid JSON — ignoring it");
+    return null;
+  }
+}
+
+/**
  * One run, every link. Keys are Instagram shortcodes; anything the run did
  * not answer for is absent, which callers must read as "no verdict" rather
  * than as bad news.
@@ -53,7 +79,11 @@ export async function checkPosts(
     const res = await fetch(`${ENDPOINT}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ postUrls: urls, maxItems: urls.length }),
+      body: JSON.stringify({
+        postUrls: urls,
+        maxItems: urls.length,
+        ...(sessionCookies() ? { sessionCookies: sessionCookies() } : {}),
+      }),
       signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
     });
     if (!res.ok) {
