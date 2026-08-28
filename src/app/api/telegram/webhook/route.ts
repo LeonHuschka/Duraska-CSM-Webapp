@@ -237,7 +237,16 @@ function fireLinkCheck(
     fetch(url, {
       method: "POST",
       headers: { "x-link-check-secret": secret },
-    }).catch((err) => console.error("[telegram] link check call failed", err))
+    })
+      .then((res) => {
+        // Silence here is how the first version failed: the session
+        // middleware answered 307 and the redirect landed on /login, so the
+        // check never ran and nothing anywhere said so.
+        if (!res.ok) {
+          console.error("[telegram] link check answered", res.status, res.url);
+        }
+      })
+      .catch((err) => console.error("[telegram] link check call failed", err))
   );
 }
 
