@@ -521,10 +521,14 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
   }
   const text = lines.join("\n");
 
-  await sendMessage({
+  const res = await sendMessage({
     chat_id: cfg.chat_id,
     message_thread_id: cfg.talk_thread_id,
     text,
     disable_notification: true,
   });
+  // The report is the only thing anyone sees. If it does not arrive, the run
+  // looks like it never happened — which is precisely how the last two
+  // failures presented themselves.
+  if (!res.ok) console.error("[links] report not delivered", res.error);
 }
