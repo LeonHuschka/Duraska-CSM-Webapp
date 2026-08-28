@@ -166,7 +166,10 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
     console.error("[telegram] /check without CRON_SECRET");
     return true;
   }
-  fireLinkCheck(req, cfg.persona_id, `von @${msg.from?.username ?? "?"}`, secret);
+  // Typed by a person, so it re-checks everything rather than reporting
+  // that nothing is due — which is what it did, correctly and uselessly,
+  // when the command was tried twice in an afternoon.
+  fireLinkCheck(req, cfg.persona_id, `von @${msg.from?.username ?? "?"}`, secret, true);
   return true;
 }
 
@@ -224,13 +227,16 @@ function fireLinkCheck(
   req: Request,
   personaId: string,
   trigger: string,
-  secret: string
+  secret: string,
+  /** Ignore the "checked recently" window — for someone who asked. */
+  force = false
 ) {
   const host = req.headers.get("host");
   if (!host) return;
   const url =
     `https://${host}/api/links/check` +
-    `?persona=${encodeURIComponent(personaId)}&trigger=${encodeURIComponent(trigger)}`;
+    `?persona=${encodeURIComponent(personaId)}&trigger=${encodeURIComponent(trigger)}` +
+    (force ? "&force=1" : "");
   // waitUntil keeps this function alive past the response long enough for
   // the request to actually leave; without it Vercel may freeze us first.
   waitUntil(

@@ -103,7 +103,7 @@ export type LinkCheckResult = {
 
 export async function runLinkCheck(
   supabase: SupabaseClient<Database>,
-  opts: { personaId?: string; trigger: string }
+  opts: { personaId?: string; trigger: string; force?: boolean }
 ): Promise<LinkCheckResult[]> {
   let q = supabase
     .from("telegram_config")
@@ -113,7 +113,7 @@ export async function runLinkCheck(
 
   const out: LinkCheckResult[] = [];
   for (const cfg of configs ?? []) {
-    const res = await runForPersona(supabase, cfg, opts.trigger);
+    const res = await runForPersona(supabase, cfg, opts.trigger, opts.force ?? false);
     out.push(res);
   }
   return out;
@@ -128,7 +128,8 @@ type Cfg = {
 async function runForPersona(
   supabase: SupabaseClient<Database>,
   cfg: Cfg,
-  trigger: string
+  trigger: string,
+  force: boolean
 ): Promise<LinkCheckResult> {
   const now = Date.now();
   const base: LinkCheckResult = {
@@ -153,15 +154,19 @@ async function runForPersona(
   base.expiredLeft = aged.left;
   base.refused = aged.refused;
 
+  // A person who typed the command wants to see something happen; the
+  // schedule wants to spend nothing twice in a day. Same job, different
+  // patience — so the window only applies when nobody asked.
   const staleBefore = new Date(now - RECHECK_AFTER_H * 3600_000).toISOString();
-  const { data: due, error: dueErr } = await supabase
+  let q = supabase
     .from("content_links")
     .select(
       "id, url, url_key, chat_id, message_id, link_ok, unreachable_since, unreachable_runs"
     )
     .eq("persona_id", cfg.persona_id)
-    .eq("status", "open")
-    .or(`checked_at.is.null,checked_at.lt.${staleBefore}`)
+    .eq("status", "open");
+  if (!force) q = q.or(`checked_at.is.null,checked_at.lt.${staleBefore}`);
+  const { data: due, error: dueErr } = await q
     .order("checked_at", { ascending: true, nullsFirst: true })
     .limit(MAX_LINKS);
 

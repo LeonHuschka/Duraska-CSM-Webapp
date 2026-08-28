@@ -24,8 +24,13 @@ async function handle(req: Request) {
 
   const personaId = url.searchParams.get("persona") ?? undefined;
   const trigger = url.searchParams.get("trigger") ?? "manuell";
+  const force = url.searchParams.get("force") === "1";
 
-  const results = await runLinkCheck(createAdminClient(), { personaId, trigger });
+  const results = await runLinkCheck(createAdminClient(), {
+    personaId,
+    trigger,
+    force,
+  });
   return NextResponse.json({ ok: true, results });
 }
 
