@@ -600,6 +600,13 @@ async function report(
     lines.push(
       `${r.checked} geprüft · ${r.alive} vorhanden · ${r.unreachable} nicht mehr vorhanden`
     );
+    // Without this line the numbers do not add up and the report looks like
+    // it is contradicting itself between runs: the second pass only looks at
+    // a batch at a time, and everything past it has no verdict either way.
+    const noVerdict = r.checked - r.alive - r.unreachable;
+    if (noVerdict > 0) {
+      lines.push(`· ${noVerdict} ohne Urteil (kommen im nächsten Lauf dran)`);
+    }
     if (r.deleted > 0) {
       lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Post" : "Posts"} nicht mehr vorhanden — gelöscht`);
     }
