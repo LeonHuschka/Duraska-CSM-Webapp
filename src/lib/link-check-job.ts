@@ -32,7 +32,7 @@ import { deleteMessage, sendMessage } from "@/lib/telegram";
  *     cheap pass alone. The cheap one's "not found" also covers private,
  *     suspended and age-restricted, which is how the earlier version came
  *     to condemn 59 of 106 links, one of them verified alive by hand.
- *   - only after that verdict has held across separate runs and days.
+ *   - only after that verdict has held across two separate runs.
  *   - only while the run itself looks trustworthy — see below.
  */
 
@@ -58,9 +58,19 @@ const MAX_UNREACHABLE_SHARE = 0.7;
 /** Don't spend money re-checking something we looked at this morning. */
 const RECHECK_AFTER_H = 16;
 
-/** How many separate runs, and how much calendar time, before deleting. */
-const MIN_STRIKES = 3;
-const MIN_AGE_H = 48;
+/**
+ * How many separate runs must call a post gone before its message goes.
+ *
+ * Two, and no waiting period on top: back to back or a day apart, both
+ * count. The second run exists to survive a single bad answer from the
+ * scraper, and a second opinion does not get better for being slept on —
+ * whereas every extra day is a day the model spends opening dead links,
+ * which is the thing this is for. The verdict itself comes from the detail
+ * pass, measured to separate a deleted post from a hidden one; the guards
+ * further down catch a whole run being wrong, which is the failure mode
+ * more strikes would not have helped with anyway.
+ */
+const MIN_STRIKES = 2;
 
 /**
  * A link nobody has reacted to in a month is dropped without asking anyone.
@@ -80,8 +90,16 @@ const EXPIRE_AFTER_DAYS = 30;
 /** Enough to clear a backlog in a few days without emptying a topic at once. */
 const MAX_EXPIRE_DELETIONS = 30;
 
-/** Real attrition is a couple of links. More than this in one run is a bug. */
-const MAX_DELETIONS = 8;
+/**
+ * A brake against a run that has gone mad, not a pace limit.
+ *
+ * It was eight, which quietly undid the point: 28 confirmed-gone links
+ * would have trickled out over five days while the model kept opening
+ * them. Clearing a backlog in two runs is the behaviour that was asked
+ * for; a run trying to delete more than this has something wrong with it
+ * that the guards above should already have caught.
+ */
+const MAX_DELETIONS = 25;
 
 export type LinkCheckResult = {
   personaId: string;
@@ -309,8 +327,7 @@ async function runForPersona(
       })
       .eq("id", l.id);
 
-    const oldEnough = now - new Date(since).getTime() >= MIN_AGE_H * 3600_000;
-    if (runs >= MIN_STRIKES && oldEnough) deletable.push(l);
+    if (runs >= MIN_STRIKES) deletable.push(l);
     else watching++;
   }
 
@@ -548,7 +565,7 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
     }
     if (r.watching > 0) {
       lines.push(
-        `👁 ${r.watching} unter Beobachtung (erst nach ${MIN_STRIKES} Läufen und ${MIN_AGE_H} h)`
+        `👁 ${r.watching} beim nächsten Lauf fällig (${MIN_STRIKES}× bestätigt wird gelöscht)`
       );
     }
   }
