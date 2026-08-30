@@ -22,8 +22,20 @@ import { instagramKey } from "@/lib/telegram";
 const ACTOR = "dami_studio~instagram-post-scraper";
 const ENDPOINT = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items`;
 
-/** The function has sixty seconds; leave room to write the results away. */
-const RUN_TIMEOUT_MS = 45_000;
+/**
+ * The cheap pass. It has answered in six to nine seconds every time it has
+ * been measured, so this is a stuck-connection cutoff, not a budget.
+ */
+const RUN_TIMEOUT_MS = 20_000;
+
+/**
+ * Everything must be written away and reported inside the function's minute,
+ * so the second pass gets whatever is left of this and no more. Measured
+ * runs of the detailed scraper: 31s, 46s, 56s — it is dominated by its own
+ * start-up and does not scale with the batch, which is why the answer is a
+ * deadline rather than a smaller batch.
+ */
+export const RUN_DEADLINE_MS = 45_000;
 
 export type PostState = "alive" | "unreachable" | "unknown";
 
@@ -149,10 +161,15 @@ const DETAIL_ENDPOINT = `https://api.apify.com/v2/acts/${DETAIL_ACTOR}/run-sync-
 export const DETAIL_BATCH = 35;
 
 export async function checkPostsDetailed(
-  urls: string[]
+  urls: string[],
+  /** What is left of the function's minute — see the caller. */
+  timeoutMs: number
 ): Promise<{ states: Map<string, PostState>; error: string | null }> {
   const states = new Map<string, PostState>();
   if (urls.length === 0) return { states, error: null };
+  if (timeoutMs < 8_000) {
+    return { states, error: "zu wenig Zeit für den zweiten Durchgang" };
+  }
 
   const token = process.env.APIFY_TOKEN;
   if (!token) return { states, error: "APIFY_TOKEN is not set" };
@@ -163,7 +180,7 @@ export async function checkPostsDetailed(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username: urls, resultsLimit: urls.length }),
-      signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return { states, error: `apify detail http ${res.status}` };
     const body: unknown = await res.json();
@@ -174,7 +191,7 @@ export async function checkPostsDetailed(
     return {
       states,
       error: timedOut
-        ? `detail pass gave no answer within ${RUN_TIMEOUT_MS / 1000}s`
+        ? `zweiter Durchgang ohne Antwort in ${Math.round(timeoutMs / 1000)}s`
         : err instanceof Error
           ? err.message
           : "apify detail call failed",

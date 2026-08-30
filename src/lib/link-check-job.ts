@@ -7,8 +7,9 @@ import {
   CONTROL_SHORTCODE,
   CONTROL_URL,
   DETAIL_BATCH,
+  RUN_DEADLINE_MS,
 } from "@/lib/apify";
-import { deleteMessage, sendMessage } from "@/lib/telegram";
+import { deleteMessage, editMessageText, sendMessage } from "@/lib/telegram";
 
 /**
  * Take inspo links whose posts are gone out of the requests topic.
@@ -166,6 +167,16 @@ async function runForPersona(
   base.expiredLeft = aged.left;
   base.refused = aged.refused;
 
+  // Say we started, before anything that can time out.
+  //
+  // The scrapers together can outlast the minute the function gets — one run
+  // spent 6s on the cheap pass and 56s on the detailed one and was killed
+  // before it could report, which from the group looked exactly like the
+  // command having done nothing at all. Now the line appears first and is
+  // rewritten with the result; a run that dies leaves "läuft" standing,
+  // which is a true statement about what happened and a visible one.
+  const notice = await announce(cfg, trigger);
+
   // A person who typed the command wants to see something happen; the
   // schedule wants to spend nothing twice in a day. Same job, different
   // patience — so the window only applies when nobody asked.
@@ -187,7 +198,7 @@ async function runForPersona(
   if (dueErr) {
     await stamp(supabase, cfg.persona_id);
     const broken = { ...base, trusted: false, note: `Datenbank: ${dueErr.message}` };
-    await report(cfg, broken, trigger);
+    await report(cfg, broken, trigger, notice);
     return broken;
   }
 
@@ -197,7 +208,7 @@ async function runForPersona(
     // Still say so: somebody typed the command and their message was
     // deleted, so silence would read as the bot being broken.
     const idle = { ...base, note: "nothing due" };
-    await report(cfg, idle, trigger);
+    await report(cfg, idle, trigger, notice);
     return idle;
   }
 
@@ -217,7 +228,11 @@ async function runForPersona(
   const unsure = links.filter((l) => states.get(l.url_key) !== "alive");
   const detailUrls = unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
   const detail = await checkPostsDetailed(
-    detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : []
+    detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : [],
+    // Whatever is left of the minute, minus what reporting and deleting
+    // need. Running out here costs a day; running out after the deletions
+    // but before the report leaves nobody knowing what happened.
+    now + RUN_DEADLINE_MS - Date.now()
   );
   detail.states.forEach((state, code) => states.set(code, state));
   // Beyond the batch there is no verdict at all, rather than a cheap one.
@@ -226,7 +241,7 @@ async function runForPersona(
   if (error) {
     await stamp(supabase, cfg.persona_id);
     const failed = { ...base, trusted: false, note: error };
-    await report(cfg, failed, trigger);
+    await report(cfg, failed, trigger, notice);
     return failed;
   }
 
@@ -344,7 +359,7 @@ async function runForPersona(
     trusted,
     note: trusted ? null : reasons.join("; "),
   };
-  await report(cfg, result, trigger);
+  await report(cfg, result, trigger, notice);
   return result;
 }
 
@@ -516,7 +531,26 @@ async function stamp(supabase: SupabaseClient<Database>, personaId: string) {
  * A line in TALK saying what happened. Never in the requests topic — that
  * one is the model's work queue and stays free of chatter.
  */
-async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
+/** The placeholder the result will be written over. */
+async function announce(cfg: Cfg, trigger: string): Promise<number | null> {
+  if (!cfg.chat_id) return null;
+  const res = await sendMessage({
+    chat_id: cfg.chat_id,
+    message_thread_id: cfg.talk_thread_id,
+    text: `🔗 <b>Link-Check läuft…</b> (${trigger})`,
+    disable_notification: true,
+  });
+  const id = (res.result as { message_id?: number } | undefined)?.message_id;
+  if (!res.ok) console.error("[links] could not announce the run", res.error);
+  return typeof id === "number" ? id : null;
+}
+
+async function report(
+  cfg: Cfg,
+  r: LinkCheckResult,
+  trigger: string,
+  editing: number | null
+) {
   if (!cfg.chat_id) return;
 
   const lines = [`🔗 <b>Link-Check</b> (${trigger})`];
@@ -560,12 +594,14 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
   }
   const text = lines.join("\n");
 
-  const res = await sendMessage({
-    chat_id: cfg.chat_id,
-    message_thread_id: cfg.talk_thread_id,
-    text,
-    disable_notification: true,
-  });
+  const res = editing
+    ? await editMessageText({ chat_id: cfg.chat_id, message_id: editing, text })
+    : await sendMessage({
+        chat_id: cfg.chat_id,
+        message_thread_id: cfg.talk_thread_id,
+        text,
+        disable_notification: true,
+      });
   // The report is the only thing anyone sees. If it does not arrive, the run
   // looks like it never happened — which is precisely how the last two
   // failures presented themselves.

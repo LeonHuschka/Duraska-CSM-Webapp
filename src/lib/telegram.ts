@@ -56,6 +56,28 @@ export async function sendMessage(opts: {
 }
 
 /**
+ * Rewrite a message the bot already sent.
+ *
+ * Used to turn "this is running" into the result. A job that posts only
+ * when it finishes is indistinguishable from one that never started — and
+ * a link check that runs out of its minute halfway does exactly that.
+ */
+export async function editMessageText(opts: {
+  chat_id: number | string;
+  message_id: number;
+  text: string;
+  parse_mode?: "HTML" | "Markdown";
+}) {
+  return call("editMessageText", {
+    chat_id: opts.chat_id,
+    message_id: opts.message_id,
+    text: opts.text,
+    parse_mode: opts.parse_mode ?? "HTML",
+    link_preview_options: { is_disabled: true },
+  });
+}
+
+/**
  * Put an emoji reaction on a message. Requires the bot to be an admin in
  * the group. Telegram only accepts a fixed set of emoji here.
  */
