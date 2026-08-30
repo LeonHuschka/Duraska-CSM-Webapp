@@ -10,37 +10,42 @@ import {
   RUN_DEADLINE_MS,
 } from "@/lib/apify";
 import {
-  canDeleteMessages,
-  deleteMessage,
   editMessageText,
   sendMessage,
+  setMessageReaction,
+  REACTION,
 } from "@/lib/telegram";
 
 /**
- * Take inspo links whose posts are gone out of the requests topic.
+ * Mark the inspo links that are no longer worth opening.
  *
- * Dead links pile up and the model works through them one by one to find
- * nothing, so removing them is worth real money. Removing a live one is
- * worse than leaving ten dead ones, though: the link is the only record of
- * what she was asked to shoot. An earlier version of this deleted on a
- * single bad answer and came within one run of wiping fifty-two valid
- * links, which is the whole reason for the caution below.
+ * It marks rather than deletes, because deleting turned out to be
+ * impossible. Telegram refuses to remove a message more than 48 hours old,
+ * and — measured, not assumed — an administrator bot holding
+ * can_delete_messages is no exception, despite the reference promising it
+ * "can delete any message there". Inspo links die weeks after they are
+ * posted, so by the time anyone knows, the window has been shut for a
+ * fortnight. Only a real user account could still remove them.
  *
- * What may be deleted:
+ * So the bot puts a 💔 on the message instead. That is unambiguous, it
+ * costs nothing to be wrong about, and clearing the topic stays a
+ * two-minute job for a person rather than something nobody can do at all.
+ *
+ * What gets marked:
  *   - only links still `open`. Once the model has reacted the reel is
  *     filmed, and whether Instagram still hosts the original is beside the
- *     point — the message is her own record and must stay. The status is
- *     re-read immediately before deleting, because she may well react in
- *     the seconds between the check and the deletion.
+ *     point — the message is her own record. The status is re-read
+ *     immediately before marking, because she may well react in the seconds
+ *     between the check and the mark.
  *   - only when every link in that message is also gone. Messages can
- *     carry several.
+ *     carry several, and a 💔 over a live one would be a lie.
  *   - only when the second pass says the post does not exist, never on the
  *     cheap pass alone. The cheap one's "not found" also covers private,
  *     suspended and age-restricted, which is how the earlier version came
  *     to condemn 59 of 106 links, one of them verified alive by hand.
- *   - only while the run itself looks trustworthy — see below. That is
- *     where all of the safety sits now: there is no repeat confirmation, a
- *     link is removed in the run that finds it gone.
+ *   - only while the run itself looks trustworthy — see below. A wrong mark
+ *     is visible and can be taken off again, so this is now a matter of not
+ *     crying wolf rather than of avoiding damage.
  */
 
 /**
@@ -87,19 +92,18 @@ const RECHECK_AFTER_H = 16;
  */
 const EXPIRE_AFTER_DAYS = 30;
 
-/** Enough to clear a backlog in a few days without emptying a topic at once. */
-const MAX_EXPIRE_DELETIONS = 30;
+/** Marking is reversible, so the whole backlog can be done in one pass. */
+const MAX_EXPIRE_DELETIONS = 80;
 
 /**
  * A brake against a run that has gone mad, not a pace limit.
  *
- * It was eight, which quietly undid the point: 28 confirmed-gone links
- * would have trickled out over five days while the model kept opening
- * them. Clearing a backlog in two runs is the behaviour that was asked
- * for; a run trying to delete more than this has something wrong with it
- * that the guards above should already have caught.
+ * Generous now that the outcome is a 💔 rather than a deletion: a wrong
+ * mark is visible and can be taken off again, where a wrong deletion was
+ * gone for good. The guards above still decide whether a run may mark
+ * anything at all.
  */
-const MAX_DELETIONS = 25;
+const MAX_DELETIONS = 60;
 
 export type LinkCheckResult = {
   personaId: string;
@@ -452,15 +456,13 @@ async function expireOldLinks(
       continue;
     }
 
-    const res = await deleteMessage({
+    const res = await setMessageReaction({
       chat_id: l.chat_id,
       message_id: Number(l.message_id),
+      emoji: REACTION.dead,
     });
     if (!res.ok) {
-      // Telegram refuses some deletions. Worth counting rather than
-      // swallowing: if it refuses everything, the bot is missing the
-      // can_delete_messages right and no amount of retrying will help.
-      console.warn("[links] expiry deletion refused", l.message_id, res.error);
+      console.warn("[links] could not mark expired link", l.message_id, res.error);
       refused++;
       continue;
     }
@@ -527,12 +529,13 @@ async function removeMessages(
       continue;
     }
 
-    const res = await deleteMessage({
+    const res = await setMessageReaction({
       chat_id: c.chat_id,
       message_id: Number(c.message_id),
+      emoji: REACTION.dead,
     });
     if (!res.ok) {
-      console.warn("[links] could not delete message", c.message_id, res.error);
+      console.warn("[links] could not mark message", c.message_id, res.error);
       refused++;
       skipped++;
       continue;
@@ -588,25 +591,14 @@ async function report(
   // The age sweep runs whatever the scraper did, so it is reported first.
   if (r.expired > 0) {
     lines.push(
-      `🗑 ${r.expired} ohne Reaktion seit über ${EXPIRE_AFTER_DAYS} Tagen — gelöscht`
+      `💔 ${r.expired} ohne Reaktion seit über ${EXPIRE_AFTER_DAYS} Tagen — markiert`
     );
   }
   if (r.expiredLeft > 0) {
     lines.push(`   ${r.expiredLeft} weitere folgen beim nächsten Lauf`);
   }
   if (r.refused > 0) {
-    // Telegram says "message can't be deleted" both when the bot lacks the
-    // right and when the message is older than its 48-hour window, so ask
-    // which it is rather than guessing in the group's face.
-    const rights = cfg.chat_id ? await canDeleteMessages(cfg.chat_id) : null;
-    const why = !rights?.known
-      ? "Grund unklar"
-      : !rights.admin
-        ? "der Bot ist in der Gruppe kein Administrator"
-        : !rights.canDelete
-          ? "dem Bot fehlt das Admin-Recht „Nachrichten löschen“"
-          : "der Bot darf löschen — Telegram lehnt es wegen des Alters der Nachrichten ab";
-    lines.push(`⚠️ ${r.refused} konnte Telegram nicht löschen: ${why}`);
+    lines.push(`⚠️ ${r.refused} konnten nicht markiert werden`);
   }
 
   if (!r.trusted) {
@@ -630,7 +622,9 @@ async function report(
       lines.push(`· ${noVerdict} ohne Urteil (kommen im nächsten Lauf dran)`);
     }
     if (r.deleted > 0) {
-      lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Post" : "Posts"} nicht mehr vorhanden — gelöscht`);
+      lines.push(
+        `💔 ${r.deleted} ${r.deleted === 1 ? "Post ist" : "Posts sind"} nicht mehr da — markiert`
+      );
     }
     // Whatever is left over was gone but could not be removed: the run hit
     // its cap, or the message still carries a live link.
