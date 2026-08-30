@@ -32,8 +32,9 @@ import { deleteMessage, sendMessage } from "@/lib/telegram";
  *     cheap pass alone. The cheap one's "not found" also covers private,
  *     suspended and age-restricted, which is how the earlier version came
  *     to condemn 59 of 106 links, one of them verified alive by hand.
- *   - only after that verdict has held across two separate runs.
- *   - only while the run itself looks trustworthy — see below.
+ *   - only while the run itself looks trustworthy — see below. That is
+ *     where all of the safety sits now: there is no repeat confirmation, a
+ *     link is removed in the run that finds it gone.
  */
 
 /**
@@ -58,19 +59,12 @@ const MAX_UNREACHABLE_SHARE = 0.7;
 /** Don't spend money re-checking something we looked at this morning. */
 const RECHECK_AFTER_H = 16;
 
-/**
- * How many separate runs must call a post gone before its message goes.
- *
- * Two, and no waiting period on top: back to back or a day apart, both
- * count. The second run exists to survive a single bad answer from the
- * scraper, and a second opinion does not get better for being slept on —
- * whereas every extra day is a day the model spends opening dead links,
- * which is the thing this is for. The verdict itself comes from the detail
- * pass, measured to separate a deleted post from a hidden one; the guards
- * further down catch a whole run being wrong, which is the failure mode
- * more strikes would not have helped with anyway.
- */
-const MIN_STRIKES = 2;
+// No strike count, on purpose. A link is deleted in the run that finds it
+// gone, and the safety lives entirely in what counts as "gone": only the
+// detail pass may say it, and only in a run that passed every guard below.
+// Waiting for a repeat protected against one scraper hiccup and cost the
+// model days of opening dead links — the wrong trade, and a second look
+// under identical conditions was never much of a second opinion anyway.
 
 /**
  * A link nobody has reacted to in a month is dropped without asking anyone.
@@ -303,9 +297,7 @@ async function runForPersona(
     if (state !== "unreachable") continue; // no verdict — leave it for next run
 
     unreachable++;
-    // A run we don't believe must not build a case for deleting anything.
-    // Otherwise the day the vantage point is fixed, every link that was only
-    // ever invisible would already have its three strikes and go at once.
+    // A run we don't believe leaves no trace beyond "we looked".
     if (!trusted) {
       await supabase
         .from("content_links")
@@ -314,21 +306,18 @@ async function runForPersona(
       continue;
     }
 
-    const since = l.unreachable_since ?? new Date().toISOString();
-    const runs = (l.unreachable_runs ?? 0) + 1;
     await supabase
       .from("content_links")
       .update({
         link_ok: false,
         checked_at: new Date().toISOString(),
-        unreachable_since: since,
-        unreachable_runs: runs,
+        unreachable_since: l.unreachable_since ?? new Date().toISOString(),
+        unreachable_runs: (l.unreachable_runs ?? 0) + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", l.id);
 
-    if (runs >= MIN_STRIKES) deletable.push(l);
-    else watching++;
+    deletable.push(l);
   }
 
   let deleted = 0;
@@ -563,10 +552,10 @@ async function report(cfg: Cfg, r: LinkCheckResult, trigger: string) {
     if (r.deleted > 0) {
       lines.push(`🗑 ${r.deleted} ${r.deleted === 1 ? "Post" : "Posts"} nicht mehr vorhanden — gelöscht`);
     }
+    // Whatever is left over was gone but could not be removed: the run hit
+    // its cap, or the message still carries a live link.
     if (r.watching > 0) {
-      lines.push(
-        `👁 ${r.watching} beim nächsten Lauf fällig (${MIN_STRIKES}× bestätigt wird gelöscht)`
-      );
+      lines.push(`↩︎ ${r.watching} folgen beim nächsten Lauf`);
     }
   }
   const text = lines.join("\n");
