@@ -164,16 +164,21 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   // happen before the command message is tidied away, because deleting that
   // message IS one of the experiments.
   if (name === "diag") {
-    const text = await diagnoseDeletion({
+    // "/diag 1234" or "/diag https://t.me/c/…/…/1234" — the last number wins.
+    const arg = text.slice(1).split(/\s+/).slice(1).join(" ");
+    const digits = arg.match(/(\d+)\D*$/);
+    const target = digits ? Number(digits[1]) : null;
+    const answer = await diagnoseDeletion({
       chatId: msg.chat.id,
       talkThreadId: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
       personaId: cfg.persona_id,
       commandMessageId: msg.message_id,
+      targetMessageId: target && Number.isFinite(target) ? target : null,
     });
     await sendMessage({
       chat_id: msg.chat.id,
       message_thread_id: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
-      text,
+      text: answer,
       disable_notification: true,
     });
     return true;

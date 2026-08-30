@@ -31,6 +31,16 @@ export async function diagnoseDeletion(opts: {
   personaId: string;
   /** The message the person typed to start this — fresh, and theirs. */
   commandMessageId: number;
+  /**
+   * An older message to try edit and delete on, given as "/diag <id>" or a
+   * pasted t.me link. Point it at one of the bot's OWN old messages — a
+   * link-check report from days ago — and it answers the only question the
+   * documentation leaves open: whether the 48-hour limit binds a bot on its
+   * own messages too. Nothing in the API reference exempts them, and the
+   * strongest exemption there ("can delete any message") has already been
+   * measured not to beat the clock.
+   */
+  targetMessageId?: number | null;
 }): Promise<string> {
   const steps: Step[] = [];
   const say = (name: string, ok: boolean | null, detail: string) =>
@@ -112,6 +122,20 @@ export async function diagnoseDeletion(opts: {
     );
     const del = await deleteMessage({ chat_id: opts.chatId, message_id: oldId });
     say("ALTE fremde Nachricht löschen", del.ok, del.error ?? "ging");
+  }
+
+  // A message named on the command line — meant to be one of the bot's own,
+  // older than two days.
+  if (opts.targetMessageId) {
+    const id = opts.targetMessageId;
+    const edit = await editMessageText({
+      chat_id: opts.chatId,
+      message_id: id,
+      text: "🧪 Diagnose: diese Nachricht wurde vom Bot bearbeitet.",
+    });
+    say(`Nachricht ${id} bearbeiten`, edit.ok, edit.error ?? "ging");
+    const del = await deleteMessage({ chat_id: opts.chatId, message_id: id });
+    say(`Nachricht ${id} löschen`, del.ok, del.error ?? "ging");
   }
 
   const mark = (ok: boolean | null) => (ok === null ? "•" : ok ? "✅" : "❌");
