@@ -159,7 +159,21 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
     return false;
   }
 
-  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+  // Deleting the command message is also the one experiment that separates
+  // the two reasons Telegram refuses a deletion. This message is fresh and
+  // it belongs to the person who typed it — the same person whose old link
+  // messages the bot cannot remove. If this succeeds, the bot is allowed to
+  // delete their messages and only age is stopping it; if it fails, rank is,
+  // and no permission will change that.
+  const tidy = await deleteMessage({
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+  });
+  console.log(
+    `[telegram] /${name} from @${msg.from?.username ?? "?"} — deleting their own fresh message: ${
+      tidy.ok ? "allowed" : `refused (${tidy.error})`
+    }`
+  );
 
   const secret = process.env.CRON_SECRET;
   if (!secret) {
