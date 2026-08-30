@@ -188,7 +188,23 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
  * get an answer to within seconds, and a scraper run would earn us the same
  * check three times over.
  */
-const CHECK_EVERY_H = 20;
+/**
+ * One check a day, counted in calendar days rather than hours.
+ *
+ * An hour count is either too long or too short: a full day drifts later
+ * every morning until an afternoon of silence skips a day entirely, and
+ * anything shorter can fire twice between one midnight and the next. The
+ * date in Berlin has neither problem — the first sign of life each day
+ * starts the run, whatever time that is, and nothing follows it until
+ * tomorrow.
+ *
+ * A run Leon starts by hand counts as the day's run: the job stamps the
+ * same field on every path it can exit by, so the group's own traffic
+ * finds the day already spent and stays quiet.
+ */
+function berlinDay(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" });
+}
 
 async function maybeRunDailyCheck(req: Request, update: TgUpdate) {
   const chatId =
@@ -209,8 +225,12 @@ async function maybeRunDailyCheck(req: Request, update: TgUpdate) {
     .maybeSingle();
   if (!cfg) return;
 
-  const last = cfg.last_link_check_at ? new Date(cfg.last_link_check_at).getTime() : 0;
-  if (Date.now() - last < CHECK_EVERY_H * 3600_000) return;
+  if (
+    cfg.last_link_check_at &&
+    berlinDay(new Date(cfg.last_link_check_at)) === berlinDay(new Date())
+  ) {
+    return; // already checked today, by the schedule or by hand
+  }
 
   // Claim the slot before the request goes out. Two updates arriving
   // together would otherwise both find the check due and both start one.
