@@ -14,6 +14,7 @@ import {
 import { extractMetricsFromImage } from "@/lib/vision";
 import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
+import { diagnoseDeletion } from "@/lib/telegram-diagnose";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -131,7 +132,7 @@ export async function POST(req: Request) {
  *
  * Returns true when the message was a command and has been dealt with.
  */
-const COMMANDS = new Set(["check", "links", "linkcheck"]);
+const COMMANDS = new Set(["check", "links", "linkcheck", "diag"]);
 
 async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   const text = (msg.text ?? "").trim();
@@ -145,7 +146,7 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   const supabase = createAdminClient();
   const { data: cfg } = await supabase
     .from("telegram_config")
-    .select("persona_id, requests_thread_id")
+    .select("persona_id, requests_thread_id, talk_thread_id")
     .eq("chat_id", msg.chat.id)
     .maybeSingle();
   if (!cfg) return false;
@@ -157,6 +158,25 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
     Number(cfg.requests_thread_id) !== Number(msg.message_thread_id)
   ) {
     return false;
+  }
+
+  // /diag runs the permission experiments and answers in TALK. It has to
+  // happen before the command message is tidied away, because deleting that
+  // message IS one of the experiments.
+  if (name === "diag") {
+    const text = await diagnoseDeletion({
+      chatId: msg.chat.id,
+      talkThreadId: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
+      personaId: cfg.persona_id,
+      commandMessageId: msg.message_id,
+    });
+    await sendMessage({
+      chat_id: msg.chat.id,
+      message_thread_id: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
+      text,
+      disable_notification: true,
+    });
+    return true;
   }
 
   // Deleting the command message is also the one experiment that separates
