@@ -189,7 +189,7 @@ async function runForPersona(
   let q = supabase
     .from("content_links")
     .select(
-      "id, url, url_key, chat_id, message_id, link_ok, unreachable_since, unreachable_runs"
+      "id, url, url_key, chat_id, message_id, link_ok, hidden_confirmed, unreachable_since, unreachable_runs"
     )
     .eq("persona_id", cfg.persona_id)
     .eq("status", "open");
@@ -223,14 +223,21 @@ async function runForPersona(
     CONTROL_URL,
   ]);
 
-  // ── Second pass: what the first could not see ──
+  // ── Second pass: what the first could not see, asked once ──
   //
   // The cheap scraper's "not found" covers deleted, private, suspended and
-  // age-restricted alike. This one tells those apart, at nine times the
-  // price, so it is asked only about the leftovers — and only about as many
-  // as fit in the minute the function gets. The control goes with them:
-  // it must still come back missing here, where "missing" decides things.
-  const unsure = links.filter((l) => states.get(l.url_key) !== "alive");
+  // age-restricted alike. This one tells those apart at nine times the
+  // price, so two rules keep it small.
+  //
+  // It only sees links the cheap pass could not confirm — and of those,
+  // only ones we have never had an answer for. A link this pass has already
+  // found alive is hidden, not gone, and hidden does not become deleted by
+  // being asked again tomorrow; re-asking was quietly re-buying the same
+  // answer every single run. Anything still hidden a month on leaves by the
+  // age rule regardless, which is why nothing needs re-verifying here.
+  const unsure = links.filter(
+    (l) => states.get(l.url_key) !== "alive" && !l.hidden_confirmed
+  );
   const detailUrls = unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
   const detail = await checkPostsDetailed(
     detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : [],
@@ -239,9 +246,23 @@ async function runForPersona(
     // but before the report leaves nobody knowing what happened.
     now + RUN_DEADLINE_MS - Date.now()
   );
+
+  // Which links the cheap pass could see at all. A link the expensive pass
+  // calls alive that this set does not contain is hidden rather than public,
+  // and that is the state worth remembering — it will not change back.
+  const publiclyVisible = new Set(
+    links.filter((l) => states.get(l.url_key) === "alive").map((l) => l.url_key)
+  );
+
+  // Only this pass may condemn anything, so the cheap pass's "missing" is
+  // wiped for every link before its answers are laid over the top. Without
+  // this, a second pass that times out leaves the cheap verdicts standing
+  // and the report announces 35 posts gone on the strength of a scraper
+  // that cannot tell gone from hidden.
+  for (const l of links) {
+    if (states.get(l.url_key) === "unreachable") states.delete(l.url_key);
+  }
   detail.states.forEach((state, code) => states.set(code, state));
-  // Beyond the batch there is no verdict at all, rather than a cheap one.
-  for (const l of unsure.slice(DETAIL_BATCH)) states.delete(l.url_key);
 
   if (error) {
     await stamp(supabase, cfg.persona_id);
@@ -306,6 +327,7 @@ async function runForPersona(
         .from("content_links")
         .update({
           link_ok: true,
+          hidden_confirmed: !publiclyVisible.has(l.url_key),
           checked_at: new Date().toISOString(),
           unreachable_since: null,
           unreachable_runs: 0,

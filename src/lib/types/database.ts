@@ -665,6 +665,7 @@ export type Database = {
           shot_at: string | null;
           request_id: string | null;
           link_ok: boolean | null;
+          hidden_confirmed: boolean;
           checked_at: string | null;
           unreachable_since: string | null;
           unreachable_runs: number;
@@ -685,6 +686,7 @@ export type Database = {
           shot_at?: string | null;
           request_id?: string | null;
           link_ok?: boolean | null;
+          hidden_confirmed?: boolean;
           checked_at?: string | null;
           unreachable_since?: string | null;
           unreachable_runs?: number;
@@ -705,6 +707,7 @@ export type Database = {
           shot_at?: string | null;
           request_id?: string | null;
           link_ok?: boolean | null;
+          hidden_confirmed?: boolean;
           checked_at?: string | null;
           unreachable_since?: string | null;
           unreachable_runs?: number;
