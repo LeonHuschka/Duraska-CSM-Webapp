@@ -9,7 +9,12 @@ import {
   DETAIL_BATCH,
   RUN_DEADLINE_MS,
 } from "@/lib/apify";
-import { deleteMessage, editMessageText, sendMessage } from "@/lib/telegram";
+import {
+  canDeleteMessages,
+  deleteMessage,
+  editMessageText,
+  sendMessage,
+} from "@/lib/telegram";
 
 /**
  * Take inspo links whose posts are gone out of the requests topic.
@@ -342,6 +347,7 @@ async function runForPersona(
     deleted = res.deleted;
     skipped = res.skipped;
     watching += res.skipped;
+    base.refused += res.refused;
   } else {
     watching += deletable.length;
   }
@@ -456,7 +462,7 @@ async function expireOldLinks(
 async function removeMessages(
   supabase: SupabaseClient<Database>,
   candidates: { id: string; chat_id: number; message_id: number }[]
-): Promise<{ deleted: number; skipped: number }> {
+): Promise<{ deleted: number; skipped: number; refused: number }> {
   // Everything the messages in question carry, not just the dead links.
   const messageIds = Array.from(new Set(candidates.map((c) => Number(c.message_id))));
   const chatIds = Array.from(new Set(candidates.map((c) => Number(c.chat_id))));
@@ -477,6 +483,7 @@ async function removeMessages(
 
   let deleted = 0;
   let skipped = 0;
+  let refused = 0;
   const seen = new Set<string>();
 
   for (const c of candidates) {
@@ -504,6 +511,7 @@ async function removeMessages(
     });
     if (!res.ok) {
       console.warn("[links] could not delete message", c.message_id, res.error);
+      refused++;
       skipped++;
       continue;
     }
@@ -517,7 +525,7 @@ async function removeMessages(
       );
   }
 
-  return { deleted, skipped };
+  return { deleted, skipped, refused };
 }
 
 async function stamp(supabase: SupabaseClient<Database>, personaId: string) {
@@ -565,9 +573,18 @@ async function report(
     lines.push(`   ${r.expiredLeft} weitere folgen beim nächsten Lauf`);
   }
   if (r.refused > 0) {
-    lines.push(
-      `⚠️ ${r.refused} konnte Telegram nicht löschen — dem Bot fehlt vermutlich das Recht „Nachrichten löschen"`
-    );
+    // Telegram says "message can't be deleted" both when the bot lacks the
+    // right and when the message is older than its 48-hour window, so ask
+    // which it is rather than guessing in the group's face.
+    const rights = cfg.chat_id ? await canDeleteMessages(cfg.chat_id) : null;
+    const why = !rights?.known
+      ? "Grund unklar"
+      : !rights.admin
+        ? "der Bot ist in der Gruppe kein Administrator"
+        : !rights.canDelete
+          ? "dem Bot fehlt das Admin-Recht „Nachrichten löschen“"
+          : "der Bot darf löschen — Telegram lehnt es wegen des Alters der Nachrichten ab";
+    lines.push(`⚠️ ${r.refused} konnte Telegram nicht löschen: ${why}`);
   }
 
   if (!r.trusted) {

@@ -153,6 +153,39 @@ export async function setMyCommands() {
   });
 }
 
+/**
+ * What the bot is allowed to do in a group.
+ *
+ * Telegram answers every refused deletion with the same "message can't be
+ * deleted", whether the message is too old or the bot simply lacks the
+ * right. Only this call tells the two apart, and the difference decides
+ * whether the cleanup is one checkbox away or impossible.
+ */
+export async function canDeleteMessages(
+  chatId: number | string
+): Promise<{ known: boolean; admin: boolean; canDelete: boolean; note: string }> {
+  const me = await getMe();
+  const id = (me.result as { id?: number } | undefined)?.id;
+  if (!me.ok || !id) {
+    return { known: false, admin: false, canDelete: false, note: me.error ?? "getMe failed" };
+  }
+  const res = await call<{ status?: string; can_delete_messages?: boolean }>(
+    "getChatMember",
+    { chat_id: chatId, user_id: id }
+  );
+  if (!res.ok || !res.result) {
+    return { known: false, admin: false, canDelete: false, note: res.error ?? "getChatMember failed" };
+  }
+  const status = res.result.status ?? "?";
+  const admin = status === "administrator" || status === "creator";
+  return {
+    known: true,
+    admin,
+    canDelete: res.result.can_delete_messages === true,
+    note: status,
+  };
+}
+
 /** Verify the configured token actually belongs to a live bot. */
 export async function getMe() {
   return call<{ id: number; username?: string; first_name?: string }>("getMe", {});
