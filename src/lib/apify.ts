@@ -29,13 +29,19 @@ const ENDPOINT = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-it
 const RUN_TIMEOUT_MS = 20_000;
 
 /**
- * Everything must be written away and reported inside the function's minute,
- * so the second pass gets whatever is left of this and no more. Measured
- * runs of the detailed scraper: 31s, 46s, 56s — it is dominated by its own
- * start-up and does not scale with the batch, which is why the answer is a
- * deadline rather than a smaller batch.
+ * How long a run may take in total before results are written away.
+ *
+ * This was 45 seconds, carved out of a minute I believed was the ceiling.
+ * It is not: Hobby functions may run for 300 seconds. The detailed scraper
+ * needs 31 to 56 depending on its own start-up, so under the old figure it
+ * was being cut off just short of finishing, run after run — the cause of
+ * "zweiter Durchgang ohne Antwort in 36s" and of a report that condemned 35
+ * posts on the cheap pass's word alone.
+ *
+ * Four minutes leaves the slowest measured run a wide margin and still ends
+ * a wedged connection well inside the platform's limit.
  */
-export const RUN_DEADLINE_MS = 45_000;
+export const RUN_DEADLINE_MS = 240_000;
 
 export type PostState = "alive" | "unreachable" | "unknown";
 

@@ -3,7 +3,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { runLinkCheck } from "@/lib/link-check-job";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Hobby allows 300 seconds, not the 60 I had assumed from an older limit —
+// and that assumption is what forced the second scraper into a deadline it
+// kept missing by ten seconds. It needs 31 to 56; now it simply has room.
+export const maxDuration = 300;
 
 /**
  * The link check, as its own request.
