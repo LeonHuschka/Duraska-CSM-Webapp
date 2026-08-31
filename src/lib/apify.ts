@@ -205,8 +205,21 @@ export const CONTROL_URL = `https://www.instagram.com/p/${CONTROL_SHORTCODE}/`;
 const DETAIL_ACTOR = "apify~instagram-api-scraper";
 const DETAIL_ENDPOINT = `https://api.apify.com/v2/acts/${DETAIL_ACTOR}/run-sync-get-dataset-items`;
 
-/** 58 links took 44 seconds, so this many keeps a run inside the minute. */
-export const DETAIL_BATCH = 35;
+/**
+ * Enough to settle a whole backlog in one run.
+ *
+ * It was 35, which left 73 links reported as "no verdict, next time" — and
+ * next time meant tomorrow, for a cleanup that was asked to happen now. The
+ * cap was set when the function had sixty seconds; it has three hundred,
+ * and this actor's runtime is dominated by its own start-up rather than by
+ * how many links it is handed.
+ *
+ * Nor is it really about money: a link reaches this pass once in its life,
+ * because "hidden" is remembered and "gone" takes it out of the pool.
+ * Clearing what is there costs about twelve cents once; a run after that
+ * finds a handful at most.
+ */
+export const DETAIL_BATCH = 150;
 
 export async function checkPostsDetailed(
   urls: string[],
