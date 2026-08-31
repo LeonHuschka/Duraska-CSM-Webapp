@@ -124,6 +124,10 @@ export type LinkCheckResult = {
   expiredLeft: number;
   /** Deletions Telegram would not carry out. */
   refused: number;
+  /** How many links each pass had to answer — the cost, itemised. */
+  freeAnswered: number;
+  cheapAsked: number;
+  detailAsked: number;
   /** Apify credit used this month, so the cost is never a surprise. */
   spentUsd: number | null;
   budgetUsd: number | null;
@@ -173,6 +177,9 @@ async function runForPersona(
     expired: 0,
     expiredLeft: 0,
     refused: 0,
+    freeAnswered: 0,
+    cheapAsked: 0,
+    detailAsked: 0,
     spentUsd: null,
     budgetUsd: null,
     trusted: true,
@@ -262,6 +269,8 @@ async function runForPersona(
     if (!code || known.has(code)) return false;
     return states.get(code) !== "alive";
   });
+  base.freeAnswered = states.size;
+  base.cheapAsked = unanswered.length;
   if (unanswered.length > 0) {
     const cheap = await checkPosts(unanswered);
     cheap.states.forEach((state, code) => {
@@ -299,6 +308,7 @@ async function runForPersona(
   base.budgetUsd = spend?.limit ?? null;
 
   const detailUrls = overBudget ? [] : unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
+  base.detailAsked = detailUrls.length;
   const detail = await checkPostsDetailed(
     detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : [],
     // Whatever is left of the minute, minus what reporting and deleting
@@ -698,6 +708,13 @@ async function report(
     if (r.watching > 0) {
       lines.push(`↩︎ ${r.watching} folgen beim nächsten Lauf`);
     }
+  }
+  // What each pass had to do, because the whole cost argument rests on the
+  // free one carrying most of it and the paid ones seeing a link once.
+  if (r.checked > 0) {
+    lines.push(
+      `⚙️ gratis ${r.freeAnswered} · billig ${r.cheapAsked} · teuer ${r.detailAsked}`
+    );
   }
   if (r.spentUsd != null && r.budgetUsd) {
     lines.push(
