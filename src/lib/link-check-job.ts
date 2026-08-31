@@ -51,11 +51,20 @@ import {
  */
 
 /**
- * Links per run. The whole backlog of 106 came back in nine seconds, so
- * there is no reason to sweep it in slices — and doing it in one go is what
- * makes a run's unreachable share meaningful.
+ * Links looked at per run, oldest-checked first.
+ *
+ * The cheap pass is per link, so sweeping the whole backlog daily had
+ * quietly become the largest line on the Apify bill — larger than the
+ * expensive pass, which only ever sees links it has never answered for.
+ * There is little to gain from it: a post that dies inside its first month
+ * is caught a couple of days later either way, and everything still sitting
+ * there after thirty days leaves by the age rule without anyone asking
+ * Instagram at all.
+ *
+ * Forty a run means every link is looked at every two or three days, and it
+ * bounds what an impatient afternoon of /check can cost.
  */
-const MAX_LINKS = 200;
+const MAX_LINKS = 40;
 
 /**
  * A runaway brake, not a judgment.

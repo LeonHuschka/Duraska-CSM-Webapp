@@ -194,10 +194,15 @@ export const CONTROL_URL = `https://www.instagram.com/p/${CONTROL_SHORTCODE}/`;
  * opened and confirmed alive was among the restricted. That is the whole
  * difference between this working and the August incident.
  *
- * It costs $0.0017 a post against $0.00018, roughly nine times as much,
- * which is why it only ever sees what the first pass could not settle.
+ * Priced at $0.0013 a post against the cheap pass's $0.00018. Every
+ * Instagram actor in the store that accepts post URLs was measured for this:
+ * of the ones cheaper than this, apidojo's answers post URLs with
+ * {noResults:true}, and the two at a third of the price take profile names
+ * only. This is the cheapest one that both takes a link and knows the
+ * difference, which is why it still only ever sees what the first pass
+ * could not settle.
  */
-const DETAIL_ACTOR = "apify~instagram-post-scraper";
+const DETAIL_ACTOR = "apify~instagram-api-scraper";
 const DETAIL_ENDPOINT = `https://api.apify.com/v2/acts/${DETAIL_ACTOR}/run-sync-get-dataset-items`;
 
 /** 58 links took 44 seconds, so this many keeps a run inside the minute. */
@@ -222,7 +227,7 @@ export async function checkPostsDetailed(
     const res = await fetch(`${DETAIL_ENDPOINT}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ username: urls, resultsLimit: urls.length }),
+      body: JSON.stringify({ directUrls: urls, resultsType: "details", resultsLimit: 1 }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return { states, error: `apify detail http ${res.status}` };
