@@ -2,7 +2,6 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import {
-  checkPosts,
   checkPostsDetailed,
   CONTROL_SHORTCODE,
   CONTROL_URL,
@@ -11,6 +10,7 @@ import {
   RUN_DEADLINE_MS,
   SPEND_CEILING_SHARE,
 } from "@/lib/apify";
+import { checkPostsDirect } from "@/lib/instagram-probe";
 import {
   editMessageText,
   sendMessage,
@@ -53,18 +53,11 @@ import {
 /**
  * Links looked at per run, oldest-checked first.
  *
- * The cheap pass is per link, so sweeping the whole backlog daily had
- * quietly become the largest line on the Apify bill — larger than the
- * expensive pass, which only ever sees links it has never answered for.
- * There is little to gain from it: a post that dies inside its first month
- * is caught a couple of days later either way, and everything still sitting
- * there after thirty days leaves by the age rule without anyone asking
- * Instagram at all.
- *
- * Forty a run means every link is looked at every two or three days, and it
- * bounds what an impatient afternoon of /check can cost.
+ * The cap was forty while the first pass was paid per link. It is free now,
+ * so the whole backlog is swept every run again and a post that dies is
+ * noticed the next day rather than three days later.
  */
-const MAX_LINKS = 40;
+const MAX_LINKS = 150;
 
 /**
  * A runaway brake, not a judgment.
@@ -237,8 +230,11 @@ async function runForPersona(
     return idle;
   }
 
-  // ── First pass: cheap, and only ever trusted when it says "alive" ──
-  const { states, error } = await checkPosts([
+  // ── First pass: free, and only ever trusted when it says "alive" ──
+  //
+  // Straight to Instagram, no scraper in between. This was the biggest line
+  // on the Apify bill until /diag showed the host is answering again.
+  const { states, error } = await checkPostsDirect([
     ...links.map((l) => l.url),
     CONTROL_URL,
   ]);
