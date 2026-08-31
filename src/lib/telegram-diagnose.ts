@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   canDeleteMessages,
+  checkInstagramAlive,
   deleteMessage,
   editMessageText,
   sendMessage,
@@ -137,6 +138,22 @@ export async function diagnoseDeletion(opts: {
     const del = await deleteMessage({ chat_id: opts.chatId, message_id: id });
     say(`Nachricht ${id} löschen`, del.ok, del.error ?? "ging");
   }
+
+  // Can this server reach Instagram directly at all?
+  //
+  // Every link check pays a scraper to ask a question the server could ask
+  // for nothing — measured from a laptop, a plain request identified 17 of
+  // 17 public posts correctly. It is not done that way because in August
+  // Instagram was found to answer this host with a login wall regardless.
+  // That was never re-checked, and it is the difference between the running
+  // cost being a few cents a month and almost nothing, so it is asked here
+  // against a post known to be public and live.
+  const direct = await checkInstagramAlive("https://www.instagram.com/p/Db6SXhgyxxo/");
+  say(
+    "Instagram direkt erreichbar (gratis)",
+    direct.alive === true ? true : direct.alive === false ? false : null,
+    `${direct.reason} — bei „media present" könnte der günstige Scraper entfallen`
+  );
 
   const mark = (ok: boolean | null) => (ok === null ? "•" : ok ? "✅" : "❌");
   const lines = [
