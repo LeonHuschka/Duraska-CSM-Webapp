@@ -328,8 +328,14 @@ async function runForPersona(
   // reads as gone. So each of these has to hold before a single message is
   // touched.
   const reasons: string[] = [];
-  if (states.get(CONTROL_SHORTCODE) !== "unreachable") {
-    reasons.push("the control post came back as reachable");
+  // "Not answered" and "answered as alive" both block deletion, but they are
+  // different problems and saying so saves an hour of looking in the wrong
+  // place — as it did when a rejected batch was reported as a live control.
+  const control = states.get(CONTROL_SHORTCODE);
+  if (control === "alive") {
+    reasons.push("der Kontrollposten kam als vorhanden zurück");
+  } else if (control !== "unreachable") {
+    reasons.push("der Kontrollposten wurde nicht beantwortet");
   }
   if (detail.error) {
     // Only the second pass can tell gone from hidden, so without it there is

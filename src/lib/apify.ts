@@ -98,7 +98,7 @@ export async function checkPosts(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        postUrls: urls,
+        postUrls: Array.from(new Set(urls)),
         maxItems: urls.length,
         ...(sessionCookies() ? { sessionCookies: sessionCookies() } : {}),
       }),
@@ -227,7 +227,16 @@ export async function checkPostsDetailed(
     const res = await fetch(`${DETAIL_ENDPOINT}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ directUrls: urls, resultsType: "details", resultsLimit: 1 }),
+      // The same post can be linked from several messages, and this actor
+      // rejects the whole batch over one repeat: "must NOT have duplicate
+      // items". One run died on it, and the failure cascaded — with no
+      // second pass there was no verdict for the control post either, so the
+      // guards reported a reachable control on top.
+      body: JSON.stringify({
+        directUrls: Array.from(new Set(urls)),
+        resultsType: "details",
+        resultsLimit: 1,
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return { states, error: `apify detail http ${res.status}` };
