@@ -140,6 +140,43 @@ export async function checkPosts(
  * deleted on their strength. NOT_FOUND rows are free, so this costs
  * nothing.
  */
+/**
+ * What this month has cost so far, against the free plan's ceiling.
+ *
+ * The expensive pass is the only part that can run the credit down, and
+ * nothing was stopping it. Apify knows the real figure, so it is asked
+ * rather than estimated — an estimate would drift exactly when it mattered.
+ */
+export async function monthlySpend(): Promise<{ used: number; limit: number } | null> {
+  const token = process.env.APIFY_TOKEN;
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      `https://api.apify.com/v2/users/me/limits?token=${encodeURIComponent(token)}`,
+      { signal: AbortSignal.timeout(10_000) }
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      data?: { limits?: { maxMonthlyUsageUsd?: number }; current?: { monthlyUsageUsd?: number } };
+    };
+    const used = body.data?.current?.monthlyUsageUsd;
+    const limit = body.data?.limits?.maxMonthlyUsageUsd;
+    if (typeof used !== "number" || typeof limit !== "number") return null;
+    return { used, limit };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Above this share of the month's credit, the expensive pass is skipped.
+ *
+ * The cheap pass and the age rule keep working — those cost almost nothing
+ * and the age rule costs nothing at all — so a month that runs hot loses
+ * the ability to tell deleted from hidden, not the cleanup itself.
+ */
+export const SPEND_CEILING_SHARE = 0.7;
+
 export const CONTROL_SHORTCODE = "CzZzZzZzZzZ";
 export const CONTROL_URL = `https://www.instagram.com/p/${CONTROL_SHORTCODE}/`;
 

@@ -7,7 +7,9 @@ import {
   CONTROL_SHORTCODE,
   CONTROL_URL,
   DETAIL_BATCH,
+  monthlySpend,
   RUN_DEADLINE_MS,
+  SPEND_CEILING_SHARE,
 } from "@/lib/apify";
 import {
   editMessageText,
@@ -119,6 +121,9 @@ export type LinkCheckResult = {
   expiredLeft: number;
   /** Deletions Telegram would not carry out. */
   refused: number;
+  /** Apify credit used this month, so the cost is never a surprise. */
+  spentUsd: number | null;
+  budgetUsd: number | null;
   trusted: boolean;
   note: string | null;
 };
@@ -165,6 +170,8 @@ async function runForPersona(
     expired: 0,
     expiredLeft: 0,
     refused: 0,
+    spentUsd: null,
+    budgetUsd: null,
     trusted: true,
     note: null,
   };
@@ -242,7 +249,19 @@ async function runForPersona(
   const unsure = links.filter(
     (l) => states.get(l.url_key) !== "alive" && !l.hidden_confirmed
   );
-  const detailUrls = unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
+  // Nothing else in this job can run the Apify credit down, so the ceiling
+  // is checked here and nowhere else. Over it, the run keeps the cheap pass
+  // and the age rule — which cost a fraction of a cent and nothing at all —
+  // and simply stops being able to tell deleted from hidden until the month
+  // turns over.
+  const spend = await monthlySpend();
+  const overBudget =
+    spend !== null && spend.limit > 0 && spend.used / spend.limit > SPEND_CEILING_SHARE;
+
+  base.spentUsd = spend?.used ?? null;
+  base.budgetUsd = spend?.limit ?? null;
+
+  const detailUrls = overBudget ? [] : unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
   const detail = await checkPostsDetailed(
     detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : [],
     // Whatever is left of the minute, minus what reporting and deleting
@@ -291,6 +310,11 @@ async function runForPersona(
   }
   if (detailUrls.length > 0 && !detail.states.size) {
     reasons.push("the second pass answered nothing");
+  }
+  if (overBudget && unsure.length > 0) {
+    reasons.push(
+      `Apify-Guthaben zu ${Math.round(((spend?.used ?? 0) / (spend?.limit || 1)) * 100)}% verbraucht — der teure Durchgang bleibt aus`
+    );
   }
   const answered = links.filter((l) => states.has(l.url_key));
   if (answered.length === 0) {
@@ -631,6 +655,11 @@ async function report(
     if (r.watching > 0) {
       lines.push(`↩︎ ${r.watching} folgen beim nächsten Lauf`);
     }
+  }
+  if (r.spentUsd != null && r.budgetUsd) {
+    lines.push(
+      `💳 Apify: $${r.spentUsd.toFixed(2)} von $${r.budgetUsd.toFixed(2)} diesen Monat`
+    );
   }
   const text = lines.join("\n");
 
