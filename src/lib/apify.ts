@@ -194,15 +194,21 @@ export const CONTROL_URL = `https://www.instagram.com/p/${CONTROL_SHORTCODE}/`;
  * opened and confirmed alive was among the restricted. That is the whole
  * difference between this working and the August incident.
  *
- * Priced at $0.0013 a post against the cheap pass's $0.00018. Every
- * Instagram actor in the store that accepts post URLs was measured for this:
- * of the ones cheaper than this, apidojo's answers post URLs with
+ * Priced at $0.0017 a post against the cheap pass's $0.00018, and it is not
+ * the cheapest that can do the job — instagram-api-scraper knows the same
+ * difference for $0.0013. That one was tried and taken out again: it costs
+ * about two seconds a link, so ninety of them ran past four minutes and the
+ * whole check timed out with nothing to show. This one is dominated by its
+ * own start-up instead — 58 links in 44 seconds, 35 in 56 — so a backlog
+ * fits in one run. A quarter off a line worth a few cents is not worth
+ * buying that back.
+ *
+ * Every Instagram actor in the store taking post URLs was priced for this,
+ * and the cheaper ones fail differently: apidojo's answers with
  * {noResults:true}, and the two at a third of the price take profile names
- * only. This is the cheapest one that both takes a link and knows the
- * difference, which is why it still only ever sees what the first pass
- * could not settle.
+ * only. So this only ever sees what the first passes could not settle.
  */
-const DETAIL_ACTOR = "apify~instagram-api-scraper";
+const DETAIL_ACTOR = "apify~instagram-post-scraper";
 const DETAIL_ENDPOINT = `https://api.apify.com/v2/acts/${DETAIL_ACTOR}/run-sync-get-dataset-items`;
 
 /**
@@ -246,9 +252,8 @@ export async function checkPostsDetailed(
       // second pass there was no verdict for the control post either, so the
       // guards reported a reachable control on top.
       body: JSON.stringify({
-        directUrls: Array.from(new Set(urls)),
-        resultsType: "details",
-        resultsLimit: 1,
+        username: Array.from(new Set(urls)),
+        resultsLimit: urls.length,
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
