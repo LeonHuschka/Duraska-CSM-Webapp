@@ -249,9 +249,18 @@ async function runForPersona(
   // the direct probe is having a good day this is nearly empty; when
   // Instagram shuts the door it carries the whole run, which is why it is
   // still here.
+  // Links already known to be hidden are left out. This scraper cannot see
+  // them either — that is what made them hidden — so asking costs money to
+  // learn nothing, every run, for the rest of their thirty days. Only the
+  // expensive pass could tell whether such a post has since been deleted,
+  // and buying that daily is precisely what we stopped doing.
+  const known = new Set(
+    links.filter((l) => l.hidden_confirmed).map((l) => l.url_key)
+  );
   const unanswered = [...links.map((l) => l.url), CONTROL_URL].filter((u) => {
     const code = u.match(/\/p\/([^/]+)/)?.[1];
-    return code ? states.get(code) !== "alive" : false;
+    if (!code || known.has(code)) return false;
+    return states.get(code) !== "alive";
   });
   if (unanswered.length > 0) {
     const cheap = await checkPosts(unanswered);
