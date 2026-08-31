@@ -25,8 +25,20 @@ import type { PostState } from "@/lib/apify";
  * and reading it as one is what nearly cost fifty-two good links in August.
  */
 
-/** Enough to sweep a backlog quickly without hammering one host. */
-const CONCURRENCY = 6;
+/**
+ * Gentle on purpose.
+ *
+ * Six at a time over a hundred links got every single one refused, minutes
+ * after the same request against a single post came back with its media
+ * intact. Instagram answers a trickle and closes the door on a flood, so
+ * this asks slowly and gives up on the clock rather than pushing harder —
+ * whatever it does not get to is simply somebody else's job.
+ */
+const CONCURRENCY = 2;
+const PAUSE_MS = 400;
+
+/** Past this the rest goes to the paid passes; the run has other work. */
+const BUDGET_MS = 70_000;
 
 export async function checkPostsDirect(
   urls: string[]
@@ -35,31 +47,37 @@ export async function checkPostsDirect(
   if (urls.length === 0) return { states, error: null };
 
   const queue = [...urls];
+  const deadline = Date.now() + BUDGET_MS;
+  let asked = 0;
   let answered = 0;
+  let refusedInARow = 0;
 
   async function worker() {
     for (;;) {
+      if (Date.now() > deadline) return;
+      // Once it starts refusing it keeps refusing, and every further request
+      // is a second spent for nothing.
+      if (refusedInARow >= 8) return;
       const url = queue.shift();
       if (!url) return;
       const code = instagramKey(url);
       if (!code) continue;
       const { alive } = await checkInstagramAlive(url);
+      asked++;
       if (alive === true) {
         states.set(code, "alive");
         answered++;
+        refusedInARow = 0;
+      } else {
+        refusedInARow++;
       }
-      // false and null alike mean "ask the one that can tell them apart".
+      await new Promise((r) => setTimeout(r, PAUSE_MS));
     }
   }
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker)
   );
 
-  // Nothing at all coming back reachable, over a batch of any size, means
-  // the wall is back rather than that every post died overnight. Saying so
-  // lets the run fall through to the paid pass with its eyes open.
-  if (urls.length >= 10 && answered === 0) {
-    return { states, error: "Instagram antwortet diesem Server nicht mehr direkt" };
-  }
+  console.log(`[probe] direkt gefragt: ${asked}, beantwortet: ${answered}`);
   return { states, error: null };
 }

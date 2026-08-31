@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import {
+  checkPosts,
   checkPostsDetailed,
   CONTROL_SHORTCODE,
   CONTROL_URL,
@@ -230,14 +231,36 @@ async function runForPersona(
     return idle;
   }
 
-  // ── First pass: free, and only ever trusted when it says "alive" ──
+  // ── First pass: free, straight to Instagram ──
   //
-  // Straight to Instagram, no scraper in between. This was the biggest line
-  // on the Apify bill until /diag showed the host is answering again.
+  // /diag showed the host is answered again, so this is tried before any
+  // money is spent. It is not reliable at volume — a hundred links at once
+  // got every one of them refused minutes after a single one worked — so it
+  // asks gently, keeps whatever it gets, and hands the rest along. Its
+  // failures are not verdicts and cost nothing.
   const { states, error } = await checkPostsDirect([
     ...links.map((l) => l.url),
     CONTROL_URL,
   ]);
+
+  // ── Second pass: the cheap scraper, for what Instagram would not answer ──
+  //
+  // $0.00018 a link, and it only sees what came back unanswered above. When
+  // the direct probe is having a good day this is nearly empty; when
+  // Instagram shuts the door it carries the whole run, which is why it is
+  // still here.
+  const unanswered = [...links.map((l) => l.url), CONTROL_URL].filter((u) => {
+    const code = u.match(/\/p\/([^/]+)/)?.[1];
+    return code ? states.get(code) !== "alive" : false;
+  });
+  if (unanswered.length > 0) {
+    const cheap = await checkPosts(unanswered);
+    cheap.states.forEach((state, code) => {
+      // "alive" is worth keeping; its "unreachable" is not a verdict at all
+      // and is dropped below with everything else the detail pass decides.
+      if (state === "alive") states.set(code, state);
+    });
+  }
 
   // ── Second pass: what the first could not see, asked once ──
   //
