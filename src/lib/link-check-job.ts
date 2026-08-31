@@ -539,6 +539,17 @@ async function expireOldLinks(
       emoji: REACTION.dead,
     });
     if (!res.ok) {
+      // "message to react not found" means somebody already removed it by
+      // hand, which is the outcome the mark was asking for. Recording that
+      // stops the link being retried, and failing, every run forever.
+      if (/not found/i.test(res.error ?? "")) {
+        await supabase
+          .from("content_links")
+          .update({ status: "skipped", updated_at: new Date().toISOString() })
+          .in("id", rows.map((r) => r.id));
+        deleted++;
+        continue;
+      }
       console.warn("[links] could not mark expired link", l.message_id, res.error);
       refused++;
       continue;
@@ -612,6 +623,16 @@ async function removeMessages(
       emoji: REACTION.dead,
     });
     if (!res.ok) {
+      // Already gone from the chat — the mark has nothing left to point at,
+      // and the link should stop coming back round.
+      if (/not found/i.test(res.error ?? "")) {
+        await supabase
+          .from("content_links")
+          .update({ status: "dead", updated_at: new Date().toISOString() })
+          .in("id", rows.map((r) => r.id));
+        deleted++;
+        continue;
+      }
       console.warn("[links] could not mark message", c.message_id, res.error);
       refused++;
       skipped++;
