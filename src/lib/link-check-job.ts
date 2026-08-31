@@ -468,6 +468,14 @@ async function runForPersona(
     trusted,
     note: trusted ? null : reasons.join("; "),
   };
+  // The detail the report no longer carries. Worth keeping, because the
+  // cost argument rests on the free pass carrying most of the traffic and
+  // the paid ones seeing each link once.
+  console.log(
+    `[links] gratis ${result.freeAnswered} · billig ${result.cheapAsked} · teuer ${result.detailAsked} → ` +
+      `${result.alive} vorhanden, ${result.unreachable} weg, ${result.deleted} markiert, ` +
+      `${result.expired} abgelaufen, ${result.refused} verweigert`
+  );
   await report(cfg, result, trigger, notice);
   return result;
 }
@@ -686,56 +694,29 @@ async function report(
 
   const lines = [`🔗 <b>Link-Check</b> (${trigger})`];
 
-  // The age sweep runs whatever the scraper did, so it is reported first.
-  if (r.expired > 0) {
-    lines.push(
-      `💔 ${r.expired} ohne Reaktion seit über ${EXPIRE_AFTER_DAYS} Tagen — markiert`
-    );
-  }
-  if (r.expiredLeft > 0) {
-    lines.push(`   ${r.expiredLeft} weitere folgen beim nächsten Lauf`);
-  }
-  if (r.refused > 0) {
-    lines.push(`⚠️ ${r.refused} konnten nicht markiert werden`);
-  }
+  // Two outcomes, because two are all there are: a link either ends the run
+  // with a 💔 on its message or it does not. Anything finer — which pass
+  // settled it, what the scraper could not see — belongs in the logs, not
+  // in a line somebody reads once a day. The earlier report carried a
+  // "these follow next run" figure that read like a queue being worked off
+  // and was really just a snapshot of that run, which made two consecutive
+  // reports look like they contradicted each other.
+  const marked = r.deleted + r.expired;
 
   if (!r.trusted) {
-    if (r.checked > 0) {
-      lines.push(
-        `${r.checked} geprüft · ${r.alive} vorhanden · ${r.unreachable} nicht mehr vorhanden`
-      );
-    }
-    lines.push(`Nichts wegen Löschung entfernt. Grund: ${r.note}`);
-  } else if (r.checked === 0) {
-    if (r.expired === 0) lines.push("Nichts fällig.");
+    lines.push(`${r.checked} geprüft · nichts markiert`);
+    lines.push(`⚠️ ${r.note}`);
+  } else if (r.checked === 0 && marked === 0) {
+    lines.push("Nichts zu prüfen.");
   } else {
     lines.push(
-      `${r.checked} geprüft · ${r.alive} vorhanden · ${r.unreachable} nicht mehr vorhanden`
+      `${r.checked} geprüft · ${r.checked - marked} sind ✅ · ${marked} sind ❌`
     );
-    // Without this line the numbers do not add up and the report looks like
-    // it is contradicting itself between runs: the second pass only looks at
-    // a batch at a time, and everything past it has no verdict either way.
-    const noVerdict = r.checked - r.alive - r.unreachable;
-    if (noVerdict > 0) {
-      lines.push(`· ${noVerdict} ohne Urteil (kommen im nächsten Lauf dran)`);
-    }
-    if (r.deleted > 0) {
-      lines.push(
-        `💔 ${r.deleted} ${r.deleted === 1 ? "Post ist" : "Posts sind"} nicht mehr da — markiert`
-      );
-    }
-    // Whatever is left over was gone but could not be removed: the run hit
-    // its cap, or the message still carries a live link.
-    if (r.watching > 0) {
-      lines.push(`↩︎ ${r.watching} folgen beim nächsten Lauf`);
-    }
+    if (marked > 0) lines.push(`↩︎ ${marked} reacted as dead`);
   }
-  // What each pass had to do, because the whole cost argument rests on the
-  // free one carrying most of it and the paid ones seeing a link once.
-  if (r.checked > 0) {
-    lines.push(
-      `⚙️ gratis ${r.freeAnswered} · billig ${r.cheapAsked} · teuer ${r.detailAsked}`
-    );
+
+  if (r.refused > 0) {
+    lines.push(`⚠️ ${r.refused} konnten nicht markiert werden`);
   }
   if (r.spentUsd != null && r.budgetUsd) {
     lines.push(
