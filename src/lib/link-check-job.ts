@@ -6,6 +6,7 @@ import {
   CONTROL_SHORTCODE,
   CONTROL_URL,
   harvestRecentRuns,
+  hasSession,
   monthlySpend,
   PAID_BATCH,
   RUN_DEADLINE_MS,
@@ -322,14 +323,23 @@ async function runForPersona(
   // So the second kind waits for the probe to have a better day, with a
   // backstop for anything nobody has had an answer about in a long time —
   // or ever, which is how a newly posted link gets looked at the same day.
+  // All of which is an economy, and every economy here is a response to the
+  // price of an answer. With a session that price is $0.00018 — a whole
+  // sweep of every open link costs about a cent — and rationing it would be
+  // care spent in the wrong place, paid for in dead links sitting in the
+  // topic for days. So the rationing is exactly as strict as the scraper is
+  // expensive, and no stricter.
+  const loggedIn = hasSession();
   const paidCutoff = new Date(now - PAID_AFTER_DAYS * 86_400_000).toISOString();
   const unsure = links.filter((l) => {
     if (bought.has(l.url_key)) return false;
     if (states.get(l.url_key) === "alive") return false;
-    // Age-gated: the probe will never see it, and buying the same "still
-    // there behind a gate" every day for a month is money for nothing. It
-    // leaves by the age rule regardless.
-    if (l.hidden_confirmed) return false;
+    // Age-gated. Logged out, neither the probe nor the scraper will ever see
+    // these, so buying the same "still there behind a gate" every day for a
+    // month is money for nothing and they leave by the age rule instead.
+    // Logged in they are ordinary posts, and the blind spot goes with them.
+    if (!loggedIn && l.hidden_confirmed) return false;
+    if (loggedIn) return true;
     if (probed.has(l.url_key)) return true;
     return !l.checked_at || l.checked_at < paidCutoff;
   });
@@ -341,7 +351,11 @@ async function runForPersona(
   const overBudget =
     before !== null && before.limit > 0 && before.used / before.limit > SPEND_CEILING_SHARE;
 
-  const paidUrls = overBudget ? [] : unsure.slice(0, PAID_BATCH).map((l) => l.url);
+  // The cap is a brake against a rule gone wrong, and how hard it has to
+  // bite depends on what a mistake costs: seven cents logged out, a third of
+  // a cent logged in.
+  const cap = loggedIn ? MAX_LINKS : PAID_BATCH;
+  const paidUrls = overBudget ? [] : unsure.slice(0, cap).map((l) => l.url);
   base.paidAsked = paidUrls.length;
   const fresh = await checkPostsPaid(
     paidUrls.length > 0 ? [...paidUrls, CONTROL_URL] : [],
@@ -412,7 +426,14 @@ async function runForPersona(
       reasons.push("der Kontrollposten wurde nicht beantwortet");
     }
     if (!answered.some((l) => states.get(l.url_key) === "alive")) {
-      reasons.push("kein einziger Link kam als vorhanden zurück");
+      // Logged in, this has one overwhelmingly likely cause, and naming it
+      // saves someone reading scraper logs to find out that a cookie has
+      // expired. Nothing is marked either way — the run simply stops.
+      reasons.push(
+        loggedIn
+          ? "kein einziger Link kam als vorhanden zurück — vermutlich ist das Instagram-Cookie abgelaufen"
+          : "kein einziger Link kam als vorhanden zurück"
+      );
     }
     // Links that were fine yesterday are the honest control: a handful may
     // genuinely have died overnight, half of them cannot have.

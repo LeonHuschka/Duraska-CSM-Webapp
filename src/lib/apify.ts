@@ -47,8 +47,50 @@ import { instagramKey } from "@/lib/telegram";
  * and both "restricted" answers mean the same thing here, namely that
  * somebody put something there and it is still there.
  */
-const PAID_ACTOR = "apify~instagram-post-scraper";
-const PAID_ENDPOINT = `https://api.apify.com/v2/acts/${PAID_ACTOR}/run-sync-get-dataset-items`;
+const BLIND_ACTOR = "apify~instagram-post-scraper";
+
+/**
+ * The same job for a fifteenth of the price — but only with a login.
+ *
+ * $0.00018 a scraped post against $0.0027, and rows it could not scrape are
+ * not charged at all. Our own bills prove both halves of that: every run of
+ * it so far reads `{"post-scraped": 0, "apify-actor-start": 1}` and cost
+ * $0.0005. It has never seen a single post. Logged out, Instagram refuses it
+ * on everything, and it dutifully returned free diagnostic rows while the
+ * expensive actor did the actual work beside it for $0.19.
+ *
+ * Logged out it also cannot do the job at all, whatever it costs: its own
+ * error text says NOT_FOUND means the post "does not exist, or is private,
+ * deleted or suspended", and that ambiguity is what once condemned 59 of 106
+ * links, one of them opened by hand and plainly alive. Logged in, NOT_FOUND
+ * means what it says.
+ *
+ * So the cookie is not a tuning knob, it is the switch: with one, this;
+ * without one, the actor that can still tell restricted from deleted while
+ * logged out, at fifteen times the price.
+ */
+const CHEAP_ACTOR = "dami_studio~instagram-post-scraper";
+
+const endpoint = (actor: string) =>
+  `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`;
+
+/** Which scraper this deployment is actually able to use. */
+function activeActor(): string {
+  return sessionCookies() ? CHEAP_ACTOR : BLIND_ACTOR;
+}
+
+/**
+ * Whether there is a session to read Instagram through — never its value.
+ *
+ * The caller needs this because almost every economy in the link check is a
+ * response to the price of an answer, and the price differs by a factor of
+ * fifteen depending on this one fact. Logged in, a full sweep of every open
+ * link costs about a cent, and rationing it would be care spent in the wrong
+ * place.
+ */
+export function hasSession(): boolean {
+  return sessionCookies() !== null;
+}
 
 /**
  * How long a run may take in total before results are written away.
@@ -90,26 +132,49 @@ type Row = {
   status?: string;
   shortcode?: string;
   post_url?: string;
+  /** dami_studio/instagram-post-scraper */
+  ok?: boolean;
+  errorCode?: string;
 };
 
 /**
- * An Instagram session for the scraper to use, as exported cookies.
+ * An Instagram session to read through, from INSTAGRAM_SESSION_COOKIES.
  *
- * Optional — the actor authenticates itself well enough that the measured
- * numbers above were all taken without one. Set INSTAGRAM_SESSION_COOKIES to
- * the cookie array as JSON to lend it yours. A malformed value is ignored
- * rather than thrown, because a bad paste must not stop the check running.
+ * Two forms are accepted, because the useful one is whatever a person
+ * actually has in their hand at the time: a plain cookie string as copied
+ * out of the browser —
+ *
+ *   sessionid=...; csrftoken=...
+ *
+ * — or a JSON array of such strings, one per account. Anything else is
+ * ignored with a warning rather than thrown: a bad paste must leave the
+ * check running logged out, not stop it.
+ *
+ * The value is passed to the scraper for that run and never written
+ * anywhere — not to the log line below, not to the report, not to the
+ * database.
  */
-function sessionCookies(): string | null {
-  const raw = process.env.INSTAGRAM_SESSION_COOKIES;
+function sessionCookies(): string[] | null {
+  const raw = process.env.INSTAGRAM_SESSION_COOKIES?.trim();
   if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? JSON.stringify(parsed) : null;
-  } catch {
-    console.warn("[apify] INSTAGRAM_SESSION_COOKIES is not valid JSON — ignoring it");
+
+  if (raw.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const list = Array.isArray(parsed)
+        ? parsed.filter((c): c is string => typeof c === "string" && c.includes("sessionid="))
+        : [];
+      if (list.length > 0) return list;
+    } catch {
+      /* falls through to the warning */
+    }
+    console.warn("[apify] INSTAGRAM_SESSION_COOKIES looks like JSON but holds no sessionid — ignoring it");
     return null;
   }
+
+  if (raw.includes("sessionid=")) return [raw];
+  console.warn("[apify] INSTAGRAM_SESSION_COOKIES holds no sessionid= — ignoring it");
+  return null;
 }
 
 /**
@@ -124,16 +189,26 @@ function readRows(rows: Row[], into: Map<string, PostState>) {
       instagramKey(row.url ?? row.inputUrl ?? row.post_url ?? "");
     if (!code) continue;
 
-    const gone = row.error === "not_found" || row.status === "not_found";
+    // dami_studio says it in a boolean, and says why in errorCode. Read
+    // strictly: anything that is neither a clear yes nor a clear NOT_FOUND
+    // is the scraper having a bad day, and a bad day is not a verdict.
+    if (typeof row.ok === "boolean") {
+      if (row.ok) into.set(code, "alive");
+      else if (row.errorCode === "NOT_FOUND") into.set(code, "unreachable");
+      continue;
+    }
+
     // A row of post data, or an honest "something is in my way" —
     // restricted_page from one actor, age_restricted from the other. Either
     // way somebody put something there and it is still there. Only "not
     // found" is a death certificate.
-    const blocked = row.error === "restricted_page" || row.status === "age_restricted";
-    const data = Boolean(row.shortCode ?? row.shortcode);
-
-    if (gone) into.set(code, "unreachable");
-    else if (blocked || data || (!row.error && !row.status)) into.set(code, "alive");
+    if (row.error === "not_found" || row.status === "not_found") {
+      into.set(code, "unreachable");
+    } else if (row.error === "restricted_page" || row.status === "age_restricted") {
+      into.set(code, "alive");
+    } else if (!row.error && !row.status) {
+      into.set(code, "alive");
+    }
     // Anything else is the scraper having a bad day, not a verdict.
   }
 }
@@ -152,22 +227,25 @@ export async function checkPostsPaid(
   if (!token) return { states, error: "APIFY_TOKEN is not set" };
 
   const cookies = sessionCookies();
+  const actor = activeActor();
+  // The same post is often linked from several messages, and the logged-out
+  // actor rejects an entire batch over a single repeat — "must NOT have
+  // duplicate items". One run died exactly that way, and with no verdict for
+  // the control post either, the guards then reported a live control on top.
+  const list = Array.from(new Set(urls));
+  const input = cookies
+    ? { postUrls: list, maxItems: list.length, sessionCookies: cookies }
+    : // "username" is what the logged-out actor calls a list of post URLs.
+      { username: list, resultsLimit: list.length };
+
+  console.log(`[apify] ${actor} · ${list.length} Links · ${cookies ? "eingeloggt" : "ausgeloggt"}`);
+
   let rows: Row[];
   try {
-    const res = await fetch(`${PAID_ENDPOINT}?token=${encodeURIComponent(token)}`, {
+    const res = await fetch(`${endpoint(actor)}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        // "username" is what this actor calls a list of post URLs. The set
-        // is not decoration: the same post is often linked from several
-        // messages, and this one rejects the whole batch over a single
-        // repeat — "must NOT have duplicate items". One run died exactly
-        // that way, and with no second pass there was no verdict for the
-        // control post either, so the guards reported a live control on top.
-        username: Array.from(new Set(urls)),
-        resultsLimit: urls.length,
-        ...(cookies ? { sessionCookies: JSON.parse(cookies) } : {}),
-      }),
+      body: JSON.stringify(input),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return { states, error: `apify http ${res.status}` };
@@ -219,7 +297,7 @@ export async function harvestRecentRuns(
   let items: { id: string; finishedAt?: string; defaultDatasetId?: string }[];
   try {
     const res = await fetch(
-      `https://api.apify.com/v2/acts/${PAID_ACTOR}/runs?${auth}&status=SUCCEEDED&desc=1&limit=5`,
+      `https://api.apify.com/v2/acts/${activeActor()}/runs?${auth}&status=SUCCEEDED&desc=1&limit=5`,
       { signal: AbortSignal.timeout(10_000) }
     );
     if (!res.ok) return { states, runs: 0 };
@@ -257,6 +335,23 @@ export async function harvestRecentRuns(
     if (own.get(CONTROL_SHORTCODE) !== "unreachable") {
       console.warn(
         `[apify] harvest: run ${run.id} did not place the control post — ignoring its ${own.size} rows`
+      );
+      continue;
+    }
+    // A run in which nothing whatsoever came back alive is not evidence, it
+    // is a symptom — and it is exactly what a logged-out run of the cheap
+    // actor looks like: every row a free diagnostic, every verdict
+    // NOT_FOUND. Believing one would condemn the entire backlog on the
+    // strength of an expired cookie. The control post alone does not catch
+    // this, because a run that can see nothing places the control correctly
+    // for the wrong reason.
+    let anyAlive = false;
+    own.forEach((s, code) => {
+      if (s === "alive" && code !== CONTROL_SHORTCODE) anyAlive = true;
+    });
+    if (!anyAlive) {
+      console.warn(
+        `[apify] harvest: run ${run.id} found nothing at all alive — ignoring its ${own.size} rows`
       );
       continue;
     }
