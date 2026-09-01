@@ -76,6 +76,17 @@ const MAX_UNREACHABLE_SHARE = 0.7;
 const RECHECK_AFTER_H = 16;
 
 /**
+ * The backstop: however quiet things look, no link goes longer than this
+ * without somebody actually answering for it.
+ *
+ * Five days against a thirty-day lifetime, so a post that dies while the
+ * free probe is being turned away is still caught with three weeks of its
+ * life left. It also bounds the worst case on its own — sixty-five open
+ * links divided over five days is thirteen a run, about three cents.
+ */
+const PAID_AFTER_DAYS = 5;
+
+/**
  * How far back to pick up scraper runs we paid for but never read.
  *
  * Long enough to catch yesterday's run at the same hour, short enough that
@@ -222,7 +233,7 @@ async function runForPersona(
   let q = supabase
     .from("content_links")
     .select(
-      "id, url, url_key, chat_id, message_id, link_ok, hidden_confirmed, unreachable_since, unreachable_runs"
+      "id, url, url_key, chat_id, message_id, link_ok, hidden_confirmed, checked_at, unreachable_since, unreachable_runs"
     )
     .eq("persona_id", cfg.persona_id)
     .eq("status", "open");
@@ -296,16 +307,32 @@ async function runForPersona(
 
   // ── Second pass: the only one that costs money ──
   //
-  // It sees what the harvest and the free probe together could not settle,
-  // capped at PAID_BATCH, minus the links already known to be age-gated.
-  // That cap is the single tap money comes out of: forty-five links is about
-  // five cents, and it clears a realistic backlog in one run.
-  const unsure = links.filter(
-    (l) =>
-      !bought.has(l.url_key) &&
-      states.get(l.url_key) !== "alive" &&
-      !l.hidden_confirmed
-  );
+  // At $0.0027 a link the bill is decided entirely by how often a link is
+  // bought an answer for, so this is where that is decided.
+  //
+  // The free probe's silence comes in two kinds and they mean opposite
+  // things. "I looked and the post was not there" is news: something changed
+  // today, and it is worth the third of a cent to find out what. "I never
+  // got that far" is not news at all — it is our vantage point failing, and
+  // the post was almost certainly fine. Paying for the second kind is what
+  // made a bad afternoon at Instagram cost twenty cents: the probe was
+  // turned away from all 83 links and every one of them fell through to the
+  // scraper.
+  //
+  // So the second kind waits for the probe to have a better day, with a
+  // backstop for anything nobody has had an answer about in a long time —
+  // or ever, which is how a newly posted link gets looked at the same day.
+  const paidCutoff = new Date(now - PAID_AFTER_DAYS * 86_400_000).toISOString();
+  const unsure = links.filter((l) => {
+    if (bought.has(l.url_key)) return false;
+    if (states.get(l.url_key) === "alive") return false;
+    // Age-gated: the probe will never see it, and buying the same "still
+    // there behind a gate" every day for a month is money for nothing. It
+    // leaves by the age rule regardless.
+    if (l.hidden_confirmed) return false;
+    if (probed.has(l.url_key)) return true;
+    return !l.checked_at || l.checked_at < paidCutoff;
+  });
   // Nothing else in this job can run the credit down, so the ceiling is
   // checked here and nowhere else. Over it, the run keeps the free probe and
   // the age rule — which cost nothing at all — and simply stops being able

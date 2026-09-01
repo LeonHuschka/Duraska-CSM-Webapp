@@ -24,26 +24,30 @@ import { instagramKey } from "@/lib/telegram";
  */
 
 /**
- * $0.001 a result plus $0.005 a run, and 50 seconds of start-up before it
- * hits its stride: 6 links took 52 seconds, 72 took 76. So a batch is nearly
- * free once it is moving, and the number that costs money is how many links
- * are ever asked about — not how they are grouped.
+ * $0.0017 for the post plus $0.001 for its details — $0.0027 a link, dead
+ * linear, with no fixed cost at all. Measured on the bills: 3 links $0.0081,
+ * 14 links $0.0378, 72 links $0.1944. Apify's platform charges (compute,
+ * proxy, storage) come to exactly $0.00 on every one of those runs, because
+ * this actor's developer absorbs them.
  *
- * The actor it replaced billed $0.0027 a row, dead linear, no start-up to
- * amortise: 3 rows $0.0081, 14 rows $0.0378, 72 rows $0.1944. Same 72 links
- * took it 325 seconds, which is how a run came to outlive its caller by
- * three seconds and bill $0.19 for a verdict nobody read.
+ * That last clause is the whole reason this actor is here and not
+ * crawlerbros/instagram-post-scraper, which was tried and looked cheaper on
+ * the shelf at $0.001 a result. Its listing sets
+ * isPPEPlatformUsagePaidByUser, so the platform bill lands on us: for 72
+ * links that was $0.02 of start events, $0.072 of results — and $0.0999 of
+ * residential proxy traffic on top, $0.21 all told. Decomposed over two runs
+ * it comes to about $0.040 fixed per run plus $0.0024 a link, which only
+ * beats $0.0027 a link once a run carries more than 133 of them. We will
+ * never ask about 133 at once, so it never wins.
  *
- * One caveat, recorded because it is the one thing here not settled by
- * measurement: on four links the old actor said "restricted" and this one
- * says "not found". Nothing available from a logged-out host can adjudicate
- * that — Instagram's embed endpoint returns the same 620 KB login shell for
- * a live post, a dead one and a shortcode that never existed. This one has
- * the finer instrument and used it 16 times rather than reaching for
- * not_found, so it gets the benefit of the doubt; and being wrong costs a
- * 💔 that someone can take off again.
+ * What crawlerbros does have is speed — 76 seconds for the same 72 links
+ * against 325 — and a third verdict, age_restricted, where this one can only
+ * say restricted_page. Neither is worth $0.04 a day: slowness stopped
+ * costing anything once runs began to be harvested rather than abandoned,
+ * and both "restricted" answers mean the same thing here, namely that
+ * somebody put something there and it is still there.
  */
-const PAID_ACTOR = "crawlerbros~instagram-post-scraper";
+const PAID_ACTOR = "apify~instagram-post-scraper";
 const PAID_ENDPOINT = `https://api.apify.com/v2/acts/${PAID_ACTOR}/run-sync-get-dataset-items`;
 
 /**
@@ -56,25 +60,33 @@ const PAID_ENDPOINT = `https://api.apify.com/v2/acts/${PAID_ACTOR}/run-sync-get-
 export const RUN_DEADLINE_MS = 240_000;
 
 /**
- * Links handed to the paid pass in one run.
+ * Links handed to the paid pass in one run — a runaway brake, not the pace.
  *
- * This is the only tap in the system that money comes out of, so it is the
- * only place a ceiling belongs. Forty-five covers a whole realistic backlog
- * in a single run — which is what was asked for — and caps the worst
- * imaginable day at about five cents. A month in which every single run had
- * to fall back this far would cost $1.50; the ordinary month, where the free
- * probe answers most of it and only the day's new links get this far, costs
- * around twenty cents.
+ * What normally keeps this small is the caller's rule about *when* a link is
+ * worth buying an answer for; this is only here so that a rule which goes
+ * wrong cannot go wrong expensively. Twenty-five links is under seven cents,
+ * and a month in which every single run hit the brake would come to $2.
  *
- * The previous cap was 150, set when the price was believed to be dominated
- * by a fixed start-up. It was not, so an unbounded batch was an unbounded
- * bill.
+ * The cap was 150 while the price was believed to be dominated by a fixed
+ * start-up. It is not — it is $0.0027 a link and nothing else — so an
+ * unbounded batch was simply an unbounded bill.
  */
-export const PAID_BATCH = 45;
+export const PAID_BATCH = 25;
 
 export type PostState = "alive" | "unreachable" | "unknown";
 
+/**
+ * Both shapes this has had to read. The field names differ between actors
+ * and datasets outlive the decision about which actor to use, so a harvest
+ * has to understand whatever it finds lying about.
+ */
 type Row = {
+  /** apify/instagram-post-scraper */
+  error?: string;
+  url?: string;
+  shortCode?: string;
+  inputUrl?: string;
+  /** crawlerbros/instagram-post-scraper */
   status?: string;
   shortcode?: string;
   post_url?: string;
@@ -106,13 +118,23 @@ function sessionCookies(): string | null {
  */
 function readRows(rows: Row[], into: Map<string, PostState>) {
   for (const row of rows) {
-    const code = row.shortcode ?? (row.post_url ? instagramKey(row.post_url) : null);
+    const code =
+      row.shortCode ??
+      row.shortcode ??
+      instagramKey(row.url ?? row.inputUrl ?? row.post_url ?? "");
     if (!code) continue;
-    if (row.status === "not_found") into.set(code, "unreachable");
-    // Post data, or an honest "there is an age gate in my way": either way
-    // somebody put something there and it is still there.
-    else if (row.shortcode || row.status === "age_restricted") into.set(code, "alive");
-    // Any other status is the scraper having a bad day, not a verdict.
+
+    const gone = row.error === "not_found" || row.status === "not_found";
+    // A row of post data, or an honest "something is in my way" —
+    // restricted_page from one actor, age_restricted from the other. Either
+    // way somebody put something there and it is still there. Only "not
+    // found" is a death certificate.
+    const blocked = row.error === "restricted_page" || row.status === "age_restricted";
+    const data = Boolean(row.shortCode ?? row.shortcode);
+
+    if (gone) into.set(code, "unreachable");
+    else if (blocked || data || (!row.error && !row.status)) into.set(code, "alive");
+    // Anything else is the scraper having a bad day, not a verdict.
   }
 }
 
@@ -136,11 +158,15 @@ export async function checkPostsPaid(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        // The same post is often linked from several messages. This actor
-        // de-duplicates silently; its predecessor rejected the whole batch
-        // over one repeat, and one run died exactly that way.
-        post_urls: Array.from(new Set(urls)),
-        ...(cookies ? { cookies } : {}),
+        // "username" is what this actor calls a list of post URLs. The set
+        // is not decoration: the same post is often linked from several
+        // messages, and this one rejects the whole batch over a single
+        // repeat — "must NOT have duplicate items". One run died exactly
+        // that way, and with no second pass there was no verdict for the
+        // control post either, so the guards reported a live control on top.
+        username: Array.from(new Set(urls)),
+        resultsLimit: urls.length,
+        ...(cookies ? { sessionCookies: JSON.parse(cookies) } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
