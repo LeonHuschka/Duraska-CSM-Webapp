@@ -14,7 +14,6 @@ import {
 import { extractMetricsFromImage } from "@/lib/vision";
 import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
-import { diagnoseDeletion } from "@/lib/telegram-diagnose";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -112,27 +111,24 @@ export async function POST(req: Request) {
     console.error("[telegram] handler failed", err);
   }
 
-  // Whatever the update was, it is also a heartbeat: see below.
-  try {
-    await maybeRunDailyCheck(req, update);
-  } catch (err) {
-    console.error("[telegram] daily check trigger failed", err);
-  }
-
   return NextResponse.json({ ok: true });
 }
 
 /**
- * `/check` in the requests topic — run the link check now.
+ * `/check` in the requests topic — take every 💔 back off the links.
+ *
+ * This once ran the availability check. That is gone: no combination of
+ * scrapers could tell a deleted post from an age-gated one reliably enough
+ * to be trusted with somebody's content, and the last run marked twenty live
+ * links dead. All the command does now is undo, and it is safe to repeat.
  *
  * The command message itself is deleted straight away. The topic is the
- * model's work queue and Leon wants it to hold links and nothing else, so
- * the bot answers in TALK rather than here, and tidies up after the person
- * who typed the command.
+ * model's work queue and holds links and nothing else, so the bot answers in
+ * TALK and tidies up after the person who typed the command.
  *
  * Returns true when the message was a command and has been dealt with.
  */
-const COMMANDS = new Set(["check", "links", "linkcheck", "diag"]);
+const COMMANDS = new Set(["check", "links", "linkcheck", "cleanup", "undo"]);
 
 async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   const text = (msg.text ?? "").trim();
@@ -160,36 +156,9 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
     return false;
   }
 
-  // /diag runs the permission experiments and answers in TALK. It has to
-  // happen before the command message is tidied away, because deleting that
-  // message IS one of the experiments.
-  if (name === "diag") {
-    // "/diag 1234" or "/diag https://t.me/c/…/…/1234" — the last number wins.
-    const arg = text.slice(1).split(/\s+/).slice(1).join(" ");
-    const digits = arg.match(/(\d+)\D*$/);
-    const target = digits ? Number(digits[1]) : null;
-    const answer = await diagnoseDeletion({
-      chatId: msg.chat.id,
-      talkThreadId: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
-      personaId: cfg.persona_id,
-      commandMessageId: msg.message_id,
-      targetMessageId: target && Number.isFinite(target) ? target : null,
-    });
-    await sendMessage({
-      chat_id: msg.chat.id,
-      message_thread_id: cfg.talk_thread_id ? Number(cfg.talk_thread_id) : null,
-      text: answer,
-      disable_notification: true,
-    });
-    return true;
-  }
 
-  // Deleting the command message is also the one experiment that separates
-  // the two reasons Telegram refuses a deletion. This message is fresh and
-  // it belongs to the person who typed it — the same person whose old link
-  // messages the bot cannot remove. If this succeeds, the bot is allowed to
-  // delete their messages and only age is stopping it; if it fails, rank is,
-  // and no permission will change that.
+  // Keep the requests topic clean: the command itself does not belong in the
+  // model's work queue. Fresh and the sender's own, so Telegram allows it.
   const tidy = await deleteMessage({
     chat_id: msg.chat.id,
     message_id: msg.message_id,
@@ -205,97 +174,17 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
     console.error("[telegram] /check without CRON_SECRET");
     return true;
   }
-  // Typed by a person, so it re-checks everything rather than reporting
-  // that nothing is due — which is what it did, correctly and uselessly,
-  // when the command was tried twice in an afternoon.
-  fireLinkCheck(req, cfg.persona_id, `von @${msg.from?.username ?? "?"}`, secret, true);
+  fireCleanup(req, cfg.persona_id, secret);
   return true;
 }
 
-/**
- * The daily link check, without a scheduler.
- *
- * The plan allows two cron jobs and both are spoken for, so the group's own
- * traffic stands in for one: every delivery asks whether a day has passed
- * since the last check, and the first message after that fires it. The
- * group is used every day — screenshots, links, reactions — so in practice
- * this runs at the first sign of life each morning. If the group ever falls
- * silent for a week, nothing is checked, which is the correct behaviour:
- * with nobody working the topic, nothing is piling up either.
- *
- * The work goes to its own request. Telegram replays any update it does not
- * get an answer to within seconds, and a scraper run would earn us the same
- * check three times over.
- */
-/**
- * One check a day, counted in calendar days rather than hours.
- *
- * An hour count is either too long or too short: a full day drifts later
- * every morning until an afternoon of silence skips a day entirely, and
- * anything shorter can fire twice between one midnight and the next. The
- * date in Berlin has neither problem — the first sign of life each day
- * starts the run, whatever time that is, and nothing follows it until
- * tomorrow.
- *
- * A run Leon starts by hand counts as the day's run: the job stamps the
- * same field on every path it can exit by, so the group's own traffic
- * finds the day already spent and stays quiet.
- */
-function berlinDay(d: Date): string {
-  return d.toLocaleDateString("en-CA", { timeZone: "Europe/Berlin" });
-}
-
-async function maybeRunDailyCheck(req: Request, update: TgUpdate) {
-  const chatId =
-    update.message?.chat?.id ??
-    update.edited_message?.chat?.id ??
-    update.message_reaction?.chat?.id ??
-    null;
-  if (!chatId) return;
-
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return;
-
-  const supabase = createAdminClient();
-  const { data: cfg } = await supabase
-    .from("telegram_config")
-    .select("persona_id, last_link_check_at")
-    .eq("chat_id", chatId)
-    .maybeSingle();
-  if (!cfg) return;
-
-  if (
-    cfg.last_link_check_at &&
-    berlinDay(new Date(cfg.last_link_check_at)) === berlinDay(new Date())
-  ) {
-    return; // already checked today, by the schedule or by hand
-  }
-
-  // Claim the slot before the request goes out. Two updates arriving
-  // together would otherwise both find the check due and both start one.
-  await supabase
-    .from("telegram_config")
-    .update({ last_link_check_at: new Date().toISOString() })
-    .eq("persona_id", cfg.persona_id);
-
-  fireLinkCheck(req, cfg.persona_id, "täglich", secret);
-}
 
 /** Hand the job to its own invocation and stop caring about the answer. */
-function fireLinkCheck(
-  req: Request,
-  personaId: string,
-  trigger: string,
-  secret: string,
-  /** Ignore the "checked recently" window — for someone who asked. */
-  force = false
-) {
+function fireCleanup(req: Request, personaId: string, secret: string) {
   const host = req.headers.get("host");
   if (!host) return;
   const url =
-    `https://${host}/api/links/check` +
-    `?persona=${encodeURIComponent(personaId)}&trigger=${encodeURIComponent(trigger)}` +
-    (force ? "&force=1" : "");
+    `https://${host}/api/links/check?persona=${encodeURIComponent(personaId)}`;
   // waitUntil keeps this function alive past the response long enough for
   // the request to actually leave; without it Vercel may freeze us first.
   waitUntil(
@@ -305,13 +194,13 @@ function fireLinkCheck(
     })
       .then((res) => {
         // Silence here is how the first version failed: the session
-        // middleware answered 307 and the redirect landed on /login, so the
-        // check never ran and nothing anywhere said so.
+        // middleware answered 307 and the redirect landed on /login, so
+        // nothing ran and nothing anywhere said so.
         if (!res.ok) {
-          console.error("[telegram] link check answered", res.status, res.url);
+          console.error("[telegram] cleanup answered", res.status, res.url);
         }
       })
-      .catch((err) => console.error("[telegram] link check call failed", err))
+      .catch((err) => console.error("[telegram] cleanup call failed", err))
   );
 }
 
