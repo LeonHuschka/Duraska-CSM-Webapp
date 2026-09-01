@@ -42,9 +42,26 @@ const BUDGET_MS = 70_000;
 
 export async function checkPostsDirect(
   urls: string[]
-): Promise<{ states: Map<string, PostState>; error: string | null }> {
+): Promise<{
+  states: Map<string, PostState>;
+  /**
+   * The links this actually got to ask about.
+   *
+   * Silence from here means two entirely different things and the caller
+   * has to tell them apart: "I asked and Instagram would not show me" is
+   * evidence that a post is age-gated, while "I never got that far" is
+   * evidence of nothing at all. The circuit breaker below means the second
+   * case is the common one — on a bad day it gives up after eight links and
+   * the other seventy are never touched. Reading those as age-gated would
+   * mark the entire backlog "never check again" on the strength of one bad
+   * afternoon, and nobody would ever hear about those posts dying.
+   */
+  asked: Set<string>;
+  error: string | null;
+}> {
   const states = new Map<string, PostState>();
-  if (urls.length === 0) return { states, error: null };
+  const askedCodes = new Set<string>();
+  if (urls.length === 0) return { states, asked: askedCodes, error: null };
 
   const queue = [...urls];
   const deadline = Date.now() + BUDGET_MS;
@@ -64,6 +81,7 @@ export async function checkPostsDirect(
       if (!code) continue;
       const { alive } = await checkInstagramAlive(url);
       asked++;
+      askedCodes.add(code);
       if (alive === true) {
         states.set(code, "alive");
         answered++;
@@ -78,6 +96,8 @@ export async function checkPostsDirect(
     Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker)
   );
 
-  console.log(`[probe] direkt gefragt: ${asked}, beantwortet: ${answered}`);
-  return { states, error: null };
+  console.log(
+    `[probe] direkt gefragt: ${asked} von ${urls.length}, beantwortet: ${answered}`
+  );
+  return { states, asked: askedCodes, error: null };
 }

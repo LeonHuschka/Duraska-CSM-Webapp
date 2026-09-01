@@ -2,12 +2,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import {
-  checkPosts,
-  checkPostsDetailed,
+  checkPostsPaid,
   CONTROL_SHORTCODE,
   CONTROL_URL,
-  DETAIL_BATCH,
+  harvestRecentRuns,
   monthlySpend,
+  PAID_BATCH,
   RUN_DEADLINE_MS,
   SPEND_CEILING_SHARE,
 } from "@/lib/apify";
@@ -75,6 +75,15 @@ const MAX_UNREACHABLE_SHARE = 0.7;
 /** Don't spend money re-checking something we looked at this morning. */
 const RECHECK_AFTER_H = 16;
 
+/**
+ * How far back to pick up scraper runs we paid for but never read.
+ *
+ * Long enough to catch yesterday's run at the same hour, short enough that
+ * nothing stale is passed off as today's news. Apify keeps datasets seven
+ * days; a week-old "still there" is not evidence about this morning.
+ */
+const HARVEST_WINDOW_MS = 26 * 3600_000;
+
 // No strike count, on purpose. A link is deleted in the run that finds it
 // gone, and the safety lives entirely in what counts as "gone": only the
 // detail pass may say it, and only in a run that passed every guard below.
@@ -125,14 +134,16 @@ export type LinkCheckResult = {
   /** Deletions Telegram would not carry out. */
   refused: number;
   /** How many links each pass had to answer — the cost, itemised. */
+  harvested: number;
   freeAnswered: number;
-  cheapAsked: number;
-  detailAsked: number;
+  paidAsked: number;
   /** Apify credit used this month, so the cost is never a surprise. */
   spentUsd: number | null;
   budgetUsd: number | null;
   trusted: boolean;
   note: string | null;
+  /** Went wrong, but does not make the verdicts we hold any less true. */
+  warn: string | null;
 };
 
 export async function runLinkCheck(
@@ -177,13 +188,14 @@ async function runForPersona(
     expired: 0,
     expiredLeft: 0,
     refused: 0,
+    harvested: 0,
     freeAnswered: 0,
-    cheapAsked: 0,
-    detailAsked: 0,
+    paidAsked: 0,
     spentUsd: null,
     budgetUsd: null,
     trusted: true,
     note: null,
+    warn: null,
   };
 
   // Age first: it costs nothing, needs no verdict, and takes those links out
@@ -238,101 +250,92 @@ async function runForPersona(
     return idle;
   }
 
+  // ── Pass zero: the answers already bought ──
+  //
+  // Abandoning the HTTP request does not cancel the scraper run; it finishes
+  // and bills either way, and its dataset keeps for a week. Reading it back
+  // costs nothing, so it happens before a cent is spent. Without this, a run
+  // that times out at 231 seconds is simply purchased again tomorrow — which
+  // is how the same 82 answers were paid for twice.
+  const harvest = await harvestRecentRuns(HARVEST_WINDOW_MS);
+  const bought = harvest.states;
+  base.harvested = links.filter((l) => bought.has(l.url_key)).length;
+
   // ── First pass: free, straight to Instagram ──
   //
   // /diag showed the host is answered again, so this is tried before any
   // money is spent. It is not reliable at volume — a hundred links at once
-  // got every one of them refused minutes after a single one worked — so it
-  // asks gently, keeps whatever it gets, and hands the rest along. Its
-  // failures are not verdicts and cost nothing.
-  const { states, error } = await checkPostsDirect([
-    ...links.map((l) => l.url),
-    CONTROL_URL,
+  // got every one of them refused minutes after a single one worked, and one
+  // September run had all 83 turned away — so it asks gently, keeps whatever
+  // it gets, and hands the rest along. Its failures are not verdicts and
+  // cost nothing.
+  const {
+    states,
+    asked: probed,
+    error,
+  } = await checkPostsDirect([
+    ...links.filter((l) => !bought.has(l.url_key)).map((l) => l.url),
+    ...(bought.has(CONTROL_SHORTCODE) ? [] : [CONTROL_URL]),
   ]);
-
-  // ── Second pass: the cheap scraper, for what Instagram would not answer ──
-  //
-  // $0.00018 a link, and it only sees what came back unanswered above. When
-  // the direct probe is having a good day this is nearly empty; when
-  // Instagram shuts the door it carries the whole run, which is why it is
-  // still here.
-  // Links already known to be hidden are left out. This scraper cannot see
-  // them either — that is what made them hidden — so asking costs money to
-  // learn nothing, every run, for the rest of their thirty days. Only the
-  // expensive pass could tell whether such a post has since been deleted,
-  // and buying that daily is precisely what we stopped doing.
-  const known = new Set(
-    links.filter((l) => l.hidden_confirmed).map((l) => l.url_key)
-  );
-  const unanswered = [...links.map((l) => l.url), CONTROL_URL].filter((u) => {
-    const code = u.match(/\/p\/([^/]+)/)?.[1];
-    if (!code || known.has(code)) return false;
-    return states.get(code) !== "alive";
-  });
   base.freeAnswered = states.size;
-  base.cheapAsked = unanswered.length;
-  if (unanswered.length > 0) {
-    const cheap = await checkPosts(unanswered);
-    cheap.states.forEach((state, code) => {
-      // "alive" is worth keeping; its "unreachable" is not a verdict at all
-      // and is dropped below with everything else the detail pass decides.
-      if (state === "alive") states.set(code, state);
-    });
-  }
 
-  // ── Second pass: what the first could not see, asked once ──
+  // Which links can be seen without paying anybody. A link the scraper calls
+  // alive that this set does not contain is age-gated rather than public,
+  // and that is worth remembering: the free probe will never see it, so
+  // without the marker it would fall through to the paid pass every single
+  // day for the rest of its month.
   //
-  // The cheap scraper's "not found" covers deleted, private, suspended and
-  // age-restricted alike. This one tells those apart at nine times the
-  // price, so two rules keep it small.
-  //
-  // It only sees links the cheap pass could not confirm — and of those,
-  // only ones we have never had an answer for. A link this pass has already
-  // found alive is hidden, not gone, and hidden does not become deleted by
-  // being asked again tomorrow; re-asking was quietly re-buying the same
-  // answer every single run. Anything still hidden a month on leaves by the
-  // age rule regardless, which is why nothing needs re-verifying here.
-  const unsure = links.filter(
-    (l) => states.get(l.url_key) !== "alive" && !l.hidden_confirmed
-  );
-  // Nothing else in this job can run the Apify credit down, so the ceiling
-  // is checked here and nowhere else. Over it, the run keeps the cheap pass
-  // and the age rule — which cost a fraction of a cent and nothing at all —
-  // and simply stops being able to tell deleted from hidden until the month
-  // turns over.
-  const spend = await monthlySpend();
-  const overBudget =
-    spend !== null && spend.limit > 0 && spend.used / spend.limit > SPEND_CEILING_SHARE;
-
-  base.spentUsd = spend?.used ?? null;
-  base.budgetUsd = spend?.limit ?? null;
-
-  const detailUrls = overBudget ? [] : unsure.slice(0, DETAIL_BATCH).map((l) => l.url);
-  base.detailAsked = detailUrls.length;
-  const detail = await checkPostsDetailed(
-    detailUrls.length > 0 ? [...detailUrls, CONTROL_URL] : [],
-    // Whatever is left of the minute, minus what reporting and deleting
-    // need. Running out here costs a day; running out after the deletions
-    // but before the report leaves nobody knowing what happened.
-    now + RUN_DEADLINE_MS - Date.now()
-  );
-
-  // Which links the cheap pass could see at all. A link the expensive pass
-  // calls alive that this set does not contain is hidden rather than public,
-  // and that is the state worth remembering — it will not change back.
+  // Only links the probe actually reached count either way. It gives up
+  // after eight refusals in a row, and on the day this was written it was
+  // turned away from all 83 — reading that silence as "age-gated" would have
+  // written the marker onto the entire backlog and quietly retired it from
+  // ever being checked again.
   const publiclyVisible = new Set(
     links.filter((l) => states.get(l.url_key) === "alive").map((l) => l.url_key)
   );
 
-  // Only this pass may condemn anything, so the cheap pass's "missing" is
-  // wiped for every link before its answers are laid over the top. Without
-  // this, a second pass that times out leaves the cheap verdicts standing
-  // and the report announces 35 posts gone on the strength of a scraper
-  // that cannot tell gone from hidden.
-  for (const l of links) {
-    if (states.get(l.url_key) === "unreachable") states.delete(l.url_key);
-  }
-  detail.states.forEach((state, code) => states.set(code, state));
+  // ── Second pass: the only one that costs money ──
+  //
+  // It sees what the harvest and the free probe together could not settle,
+  // capped at PAID_BATCH, minus the links already known to be age-gated.
+  // That cap is the single tap money comes out of: forty-five links is about
+  // five cents, and it clears a realistic backlog in one run.
+  const unsure = links.filter(
+    (l) =>
+      !bought.has(l.url_key) &&
+      states.get(l.url_key) !== "alive" &&
+      !l.hidden_confirmed
+  );
+  // Nothing else in this job can run the credit down, so the ceiling is
+  // checked here and nowhere else. Over it, the run keeps the free probe and
+  // the age rule — which cost nothing at all — and simply stops being able
+  // to tell deleted from age-gated until the month turns over.
+  const before = await monthlySpend();
+  const overBudget =
+    before !== null && before.limit > 0 && before.used / before.limit > SPEND_CEILING_SHARE;
+
+  const paidUrls = overBudget ? [] : unsure.slice(0, PAID_BATCH).map((l) => l.url);
+  base.paidAsked = paidUrls.length;
+  const fresh = await checkPostsPaid(
+    paidUrls.length > 0 ? [...paidUrls, CONTROL_URL] : [],
+    // Whatever is left of the run's budget. Running out here costs a day;
+    // running out after the marking but before the report leaves nobody
+    // knowing what happened.
+    now + RUN_DEADLINE_MS - Date.now()
+  );
+
+  // Read the bill after the run that ran it up, not before. The report used
+  // to quote a figure taken minutes earlier and was short by exactly the
+  // cost of the run it was reporting on.
+  const spend = (paidUrls.length > 0 ? await monthlySpend() : null) ?? before;
+  base.spentUsd = spend?.used ?? null;
+  base.budgetUsd = spend?.limit ?? null;
+
+  // Only the paid pass may condemn anything; the free probe never says
+  // "gone", so it has nothing here to overrule. Bought verdicts go on first,
+  // this run's over the top of them.
+  bought.forEach((state, code) => states.set(code, state));
+  fresh.states.forEach((state, code) => states.set(code, state));
 
   if (error) {
     await stamp(supabase, cfg.persona_id);
@@ -341,56 +344,65 @@ async function runForPersona(
     return failed;
   }
 
+  // Something went wrong that is worth saying out loud but does not make the
+  // verdicts we do hold any less true. A scraper that refused to answer this
+  // run tells us nothing about the answers bought yesterday, and treating it
+  // as though it did is what turned a run holding 82 good verdicts into "82
+  // geprüft · nichts markiert".
+  const warnings: string[] = [];
+  if (fresh.error) warnings.push(fresh.error);
+  if (paidUrls.length > 0 && fresh.states.size === 0) {
+    warnings.push("der Scraper hat auf nichts geantwortet");
+  }
+  if (overBudget && unsure.length > 0) {
+    warnings.push(
+      `Apify-Guthaben zu ${Math.round(((spend?.used ?? 0) / (spend?.limit || 1)) * 100)}% verbraucht — der bezahlte Durchgang bleibt aus`
+    );
+  }
+
   // ── Is this run worth believing? ──
   //
   // Every way this can go wrong looks the same from the inside: everything
   // reads as gone. So each of these has to hold before a single message is
   // touched.
-  const reasons: string[] = [];
-  // "Not answered" and "answered as alive" both block deletion, but they are
-  // different problems and saying so saves an hour of looking in the wrong
-  // place — as it did when a rejected batch was reported as a live control.
-  const control = states.get(CONTROL_SHORTCODE);
-  if (control === "alive") {
-    reasons.push("der Kontrollposten kam als vorhanden zurück");
-  } else if (control !== "unreachable") {
-    reasons.push("der Kontrollposten wurde nicht beantwortet");
-  }
-  if (detail.error) {
-    // Only the second pass can tell gone from hidden, so without it there is
-    // no deletable verdict at all — whatever the cheap one said.
-    reasons.push(detail.error);
-  }
-  if (detailUrls.length > 0 && !detail.states.size) {
-    reasons.push("the second pass answered nothing");
-  }
-  if (overBudget && unsure.length > 0) {
-    reasons.push(
-      `Apify-Guthaben zu ${Math.round(((spend?.used ?? 0) / (spend?.limit || 1)) * 100)}% verbraucht — der teure Durchgang bleibt aus`
-    );
-  }
+  //
+  // They are only asked when the run actually wants to mark something. A
+  // quiet run that found nothing dead has nothing to be wrong about, and
+  // warning about it reads as breakage where there is none.
   const answered = links.filter((l) => states.has(l.url_key));
-  if (answered.length === 0) {
-    reasons.push("nothing was answered");
-  } else if (!answered.some((l) => states.get(l.url_key) === "alive")) {
-    reasons.push("not one link came back reachable");
-  }
-  // Links that were fine yesterday are the honest control: a handful may
-  // genuinely have died overnight, half of them cannot have.
-  const wereAlive = answered.filter((l) => l.link_ok === true);
-  const stillAlive = wereAlive.filter((l) => states.get(l.url_key) === "alive");
-  if (wereAlive.length >= 4 && stillAlive.length < wereAlive.length / 2) {
-    reasons.push(
-      `${wereAlive.length - stillAlive.length} of ${wereAlive.length} previously reachable links went at once`
-    );
-  }
-  // And the share itself: see MAX_UNREACHABLE_SHARE.
   const missing = answered.filter((l) => states.get(l.url_key) === "unreachable");
-  const share = answered.length > 0 ? missing.length / answered.length : 0;
-  if (answered.length >= 10 && share > MAX_UNREACHABLE_SHARE) {
-    reasons.push(
-      `${missing.length} of ${answered.length} links (${Math.round(share * 100)}%) are unreachable from here — that is the vantage point, not the posts`
-    );
+  const reasons: string[] = [];
+
+  if (missing.length > 0) {
+    // "Not answered" and "answered as alive" both block marking, but they
+    // are different problems and saying which saves an hour of looking in
+    // the wrong place — as it did when a rejected batch was reported as a
+    // live control.
+    const control = states.get(CONTROL_SHORTCODE);
+    if (control === "alive") {
+      reasons.push("der Kontrollposten kam als vorhanden zurück");
+    } else if (control !== "unreachable") {
+      reasons.push("der Kontrollposten wurde nicht beantwortet");
+    }
+    if (!answered.some((l) => states.get(l.url_key) === "alive")) {
+      reasons.push("kein einziger Link kam als vorhanden zurück");
+    }
+    // Links that were fine yesterday are the honest control: a handful may
+    // genuinely have died overnight, half of them cannot have.
+    const wereAlive = answered.filter((l) => l.link_ok === true);
+    const stillAlive = wereAlive.filter((l) => states.get(l.url_key) === "alive");
+    if (wereAlive.length >= 4 && stillAlive.length < wereAlive.length / 2) {
+      reasons.push(
+        `${wereAlive.length - stillAlive.length} von ${wereAlive.length} zuletzt erreichbaren Links sind auf einmal weg`
+      );
+    }
+    // And the share itself: see MAX_UNREACHABLE_SHARE.
+    const share = missing.length / answered.length;
+    if (answered.length >= 10 && share > MAX_UNREACHABLE_SHARE) {
+      reasons.push(
+        `${missing.length} von ${answered.length} Links (${Math.round(share * 100)}%) sind von hier aus nicht erreichbar — das ist der Blickwinkel, nicht die Posts`
+      );
+    }
   }
   const trusted = reasons.length === 0;
 
@@ -408,7 +420,11 @@ async function runForPersona(
         .from("content_links")
         .update({
           link_ok: true,
-          hidden_confirmed: !publiclyVisible.has(l.url_key),
+          // Left exactly as it was when the probe never reached this link:
+          // no evidence, no change.
+          hidden_confirmed: probed.has(l.url_key)
+            ? !publiclyVisible.has(l.url_key)
+            : l.hidden_confirmed,
           checked_at: new Date().toISOString(),
           unreachable_since: null,
           unreachable_runs: 0,
@@ -467,12 +483,13 @@ async function runForPersona(
     skipped,
     trusted,
     note: trusted ? null : reasons.join("; "),
+    warn: warnings.length > 0 ? warnings.join("; ") : null,
   };
-  // The detail the report no longer carries. Worth keeping, because the
-  // cost argument rests on the free pass carrying most of the traffic and
-  // the paid ones seeing each link once.
+  // The detail the report no longer carries. Worth keeping, because the cost
+  // argument rests entirely on these three numbers: the paid one should be
+  // small, and it should be small because the other two are doing the work.
   console.log(
-    `[links] gratis ${result.freeAnswered} · billig ${result.cheapAsked} · teuer ${result.detailAsked} → ` +
+    `[links] geerbt ${result.harvested} · gratis ${result.freeAnswered} · bezahlt ${result.paidAsked} → ` +
       `${result.alive} vorhanden, ${result.unreachable} weg, ${result.deleted} markiert, ` +
       `${result.expired} abgelaufen, ${result.refused} verweigert`
   );
@@ -715,6 +732,9 @@ async function report(
     if (marked > 0) lines.push(`↩︎ ${marked} reacted as dead`);
   }
 
+  if (r.warn) {
+    lines.push(`⚠️ ${r.warn}`);
+  }
   if (r.refused > 0) {
     lines.push(`⚠️ ${r.refused} konnten nicht markiert werden`);
   }
