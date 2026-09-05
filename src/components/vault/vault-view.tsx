@@ -779,60 +779,87 @@ function ReelStack({
     : null;
 
   if (!expanded) {
+    // The two cuts behind the cover, back-most first so the DOM order is
+    // the paint order.
+    const behind = reel.cuts.filter((x) => x.id !== c.id).slice(0, 2).reverse();
     return (
       <div className="group overflow-hidden rounded-xl border border-border/50 bg-card transition-colors hover:border-border">
         {/* The label sits beside the toggle button, not inside it: it opens
             the breakdown, and a tap on it must not fan the stack out. */}
         <div className="relative">
-        <button type="button" onClick={onToggle} className="block w-full text-left">
-          <div className="relative pt-2.5">
-            {/* The stack, drawn: two frames behind the cover, offset upward. */}
-            <div className="pointer-events-none absolute inset-x-4 top-0 h-4 rounded-t-lg border border-white/15 bg-white/10" />
-            <div className="pointer-events-none absolute inset-x-2 top-[5px] h-4 rounded-t-lg border border-white/25 bg-white/15" />
-            <div className="relative aspect-[9/16] w-full overflow-hidden rounded-t-lg bg-black">
-              {c.thumbnailUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={c.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-muted/40 px-2 text-center text-xs text-muted-foreground">
-                  {reel.title}
+          <button type="button" onClick={onToggle} className="block w-full text-left">
+            {/* Same box as every other card, so the row stays level. The
+                stack lives inside it: the siblings peek out along the top
+                edge — as themselves when they have thumbnails, as tinted
+                frames when not — and the cover sits in front of them. */}
+            <div className="relative aspect-[9/16] w-full overflow-hidden bg-black">
+              {behind.map((b, i) => {
+                const back = i === 0 && behind.length === 2;
+                return (
+                  <div
+                    key={b.id}
+                    className={`absolute h-10 overflow-hidden rounded-t-xl border border-white/20 bg-white/10 ${
+                      back ? "inset-x-[12%] top-0" : "inset-x-[6%] top-[7px]"
+                    }`}
+                  >
+                    {b.thumbnailUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={b.thumbnailUrl}
+                        alt=""
+                        className={`h-full w-full object-cover object-top ${back ? "opacity-40" : "opacity-60"}`}
+                        loading="lazy"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+              <div className="absolute inset-x-0 bottom-0 top-[14px] overflow-hidden rounded-t-xl bg-black shadow-[0_-3px_8px_rgba(0,0,0,0.6)]">
+                {c.thumbnailUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-muted/40 px-2 text-center text-xs text-muted-foreground">
+                    {reel.title}
+                  </div>
+                )}
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent" />
+                <div className="absolute left-2 top-2 flex items-center gap-1">
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white ${
+                      c.is_nsfw ? "bg-blue-600/90" : "bg-green-600/90"
+                    }`}
+                  >
+                    {c.is_nsfw ? "NSFW" : "SFW"}
+                  </span>
+                  {c.is_trial && <TrialBadge size="sm" />}
                 </div>
-              )}
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent" />
-              <div className="absolute left-2 top-2 flex items-center gap-1">
-                <span
-                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white ${
-                    c.is_nsfw ? "bg-blue-600/90" : "bg-green-600/90"
-                  }`}
-                >
-                  {c.is_nsfw ? "NSFW" : "SFW"}
+                <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-white/90 px-2 py-1 text-[10px] font-bold text-black">
+                  <Layers className="h-3 w-3" />
+                  <span className="tabular-nums">{reel.cuts.length} cuts</span>
+                  <ChevronRight className="h-3 w-3" />
                 </span>
-                {c.is_trial && <TrialBadge size="sm" />}
               </div>
-              <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-white/90 px-2 py-1 text-[10px] font-bold text-black">
-                <Layers className="h-3 w-3" />
-                <span className="tabular-nums">{reel.cuts.length} cuts</span>
-                <ChevronRight className="h-3 w-3" />
-              </span>
             </div>
-          </div>
-        </button>
-        {note && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-            <PostedDetails
-              label={note}
-              className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
-              title={reel.title}
-              cuts={allCuts}
-              postings={reel.postings}
-              accounts={accounts}
-            />
-          </div>
-        )}
+          </button>
+          {note && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+              <PostedDetails
+                label={note}
+                className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
+                title={reel.title}
+                cuts={allCuts}
+                postings={reel.postings}
+                accounts={accounts}
+              />
+            </div>
+          )}
         </div>
         <div className="px-2.5 py-2">
           <p className="text-xs font-medium leading-tight line-clamp-1 text-foreground">{reel.title}</p>
-          <p className="mt-0.5 text-[10px] text-muted-foreground/60">{reel.cuts.length} cuts · tap to fan out</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground/60">
+            {reel.cuts.length} cuts · tap to fan out
+          </p>
         </div>
       </div>
     );
