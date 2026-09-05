@@ -93,10 +93,10 @@
       "mcp__Claude_in_Chrome__javascript_tool",
       "mcp__Claude_in_Chrome__computer",
       "Bash(grep -rn '${uuid}_${file.name}\\\\|_${file.name}' /Users/leon/Desktop/fansly_CSM/src --include=\"*.tsx\" --include=\"*.ts\")",
-      "Bash(grep -n 'href=\"/requests\"\\\\|ArrowLeft\\\\|Back\\\\|Zur\u00fcck\\\\|href={`/requests' /Users/leon/Desktop/fansly_CSM/src/components/requests/request-detail.tsx)",
+      "Bash(grep -n 'href=\"/requests\"\\\\|ArrowLeft\\\\|Back\\\\|Zurück\\\\|href={`/requests' /Users/leon/Desktop/fansly_CSM/src/components/requests/request-detail.tsx)",
       "Bash(python3 -)",
       "Bash(git commit -q -m ' *)",
-      "Bash(grep -n \"Uploading\u2026\\\\|setPct\\(0\\)\\\\|setProgress\\({ done: 0, total: files.length }\\)\" src/components/upload/upload-view.tsx)",
+      "Bash(grep -n \"Uploading…\\\\|setPct\\(0\\)\\\\|setProgress\\({ done: 0, total: files.length }\\)\" src/components/upload/upload-view.tsx)",
       "Bash(dig +short A db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(dig +short AAAA db.nlwkpkhtevgcdpqbksed.supabase.co)",
       "Bash(ping6 -c 1 -W 3000 2a05:d018:135e:16e0:387a:259e:a50f:2047)",
@@ -109,7 +109,7 @@
       "Bash(curl -s \"https://duraska-csm-webapp.vercel.app/login\" -o /tmp/dep.html -w \"%{http_code}\\\\n\")",
       "Read(//tmp/**)",
       "Bash(curl -s -o /dev/null -w \"page-203c90f526a9134f.js -> %{http_code}\\\\n\" \"https://duraska-csm-webapp.vercel.app/_next/static/chunks/app/\\(app\\)/page-203c90f526a9134f.js\")",
-      "Bash(node -e \"try{require.resolve\\('server-only'\\);console.log\\('resolves OK'\\)}catch\\(e\\){console.log\\('\u274c '+e.code\\)}\")",
+      "Bash(node -e \"try{require.resolve\\('server-only'\\);console.log\\('resolves OK'\\)}catch\\(e\\){console.log\\('❌ '+e.code\\)}\")",
       "Bash(node -e \"const p=require\\('./node_modules/next/package.json'\\); console.log\\('next deps incl server-only?', Object.keys\\(p.dependencies||{}\\).filter\\(d=>/server-only|client-only/.test\\(d\\)\\)\\)\")",
       "Bash(cat supabase/migrations/00023_content_links.sql supabase/migrations/00024_account_metrics.sql supabase/migrations/00025_weekly_reel_target.sql > /tmp/combined.sql; wc -l /tmp/combined.sql; echo \"--- sanity: order of object creation ---\"; grep -nE \"create table|alter table public\\\\.\\(accounts|content_requests|telegram_config\\)\" /tmp/combined.sql)",
       "Bash(openssl rand *)",
@@ -243,7 +243,12 @@
       "Bash(sed -n '/const staleBefore = new Date/,/\\\\.limit\\(MAX_LINKS\\)/p' src/lib/link-check-job.ts)",
       "Bash(sed -n '/const unsure = links.filter/,/\\);/p' src/lib/link-check-job.ts)",
       "Bash(vercel --version)",
-      "Bash(vercel redeploy *)"
+      "Bash(vercel redeploy *)",
+      "Bash(vercel --prod)",
+      "Bash(vercel inspect *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST \"https://csm-duraskastudios.space/api/links/check\")",
+      "Bash(grep -n '^ [a-z_]*: {$' src/lib/types/database.ts)",
+      "Bash(grep -rn '\"Reel\\\\|`Reel\\\\|Reel #\\\\|Reel ' src --include='*.ts' --include='*.tsx')"
     ]
   }
 }

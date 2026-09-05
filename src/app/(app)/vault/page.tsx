@@ -21,8 +21,23 @@ export interface VaultAsset {
   is_warmup: boolean;
   // posting info: platform → best status (used by the platform filter)
   platformStatus: Record<string, string>;
-  // accounts this request has been marked posted on
+  // accounts this cut has been marked posted on
   postedAccountIds: string[];
+  /**
+   * Which finished cut of its reel this is — "2 of 5". A job yields several
+   * final cuts and they used to sit in the grid as five unrelated cards
+   * called "Reel #21", which is how two of them went out on the same day.
+   * Null for raw takes, which are not something anybody posts.
+   */
+  variantNo: number | null;
+  variantCount: number;
+  /**
+   * How often the reel as a whole — any of its cuts — has gone out on each
+   * account, and when it last did. This is what the card shows at the
+   * bottom, so a VA holding an unposted cut still sees that its sibling ran
+   * on @harold yesterday.
+   */
+  reelPostings: Record<string, { count: number; lastAt: string | null }>;
 }
 
 export interface PostingAccount {
@@ -94,7 +109,7 @@ export default async function VaultPage() {
   // 3b. All schedule slots for those requests (to build posting status)
   const { data: slots } = await supabase
     .from("schedule_slots")
-    .select("request_id, asset_id, platform, status, account_id")
+    .select("request_id, asset_id, platform, status, account_id, posted_at, scheduled_for")
     .eq("persona_id", personaId)
     .in("request_id", requestIds);
 
@@ -103,6 +118,11 @@ export default async function VaultPage() {
   const slotsByRequest: Record<string, Record<string, string>> = {};
   const postedAccountsByRequest: Record<string, Set<string>> = {};
   const postedAccountsByAsset: Record<string, Set<string>> = {};
+  // The reel as a whole, per account: every posting of any of its cuts.
+  const reelPostingsByRequest: Record<
+    string,
+    Record<string, { count: number; lastAt: string | null }>
+  > = {};
   for (const slot of slots ?? []) {
     const rid = slot.request_id;
     if (!rid) continue;
@@ -122,7 +142,28 @@ export default async function VaultPage() {
         // speak for the whole job, so they still do.
         (postedAccountsByRequest[rid] ??= new Set()).add(slot.account_id);
       }
+      const perAccount = (reelPostingsByRequest[rid] ??= {});
+      const entry = (perAccount[slot.account_id] ??= { count: 0, lastAt: null });
+      entry.count++;
+      const at = slot.posted_at ?? slot.scheduled_for;
+      if (at && (!entry.lastAt || at > entry.lastAt)) entry.lastAt = at;
     }
+  }
+
+  // Number the finished cuts of each job in the order they were uploaded.
+  // Raw takes get no number: nobody posts those, and counting them would
+  // make "2 of 5" mean something different on every card.
+  const variantByAsset: Record<string, { no: number; of: number }> = {};
+  const cutsByRequest: Record<string, typeof assets> = {};
+  for (const a of assets) {
+    if (a.stage !== "edited") continue;
+    (cutsByRequest[a.request_id] ??= []).push(a);
+  }
+  for (const cuts of Object.values(cutsByRequest)) {
+    cuts.sort((x, y) => x.uploaded_at.localeCompare(y.uploaded_at));
+    cuts.forEach((c, i) => {
+      variantByAsset[c.id] = { no: i + 1, of: cuts.length };
+    });
   }
 
   // 4. Batch-sign URLs for both originals and thumbnails. Chunked into
@@ -187,6 +228,9 @@ export default async function VaultPage() {
             )
           )
         ),
+        variantNo: variantByAsset[asset.id]?.no ?? null,
+        variantCount: variantByAsset[asset.id]?.of ?? 0,
+        reelPostings: reelPostingsByRequest[asset.request_id] ?? {},
       } satisfies VaultAsset;
     })
     .filter(Boolean) as VaultAsset[];

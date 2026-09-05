@@ -97,7 +97,12 @@ function VaultCard({
   asset: VaultAsset;
   accounts: PostingAccount[];
   onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
-  onUpdatePosted: (requestId: string, postedAccountIds: string[]) => void;
+  onUpdatePosted: (
+    assetId: string,
+    postedAccountIds: string[],
+    /** The reel-level tally to adjust on every card of the same job. */
+    change?: { requestId: string; accountId: string; delta: 1 | -1 }
+  ) => void;
   onVisible: (asset: VaultAsset) => void;
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
@@ -137,7 +142,10 @@ function VaultCard({
   }, [asset]);
 
   const postedSet = new Set(asset.postedAccountIds);
-  const postedAccounts = accounts.filter((a) => postedSet.has(a.id));
+  // Every account the reel — any cut of it — has gone out on.
+  const reelAccounts = accounts
+    .map((acc) => ({ acc, ...(asset.reelPostings[acc.id] ?? { count: 0, lastAt: null }) }))
+    .filter((r) => r.count > 0);
   const isUnposted = asset.postedAccountIds.length === 0;
 
   function handleMediaClick() {
@@ -314,11 +322,17 @@ function VaultCard({
   function togglePostedAccount(account: PostingAccount) {
     const isPosted = postedSet.has(account.id);
     startTransition(async () => {
-      // Optimistic update — for this cut alone, not its siblings.
+      // Optimistic update. The tick belongs to this cut alone; the reel
+      // tally moves on every sibling card too, so they see it straight away.
       const next = isPosted
         ? asset.postedAccountIds.filter((id) => id !== account.id)
         : [...asset.postedAccountIds, account.id];
-      onUpdatePosted(asset.id, next);
+      const change = {
+        requestId: asset.request_id,
+        accountId: account.id,
+        delta: (isPosted ? -1 : 1) as 1 | -1,
+      };
+      onUpdatePosted(asset.id, next, change);
 
       const result = isPosted
         ? await unmarkAssetPostedFromVault({
@@ -334,7 +348,10 @@ function VaultCard({
 
       if (result.error) {
         toast.error(result.error);
-        onUpdatePosted(asset.id, asset.postedAccountIds); // revert
+        onUpdatePosted(asset.id, asset.postedAccountIds, {
+          ...change,
+          delta: (change.delta === 1 ? -1 : 1) as 1 | -1,
+        }); // revert
       } else {
         toast.success(
           isPosted
@@ -446,9 +463,21 @@ function VaultCard({
             </button>
             {asset.is_trial && <TrialBadge size="sm" />}
           </div>
-          <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
-            {asset.stage}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
+              {asset.stage}
+            </span>
+            {/* Which cut of the reel this is. Only shown when there are
+                siblings — a lone cut has nothing to be confused with. */}
+            {asset.variantNo !== null && asset.variantCount > 1 && (
+              <span
+                className="rounded-full bg-amber-400/90 px-1.5 py-0.5 text-[9px] font-bold tabular-nums text-black"
+                title={`Cut ${asset.variantNo} of ${asset.variantCount} — ${asset.request_title}`}
+              >
+                {asset.variantNo}/{asset.variantCount}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Top-right: Action buttons — always visible on mobile, hover on desktop */}
@@ -555,26 +584,39 @@ function VaultCard({
           </button>
         </div>
 
-        {/* Bottom gradient + posted-account tags */}
+        {/* Bottom gradient + per-account tags for the REEL, not just this cut.
+            One chip per account the reel has ever gone out on, with how many
+            times in brackets: "IG (2) · harold". Green when this very cut is
+            among those postings, amber when only its siblings are — which is
+            the case that used to be invisible, and the one that matters to
+            somebody about to post this cut. */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
-          {isUnposted ? (
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-medium text-white/60">
-              Available
-            </span>
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {postedAccounts.map((acc) => (
-                <span
-                  key={acc.id}
-                  className="flex items-center gap-1 rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white"
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[acc.platform] ?? "bg-gray-400"}`} />
-                  @{acc.handle}
-                  <span>✓</span>
-                </span>
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-1">
+            {isUnposted && (
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-medium text-white/60">
+                Available
+              </span>
+            )}
+            {reelAccounts.map(({ acc, count, lastAt }) => (
+              <span
+                key={acc.id}
+                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold text-white ${
+                  postedSet.has(acc.id) ? "bg-green-500/80" : "bg-amber-500/80"
+                }`}
+                title={
+                  lastAt
+                    ? `${asset.request_title} ran ${count}× on @${acc.handle}, last ${new Date(lastAt).toLocaleDateString("de-DE")}`
+                    : undefined
+                }
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[acc.platform] ?? "bg-gray-400"}`} />
+                {PLATFORM_LABELS[acc.platform] ?? acc.platform}
+                <span className="tabular-nums">({count})</span>
+                · {acc.handle}
+                {postedSet.has(acc.id) && <span>✓</span>}
+              </span>
+            ))}
+          </div>
         </div>
 
       </div>
@@ -639,11 +681,31 @@ export function VaultView({
     setLocalAssets(assets);
   }, [assets]);
 
-  function handlePostedUpdate(assetId: string, postedAccountIds: string[]) {
-    // Posting belongs to the single cut — its siblings are separate reels
-    // and stay available.
+  function handlePostedUpdate(
+    assetId: string,
+    postedAccountIds: string[],
+    change?: { requestId: string; accountId: string; delta: 1 | -1 }
+  ) {
+    // The tick belongs to the single cut — its siblings are separate reels
+    // and stay available. The reel tally, though, is shared by every cut of
+    // the job, so it moves on all of them.
     setLocalAssets((prev) =>
-      prev.map((a) => (a.id === assetId ? { ...a, postedAccountIds } : a))
+      prev.map((a) => {
+        let next = a.id === assetId ? { ...a, postedAccountIds } : a;
+        if (change && a.request_id === change.requestId) {
+          const cur = next.reelPostings[change.accountId] ?? { count: 0, lastAt: null };
+          const count = Math.max(0, cur.count + change.delta);
+          const reelPostings = { ...next.reelPostings };
+          if (count === 0) delete reelPostings[change.accountId];
+          else
+            reelPostings[change.accountId] = {
+              count,
+              lastAt: change.delta === 1 ? new Date().toISOString() : cur.lastAt,
+            };
+          next = { ...next, reelPostings };
+        }
+        return next;
+      })
     );
   }
 
