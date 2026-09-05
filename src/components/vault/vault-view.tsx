@@ -782,24 +782,25 @@ function ReelStack({
     // The two cuts behind the cover, back-most first so the DOM order is
     // the paint order.
     const behind = reel.cuts.filter((x) => x.id !== c.id).slice(0, 2).reverse();
+    // Every layer shares one frame inside the card box; the back ones are
+    // turned a few degrees so their corners show past the cover, the way a
+    // pile of prints does. The cover gives up some size for that — the
+    // stack is the point of the card, so it may look like one.
+    const frame = "absolute left-[7%] right-[7%] top-[6%] bottom-[6%] overflow-hidden rounded-xl";
     return (
       <div className="group overflow-hidden rounded-xl border border-border/50 bg-card transition-colors hover:border-border">
         {/* The label sits beside the toggle button, not inside it: it opens
             the breakdown, and a tap on it must not fan the stack out. */}
         <div className="relative">
           <button type="button" onClick={onToggle} className="block w-full text-left">
-            {/* Same box as every other card, so the row stays level. The
-                stack lives inside it: the siblings peek out along the top
-                edge — as themselves when they have thumbnails, as tinted
-                frames when not — and the cover sits in front of them. */}
-            <div className="relative aspect-[9/16] w-full overflow-hidden bg-black">
+            <div className="relative aspect-[9/16] w-full overflow-hidden bg-muted/30">
               {behind.map((b, i) => {
                 const back = i === 0 && behind.length === 2;
                 return (
                   <div
                     key={b.id}
-                    className={`absolute h-10 overflow-hidden rounded-t-xl border border-white/20 bg-white/10 ${
-                      back ? "inset-x-[12%] top-0" : "inset-x-[6%] top-[7px]"
+                    className={`${frame} border border-white/15 bg-neutral-800 shadow-lg ${
+                      back ? "-rotate-6" : "rotate-[5deg]"
                     }`}
                   >
                     {b.thumbnailUrl && (
@@ -807,14 +808,14 @@ function ReelStack({
                       <img
                         src={b.thumbnailUrl}
                         alt=""
-                        className={`h-full w-full object-cover object-top ${back ? "opacity-40" : "opacity-60"}`}
+                        className={`h-full w-full object-cover ${back ? "opacity-40" : "opacity-60"}`}
                         loading="lazy"
                       />
                     )}
                   </div>
                 );
               })}
-              <div className="absolute inset-x-0 bottom-0 top-[14px] overflow-hidden rounded-t-xl bg-black shadow-[0_-3px_8px_rgba(0,0,0,0.6)]">
+              <div className={`${frame} bg-black shadow-2xl ring-1 ring-white/25`}>
                 {c.thumbnailUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={c.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -836,14 +837,15 @@ function ReelStack({
                 </div>
                 <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-white/90 px-2 py-1 text-[10px] font-bold text-black">
                   <Layers className="h-3 w-3" />
-                  <span className="tabular-nums">{reel.cuts.length} cuts</span>
+                  <span className="tabular-nums">{reel.cuts.length}</span>
                   <ChevronRight className="h-3 w-3" />
                 </span>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/70 to-transparent" />
               </div>
             </div>
           </button>
           {note && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+            <div className="pointer-events-none absolute bottom-[6%] left-[7%] right-[7%] p-2">
               <PostedDetails
                 label={note}
                 className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
