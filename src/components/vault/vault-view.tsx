@@ -1140,13 +1140,15 @@ export function VaultView({
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
-  const readyCount = useMemo(
-    () =>
-      localAssets.filter(
-        (a) => a.stage === "edited" && !a.is_nsfw && a.postedAccountIds.length === 0
-      ).length,
-    [localAssets]
-  );
+  // Two numbers, because they answer different questions: how many reels
+  // are still untouched is what a VA plans a week with, how many cuts is how
+  // much of that week she can actually fill.
+  const ready = useMemo(() => {
+    const cuts = localAssets.filter(
+      (a) => a.stage === "edited" && !a.is_nsfw && a.postedAccountIds.length === 0
+    );
+    return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
+  }, [localAssets]);
 
   // ── One card per reel ──
   //
@@ -1310,9 +1312,13 @@ export function VaultView({
           >
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
             Ready to post
-            <span className="tabular-nums text-muted-foreground">
-              {readyCount}
+            <span
+              className="tabular-nums text-muted-foreground"
+              title={`${ready.reels} reels · ${ready.cuts} cuts`}
+            >
+              {ready.reels} / {ready.cuts}
             </span>
+            <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
           </button>
         );
       })()}
