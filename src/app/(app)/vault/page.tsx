@@ -24,6 +24,14 @@ export interface VaultAsset {
   // accounts this cut has been marked posted on
   postedAccountIds: string[];
   /**
+   * Posted, but the row names no account — slots the schedule page creates
+   * carry a platform only, and get promoted to "posted" when their time
+   * passes. The vault used to ignore those and call the cut "Available",
+   * which is how it showed 79 free cuts while the dashboard, which counts
+   * every posted row, showed 37.
+   */
+  postedWithoutAccount: boolean;
+  /**
    * Which finished cut of its reel this is — "2 of 5". A job yields several
    * final cuts and they used to sit in the grid as five unrelated cards
    * called "Reel #21", which is how two of them went out on the same day.
@@ -177,6 +185,8 @@ export default async function VaultPage() {
   const slotsByRequest: Record<string, Record<string, string>> = {};
   const postedAccountsByRequest: Record<string, Set<string>> = {};
   const postedAccountsByAsset: Record<string, Set<string>> = {};
+  const postedNoAccountByAsset = new Set<string>();
+  const postedNoAccountByRequest = new Set<string>();
   // The reel as a whole, per account: every posting of any of its cuts.
   const reelPostingsByRequest: Record<
     string,
@@ -191,6 +201,10 @@ export default async function VaultPage() {
     const oldRank = STATUS_RANK[existing] ?? 0;
     if (newRank > oldRank) {
       slotsByRequest[rid][slot.platform] = slot.status;
+    }
+    if (slot.status === "posted" && !slot.account_id) {
+      if (slot.asset_id) postedNoAccountByAsset.add(slot.asset_id);
+      else postedNoAccountByRequest.add(rid);
     }
     if (slot.status === "posted" && slot.account_id) {
       if (slot.asset_id) {
@@ -287,6 +301,9 @@ export default async function VaultPage() {
             )
           )
         ),
+        postedWithoutAccount:
+          postedNoAccountByAsset.has(asset.id) ||
+          postedNoAccountByRequest.has(asset.request_id),
         variantNo: variantByAsset[asset.id]?.no ?? null,
         variantCount: variantByAsset[asset.id]?.of ?? 0,
         reelPostings: reelPostingsByRequest[asset.request_id] ?? {},

@@ -34,7 +34,7 @@ export async function PipelineTab({
     await Promise.all([
       supabase
         .from("content_requests")
-        .select("id, title, status, created_at, shooted_at")
+        .select("id, title, status, created_at, shooted_at, is_nsfw")
         .eq("persona_id", personaId),
       supabase
         .from("content_links")
@@ -65,6 +65,9 @@ export async function PipelineTab({
           .from("content_assets")
           .select("id, request_id, stage, uploaded_at")
           .in("request_id", requestIds)
+          // The vault hides deleted files; a number that counts them cannot
+          // be checked against it.
+          .is("deleted_at", null)
       : Promise.resolve({ data: [] }),
     supabase
       .from("schedule_slots")
@@ -115,9 +118,22 @@ export async function PipelineTab({
 
   const availableCuts = editedCuts.filter((a) => !isPosted(a)).length;
   const postedCuts = editedCuts.filter((a) => isPosted(a)).length;
+  // The vault's "Ready to post" is SFW only — Instagram and TikTok are what
+  // the VAs post to — so that figure is named here too, or the two numbers
+  // look like they disagree.
+  const nsfwJobs = new Set(reqs.filter((r) => r.is_nsfw).map((r) => r.id));
+  const availableSfw = editedCuts.filter(
+    (a) => !isPosted(a) && !(a.request_id && nsfwJobs.has(a.request_id))
+  ).length;
 
   const openLinks = (links ?? []).filter((l) => l.status === "open").length;
-  const toEdit = reqs.filter((r) => r.status === "shooted").length;
+  // A job counts as waiting for a cut only when there is something to cut.
+  // The editing page hides shooted jobs with no take uploaded, so counting
+  // them here showed "2" against a list of one.
+  const hasRaw = new Set(
+    (assets ?? []).filter((a) => a.stage === "raw" && a.request_id).map((a) => a.request_id)
+  );
+  const toEdit = reqs.filter((r) => r.status === "shooted" && hasRaw.has(r.id)).length;
 
   // Posted is deliberately absent: it only ever grows, so in a proportional
   // bar it swallows the three figures that actually move.
@@ -138,7 +154,7 @@ export async function PipelineTab({
       label: "Ready",
       value: availableCuts,
       tone: "bg-emerald-400",
-      note: "cuts nobody has posted",
+      note: `cuts nobody has posted · ${availableSfw} SFW`,
     },
   ];
 

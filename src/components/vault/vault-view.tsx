@@ -162,7 +162,10 @@ function VaultCard({
 
   const postedSet = new Set(asset.postedAccountIds);
   const postedOnMine = accounts.some((a) => postedSet.has(a.id));
-  const isUnposted = asset.postedAccountIds.length === 0;
+  const isUnposted = asset.postedAccountIds.length === 0 && !asset.postedWithoutAccount;
+  // Posted through the schedule, with no account on the row. There is no
+  // account to keep from anybody, so everyone sees a plain "Already posted".
+  const postedUnnamed = !isUnposted && asset.postedAccountIds.length === 0;
 
   function handleMediaClick() {
     if (!isVideo) return;
@@ -605,11 +608,15 @@ function VaultCard({
             not "Available", because it is not, and not whose, because that
             is not the viewer's business. The filter still treats it as
             taken. */}
-        {(isUnposted || postedOnMine) && (
+        {(isUnposted || postedOnMine || postedUnnamed) && (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
             {isUnposted ? (
               <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white/60">
                 Available
+              </span>
+            ) : postedUnnamed ? (
+              <span className="rounded-full bg-white/25 px-2 py-0.5 text-[9px] font-semibold text-white/90">
+                Already posted
               </span>
             ) : (
               <PostedDetails
@@ -1151,9 +1158,9 @@ export function VaultView({
       items = items.filter((a) => a.is_nsfw);
     }
     if (platformFilter === "available") {
-      items = items.filter((a) => a.postedAccountIds.length === 0);
+      items = items.filter((a) => a.postedAccountIds.length === 0 && !a.postedWithoutAccount);
     } else if (platformFilter === "posted") {
-      items = items.filter((a) => a.postedAccountIds.length > 0);
+      items = items.filter((a) => a.postedAccountIds.length > 0 || a.postedWithoutAccount);
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -1174,7 +1181,11 @@ export function VaultView({
   // much of that week she can actually fill.
   const ready = useMemo(() => {
     const cuts = localAssets.filter(
-      (a) => a.stage === "edited" && !a.is_nsfw && a.postedAccountIds.length === 0
+      (a) =>
+        a.stage === "edited" &&
+        !a.is_nsfw &&
+        a.postedAccountIds.length === 0 &&
+        !a.postedWithoutAccount
     );
     return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
   }, [localAssets]);
@@ -1215,7 +1226,9 @@ export function VaultView({
     return order.map((rid) => {
       const cuts = by.get(rid)!.slice().sort(byVariant);
       const cover =
-        cuts.find((c) => c.thumbnailUrl && c.postedAccountIds.length === 0) ??
+        cuts.find(
+          (c) => c.thumbnailUrl && c.postedAccountIds.length === 0 && !c.postedWithoutAccount
+        ) ??
         cuts.find((c) => c.thumbnailUrl) ??
         cuts[0];
       return {

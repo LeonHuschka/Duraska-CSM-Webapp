@@ -193,7 +193,8 @@ export default async function DashboardPage({
       .from("content_assets")
       .select("id, request_id, stage")
       .in("request_id", (requests ?? []).map((r) => r.id))
-      .eq("stage", "edited");
+      .eq("stage", "edited")
+      .is("deleted_at", null);
     const { data: postedSlots } = await supabase
       .from("schedule_slots")
       .select("asset_id, request_id, status")
