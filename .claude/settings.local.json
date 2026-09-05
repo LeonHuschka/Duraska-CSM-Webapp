@@ -248,7 +248,9 @@
       "Bash(vercel inspect *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST \"https://csm-duraskastudios.space/api/links/check\")",
       "Bash(grep -n '^ [a-z_]*: {$' src/lib/types/database.ts)",
-      "Bash(grep -rn '\"Reel\\\\|`Reel\\\\|Reel #\\\\|Reel ' src --include='*.ts' --include='*.tsx')"
+      "Bash(grep -rn '\"Reel\\\\|`Reel\\\\|Reel #\\\\|Reel ' src --include='*.ts' --include='*.tsx')",
+      "Bash(grep -iv 'Vercel CLI\\\\|^$')",
+      "mcp__claude-in-chrome__read_console_messages"
     ]
   }
 }

@@ -109,6 +109,7 @@ function VaultCard({
   onUpdateNsfw,
   onUpdatePosted,
   onVisible,
+  reelCuts,
 }: {
   asset: VaultAsset;
   accounts: PostingAccount[];
@@ -120,6 +121,8 @@ function VaultCard({
     change?: { requestId: string; accountId: string; delta: 1 | -1 }
   ) => void;
   onVisible: (asset: VaultAsset) => void;
+  /** Every cut of this cut's reel — for the "already posted" breakdown. */
+  reelCuts?: VaultAsset[];
 }) {
   const isVideo = asset.mime_type?.startsWith("video/");
   const isImage = asset.mime_type?.startsWith("image/");
@@ -604,13 +607,20 @@ function VaultCard({
             taken. */}
         {(isUnposted || postedOnMine) && (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
-            <span
-              className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                isUnposted ? "bg-white/10 text-white/60" : "bg-green-500/80 text-white"
-              }`}
-            >
-              {isUnposted ? "Available" : "Already posted ✓"}
-            </span>
+            {isUnposted ? (
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white/60">
+                Available
+              </span>
+            ) : (
+              <PostedDetails
+                label="Already posted ✓"
+                className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
+                title={asset.request_title}
+                cuts={reelCuts ?? [asset]}
+                postings={asset.reelPostings}
+                accounts={accounts}
+              />
+            )}
           </div>
         )}
 
@@ -626,6 +636,90 @@ function VaultCard({
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * What "Already posted" means, spelled out on tap: each of the viewer's
+ * accounts the reel has gone out on, how often, when last, and which cuts.
+ * Only the viewer's accounts are listed — a VA is not told about anybody
+ * else's — so a manager, who sees every account, gets the whole record
+ * through the same rule.
+ */
+function PostedDetails({
+  label,
+  className,
+  title,
+  cuts,
+  postings,
+  accounts,
+}: {
+  label: string;
+  className: string;
+  title: string;
+  /** Every cut of the reel, filters or no filters, so the variant list is complete. */
+  cuts: VaultAsset[];
+  postings: VaultAsset["reelPostings"];
+  accounts: PostingAccount[];
+}) {
+  const rows = accounts.flatMap((acc) => {
+    const tally = postings[acc.id];
+    if (!tally || tally.count === 0) return [];
+    const variants = cuts
+      .filter((c) => c.variantNo !== null && c.postedAccountIds.includes(acc.id))
+      .map((c) => c.variantNo as number)
+      .sort((a, b) => a - b);
+    return [{ acc, count: tally.count, lastAt: tally.lastAt, variants }];
+  });
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className={`pointer-events-auto ${className}`}
+          title="Where this reel has already gone out"
+        >
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="top"
+        className="w-64 p-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="px-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title} · posted on
+        </p>
+        <div className="space-y-0.5">
+          {rows.map(({ acc, count, lastAt, variants }) => (
+            <div
+              key={acc.id}
+              className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-xs"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${PLATFORM_DOT[acc.platform] ?? "bg-gray-500"}`}
+                />
+                <span className="truncate">
+                  <span className="text-muted-foreground">
+                    {PLATFORM_LABELS[acc.platform] ?? acc.platform}
+                  </span>{" "}
+                  @{acc.handle}
+                </span>
+              </span>
+              <span className="shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                {count}×
+                {lastAt &&
+                  ` · ${new Date(lastAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}`}
+                {variants.length > 0 && ` · ${variants.map((n) => `V${n}`).join(", ")}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -654,6 +748,7 @@ type Reel = {
  */
 function ReelStack({
   reel,
+  allCuts,
   accounts,
   visibleIds,
   expanded,
@@ -663,6 +758,8 @@ function ReelStack({
   onVisible,
 }: {
   reel: Reel;
+  /** Every cut of the job, whatever the filters hide. */
+  allCuts: VaultAsset[];
   accounts: PostingAccount[];
   visibleIds: Set<string>;
   expanded: boolean;
@@ -684,6 +781,9 @@ function ReelStack({
   if (!expanded) {
     return (
       <div className="group overflow-hidden rounded-xl border border-border/50 bg-card transition-colors hover:border-border">
+        {/* The label sits beside the toggle button, not inside it: it opens
+            the breakdown, and a tap on it must not fan the stack out. */}
+        <div className="relative">
         <button type="button" onClick={onToggle} className="block w-full text-left">
           <div className="relative pt-2.5">
             {/* The stack, drawn: two frames behind the cover, offset upward. */}
@@ -714,16 +814,22 @@ function ReelStack({
                 <span className="tabular-nums">{reel.cuts.length} cuts</span>
                 <ChevronRight className="h-3 w-3" />
               </span>
-              {note && (
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                  <span className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white">
-                    {note}
-                  </span>
-                </div>
-              )}
             </div>
           </div>
         </button>
+        {note && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+            <PostedDetails
+              label={note}
+              className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
+              title={reel.title}
+              cuts={allCuts}
+              postings={reel.postings}
+              accounts={accounts}
+            />
+          </div>
+        )}
+        </div>
         <div className="px-2.5 py-2">
           <p className="text-xs font-medium leading-tight line-clamp-1 text-foreground">{reel.title}</p>
           <p className="mt-0.5 text-[10px] text-muted-foreground/60">{reel.cuts.length} cuts · tap to fan out</p>
@@ -747,9 +853,16 @@ function ReelStack({
         </button>
         <p className="min-w-0 truncate text-xs font-medium">{reel.title}</p>
         {note && (
-          <span className="ml-auto shrink-0 rounded-full bg-green-500/80 px-2 py-0.5 text-[10px] font-semibold text-white">
-            {note}
-          </span>
+          <div className="ml-auto shrink-0">
+            <PostedDetails
+              label={note}
+              className="rounded-full bg-green-500/80 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-green-500"
+              title={reel.title}
+              cuts={allCuts}
+              postings={reel.postings}
+              accounts={accounts}
+            />
+          </div>
         )}
       </div>
       {/* Sideways: on a phone this is a swipe, and two cuts fit the screen. */}
@@ -759,6 +872,7 @@ function ReelStack({
             <VaultCard
               asset={asset}
               accounts={accounts}
+              reelCuts={allCuts}
               onUpdateNsfw={onUpdateNsfw}
               onUpdatePosted={onUpdatePosted}
               onVisible={onVisible}
@@ -1042,6 +1156,18 @@ export function VaultView({
   // place. Only cuts that pass the current filters are in it: with "Ready to
   // post" on, the stack holds the free ones and nothing else. A job with a
   // single matching cut stays an ordinary card — most are.
+  // Every cut of every job, filters or no filters — the "already posted"
+  // breakdown must list a posted variant even while the grid is hiding it.
+  const cutsByRequest = useMemo(() => {
+    const m = new Map<string, VaultAsset[]>();
+    for (const a of localAssets) {
+      const list = m.get(a.request_id);
+      if (list) list.push(a);
+      else m.set(a.request_id, [a]);
+    }
+    return m;
+  }, [localAssets]);
+
   const reels = useMemo<Reel[]>(() => {
     const order: string[] = [];
     const by = new Map<string, VaultAsset[]>();
@@ -1258,6 +1384,7 @@ export function VaultView({
                   key={reel.cuts[0].id}
                   asset={reel.cuts[0]}
                   accounts={visibleAccounts}
+                  reelCuts={cutsByRequest.get(reel.requestId)}
                   onUpdateNsfw={handleNsfwUpdate}
                   onUpdatePosted={handlePostedUpdate}
                   onVisible={enqueueAsset}
@@ -1266,6 +1393,7 @@ export function VaultView({
                 <ReelStack
                   key={reel.requestId}
                   reel={reel}
+                  allCuts={cutsByRequest.get(reel.requestId) ?? reel.cuts}
                   accounts={visibleAccounts}
                   visibleIds={visibleIds}
                   expanded={expandedId === reel.requestId}
