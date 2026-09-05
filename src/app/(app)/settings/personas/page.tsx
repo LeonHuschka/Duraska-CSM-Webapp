@@ -37,7 +37,7 @@ export default async function PersonaSettingsPage() {
 
   const { data: members } = await supabase
     .from("persona_members")
-    .select("user_id, role, user_profiles(id, full_name, avatar_url)")
+    .select("user_id, role, user_profiles(id, full_name, avatar_url, telegram_username)")
     .eq("persona_id", personaId) as {
     data:
       | Array<{
@@ -47,6 +47,7 @@ export default async function PersonaSettingsPage() {
             id: string;
             full_name: string | null;
             avatar_url: string | null;
+            telegram_username: string | null;
           } | null;
         }>
       | null;
@@ -77,6 +78,7 @@ export default async function PersonaSettingsPage() {
             role: m.role,
             fullName: m.user_profiles?.full_name ?? "Unknown",
             avatarUrl: m.user_profiles?.avatar_url ?? null,
+            telegramUsername: m.user_profiles?.telegram_username ?? null,
           })) ?? []
         }
         currentUserId={user.id}

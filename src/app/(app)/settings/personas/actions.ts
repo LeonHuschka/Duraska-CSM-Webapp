@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   createPersonaSchema,
   type CreatePersonaFormData,
@@ -175,5 +176,57 @@ export async function removeMember(personaId: string, userId: string) {
   if (error) return { error: error.message };
 
   revalidatePath("/settings/personas");
+  return { error: null };
+}
+
+/**
+ * Which Telegram handle a member goes by — the one typed as "manager" on the
+ * accounts tab. It is what lets the vault show a VA her own accounts and
+ * nobody else's, so only an owner of the persona may set it, and it is
+ * written through the admin client because a profile row belongs to its
+ * user and the owner is not that user.
+ */
+export async function updateMemberTelegramUsername(
+  personaId: string,
+  userId: string,
+  username: string
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    supabase.from("user_profiles").select("global_role").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("persona_members")
+      .select("role")
+      .eq("persona_id", personaId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
+  const isOwner = profile?.global_role === "owner" || membership?.role === "owner";
+  if (!isOwner) return { error: "Only an owner can set usernames" };
+
+  // The member must actually belong to this persona; an owner of one persona
+  // must not be able to relabel logins of another.
+  const { data: target } = await supabase
+    .from("persona_members")
+    .select("user_id")
+    .eq("persona_id", personaId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!target) return { error: "Not a member of this persona" };
+
+  const clean = username.trim().replace(/^@/, "");
+  const { error } = await createAdminClient()
+    .from("user_profiles")
+    .update({ telegram_username: clean === "" ? null : clean })
+    .eq("id", userId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/settings/personas");
+  revalidatePath("/vault");
   return { error: null };
 }

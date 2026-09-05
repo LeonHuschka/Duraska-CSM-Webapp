@@ -14,6 +14,7 @@ export type Database = {
           id: string;
           full_name: string | null;
           avatar_url: string | null;
+          telegram_username: string | null;
           global_role: string;
           created_at: string;
           updated_at: string;
@@ -22,6 +23,7 @@ export type Database = {
           id: string;
           full_name?: string | null;
           avatar_url?: string | null;
+          telegram_username?: string | null;
           global_role?: string;
           created_at?: string;
           updated_at?: string;
@@ -30,6 +32,7 @@ export type Database = {
           id?: string;
           full_name?: string | null;
           avatar_url?: string | null;
+          telegram_username?: string | null;
           global_role?: string;
           created_at?: string;
           updated_at?: string;

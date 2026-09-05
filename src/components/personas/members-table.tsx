@@ -7,8 +7,10 @@ import { toast } from "sonner";
 import { PERSONA_ROLES } from "@/lib/constants";
 import {
   updateMemberRole,
+  updateMemberTelegramUsername,
   removeMember,
 } from "@/app/(app)/settings/personas/actions";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +34,8 @@ interface Member {
   role: string;
   fullName: string;
   avatarUrl: string | null;
+  /** The handle typed as "manager" on the accounts tab. Links login to accounts. */
+  telegramUsername: string | null;
 }
 
 interface MembersTableProps {
@@ -59,6 +63,20 @@ export function MembersTable({
         return;
       }
       toast.success("Role updated");
+      router.refresh();
+    });
+  }
+
+  function handleUsername(userId: string, value: string, previous: string | null) {
+    const clean = value.trim().replace(/^@/, "");
+    if (clean === (previous ?? "")) return;
+    startTransition(async () => {
+      const result = await updateMemberTelegramUsername(personaId, userId, clean);
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(clean ? `@${clean} saved` : "Username cleared");
       router.refresh();
     });
   }
@@ -121,6 +139,28 @@ export function MembersTable({
                     {member.userId === currentUserId && (
                       <p className="text-xs text-muted-foreground">You</p>
                     )}
+                    {/* The Telegram handle is what ties this login to the
+                        posting accounts it manages — the vault shows a VA
+                        only the accounts whose manager carries this name. */}
+                    {canManage ? (
+                      <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>@</span>
+                        <Input
+                          defaultValue={member.telegramUsername ?? ""}
+                          placeholder="telegram username"
+                          className="h-7 w-40 text-xs"
+                          disabled={isPending}
+                          onBlur={(e) =>
+                            handleUsername(member.userId, e.target.value, member.telegramUsername)
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                        />
+                      </div>
+                    ) : member.telegramUsername ? (
+                      <p className="text-xs text-muted-foreground">@{member.telegramUsername}</p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

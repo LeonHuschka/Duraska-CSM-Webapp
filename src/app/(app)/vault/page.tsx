@@ -44,6 +44,21 @@ export interface PostingAccount {
   id: string;
   platform: string;
   handle: string;
+  /** Telegram handle of whoever runs it, as typed on the accounts tab. */
+  manager_username: string | null;
+}
+
+/** Who is looking, and therefore which accounts they get to see. */
+export interface VaultViewer {
+  role: "owner" | "manager" | "model" | "va";
+  /** Their own Telegram handle — what accounts.manager_username is matched against. */
+  username: string | null;
+}
+
+/** A member a manager can look at the vault as, for checking what a VA sees. */
+export interface VaultMember {
+  username: string;
+  name: string;
 }
 
 export default async function VaultPage() {
@@ -58,6 +73,59 @@ export default async function VaultPage() {
     );
   }
 
+  // Who is looking. A VA sees the accounts she manages and nothing else; an
+  // owner or manager sees them all and may look through a VA's eyes to
+  // check what she is getting.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [{ data: profile }, { data: membership }, { data: teammates }] = await Promise.all([
+    supabase
+      .from("user_profiles")
+      .select("global_role, telegram_username")
+      .eq("id", user?.id ?? "")
+      .maybeSingle(),
+    supabase
+      .from("persona_members")
+      .select("role")
+      .eq("persona_id", personaId)
+      .eq("user_id", user?.id ?? "")
+      .maybeSingle(),
+    supabase
+      .from("persona_members")
+      .select("role, user_profiles(full_name, telegram_username)")
+      .eq("persona_id", personaId) as unknown as Promise<{
+      data:
+        | Array<{
+            role: string;
+            user_profiles: { full_name: string | null; telegram_username: string | null } | null;
+          }>
+        | null;
+    }>,
+  ]);
+  const viewer: VaultViewer = {
+    role:
+      profile?.global_role === "owner"
+        ? "owner"
+        : ((membership?.role as VaultViewer["role"] | undefined) ?? "va"),
+    username: profile?.telegram_username ?? null,
+  };
+  const members: VaultMember[] = (teammates ?? [])
+    .filter((m) => m.role !== "model" && m.user_profiles?.telegram_username)
+    .map((m) => ({
+      username: m.user_profiles!.telegram_username!,
+      name: m.user_profiles?.full_name ?? m.user_profiles!.telegram_username!,
+    }));
+
+  // Registered posting accounts, with who runs each one.
+  const { data: accountRows } = await supabase
+    .from("accounts")
+    .select("id, platform, handle, manager_username")
+    .eq("persona_id", personaId)
+    .neq("status", "dead")
+    .order("platform", { ascending: true });
+  const accounts = (accountRows ?? []) as PostingAccount[];
+
   // 1. All requests for this persona (lightweight — just what we need).
   //    Explicit high limit to bypass the default 1000-row cap.
   const { data: requests } = await supabase
@@ -68,7 +136,7 @@ export default async function VaultPage() {
 
   const requestIds = (requests ?? []).map((r) => r.id);
   if (requestIds.length === 0) {
-    return <VaultView assets={[]} accounts={[]} />;
+    return <VaultView assets={[]} accounts={accounts} viewer={viewer} members={members} />;
   }
 
   const requestMap = Object.fromEntries(
@@ -94,17 +162,8 @@ export default async function VaultPage() {
     .limit(2000);
 
   if (!assets || assets.length === 0) {
-    return <VaultView assets={[]} accounts={[]} />;
+    return <VaultView assets={[]} accounts={accounts} viewer={viewer} members={members} />;
   }
-
-  // 3a. Registered posting accounts (for the mark-posted picker)
-  const { data: accountRows } = await supabase
-    .from("accounts")
-    .select("id, platform, handle")
-    .eq("persona_id", personaId)
-    .neq("status", "dead")
-    .order("platform", { ascending: true });
-  const accounts = (accountRows ?? []) as PostingAccount[];
 
   // 3b. All schedule slots for those requests (to build posting status)
   const { data: slots } = await supabase
@@ -235,5 +294,7 @@ export default async function VaultPage() {
     })
     .filter(Boolean) as VaultAsset[];
 
-  return <VaultView assets={assetsWithUrls} accounts={accounts} />;
+  return (
+    <VaultView assets={assetsWithUrls} accounts={accounts} viewer={viewer} members={members} />
+  );
 }
