@@ -598,19 +598,21 @@ function VaultCard({
 
         {/* Bottom: one word about the cut's state. Which accounts exactly is
             behind the ✓ button, ticked. */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
-          <span
-            className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-              isUnposted
-                ? "bg-white/10 text-white/60"
-                : postedOnMine
-                  ? "bg-green-500/80 text-white"
-                  : "bg-white/25 text-white/90"
-            }`}
-          >
-            {isUnposted ? "Available" : postedOnMine ? "Posted on your acc(s) ✓" : "Already posted"}
-          </span>
-        </div>
+        {/* A cut posted only on somebody else's account says nothing here:
+            not "Available", because it is not, and not whose, because that
+            is not the viewer's business. The filter still treats it as
+            taken. */}
+        {(isUnposted || postedOnMine) && (
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
+            <span
+              className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+                isUnposted ? "bg-white/10 text-white/60" : "bg-green-500/80 text-white"
+              }`}
+            >
+              {isUnposted ? "Available" : "Already posted ✓"}
+            </span>
+          </div>
+        )}
 
       </div>
 
@@ -670,15 +672,14 @@ function ReelStack({
   onVisible: (asset: VaultAsset) => void;
 }) {
   const c = reel.cover;
-  const postedOnMine = Object.entries(reel.postings).some(
+  // Only the viewer's own accounts count. A VA is not told about postings
+  // on anybody else's — they are not hers to act on — and a manager, who
+  // sees every account, gets the whole picture through the same rule.
+  const note = Object.entries(reel.postings).some(
     ([id, t]) => visibleIds.has(id) && t.count > 0
-  );
-  const postedAnywhere = Object.values(reel.postings).some((t) => t.count > 0);
-  const note = postedOnMine
-    ? "Already posted on your acc(s)"
-    : postedAnywhere
-      ? "Already posted"
-      : null;
+  )
+    ? "Already posted"
+    : null;
 
   if (!expanded) {
     return (
@@ -715,11 +716,7 @@ function ReelStack({
               </span>
               {note && (
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
-                      postedOnMine ? "bg-green-500/80 text-white" : "bg-white/25 text-white/90"
-                    }`}
-                  >
+                  <span className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white">
                     {note}
                   </span>
                 </div>
@@ -750,11 +747,7 @@ function ReelStack({
         </button>
         <p className="min-w-0 truncate text-xs font-medium">{reel.title}</p>
         {note && (
-          <span
-            className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              postedOnMine ? "bg-green-500/80 text-white" : "bg-muted text-muted-foreground"
-            }`}
-          >
+          <span className="ml-auto shrink-0 rounded-full bg-green-500/80 px-2 py-0.5 text-[10px] font-semibold text-white">
             {note}
           </span>
         )}
