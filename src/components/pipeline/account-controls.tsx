@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setAccountPosting, setAccountManager } from "@/components/pipeline/actions";
+import {
+  setAccountPosting,
+  setAccountManager,
+  setAccountHandle,
+} from "@/components/pipeline/actions";
 
 /**
  * The two things about an account that only a person knows: how often it
@@ -14,17 +18,34 @@ import { setAccountPosting, setAccountManager } from "@/components/pipeline/acti
  */
 export function AccountControls({
   accountId,
+  handle,
   perDay,
   manager,
   editable,
 }: {
   accountId: string;
+  handle: string;
   perDay: number;
   manager: string | null;
   editable: boolean;
 }) {
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] text-muted-foreground">
+      {/* What the scrape reads the account by. A Facebook page without a
+          name needs its full URL here. */}
+      {editable && (
+        <span className="flex items-center gap-1.5">
+          <span>Handle</span>
+          <InlineText
+            value={handle}
+            placeholder="handle or page URL"
+            width="w-56"
+            onSave={(v) => setAccountHandle(accountId, v)}
+            render={(v) => v || "—"}
+          />
+        </span>
+      )}
+
       <span className="flex items-center gap-1.5">
         <span>Managed by</span>
         {editable ? (

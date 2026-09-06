@@ -509,7 +509,17 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
       })
     );
     if (error) notes.push(`@${r.account.handle}: posts not stored — ${error.message}`);
-    else posts += r.posts.length;
+    else {
+      posts += r.posts.length;
+      // The screenshot readings this replaces. They keyed unmatched tiles
+      // on their position in the picture, so one reel was five rows; once
+      // the platform has been read they are noise, and they go.
+      await supabase
+        .from("reel_metrics")
+        .delete()
+        .eq("account_id", r.account.id)
+        .eq("source", "screenshot");
+    }
   }
 
   const estimatedUsd =

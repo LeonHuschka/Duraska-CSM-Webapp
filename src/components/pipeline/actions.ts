@@ -164,3 +164,24 @@ export async function addPostingAccount(data: {
   revalidatePath("/vault");
   return { error: null };
 }
+
+/**
+ * The handle is what the scrape reads the account by, so a placeholder
+ * like "Lyza tbd" means the account is never read. Editable on the card,
+ * where the empty row makes it obvious something is wrong.
+ */
+export async function setAccountHandle(accountId: string, handle: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const clean = handle.trim().replace(/^@/, "");
+  if (!clean) return { error: "A handle is required" };
+  const { error } = await supabase
+    .from("accounts")
+    .update({ handle: clean, updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  revalidatePath("/vault");
+  return { error: null };
+}

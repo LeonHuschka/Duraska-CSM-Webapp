@@ -456,6 +456,7 @@ export async function AccountsTab({
 
           <AccountControls
             accountId={r.id}
+            handle={r.handle}
             perDay={Number(r.posts_per_day ?? 0)}
             manager={r.manager_username}
             editable={canEdit}
