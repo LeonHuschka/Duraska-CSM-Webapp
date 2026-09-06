@@ -209,6 +209,20 @@ export async function AccountsTab({
       const seen = earlierPerReel.get(key);
       if (!seen || r.captured_at > seen.captured_at) earlierPerReel.set(key, r);
     }
+    // What "doing well" means on this account: well above its own middle.
+    // Median rather than mean, so one runaway reel does not make every
+    // other one look bad.
+    const viewList = Array.from(latestPerReel.values())
+      .map((r) => r.views)
+      .filter((v): v is number => v != null && v > 0)
+      .sort((a, b) => a - b);
+    const median =
+      viewList.length === 0
+        ? 0
+        : viewList.length % 2
+          ? viewList[(viewList.length - 1) / 2]
+          : (viewList[viewList.length / 2 - 1] + viewList[viewList.length / 2]) / 2;
+
     const tiles = Array.from(latestPerReel.entries())
       .sort(([, x], [, y]) => {
         // Newest post first when we know when it went up; views otherwise.
@@ -240,6 +254,8 @@ export async function AccountsTab({
           // is no cut of ours to play.
           cover: r.source === "scrape" ? r.tile_path : null,
           title: titles.get(requestId) ?? null,
+          // Times the account's median. 2× is doing well, 5× is a hit.
+          lift: r.views != null && median > 0 ? r.views / median : null,
           seenAt: r.captured_at,
           src: clip ? (signed.get(clip.path) ?? null) : null,
           poster: clip?.thumb ? (signed.get(clip.thumb) ?? null) : null,
@@ -486,7 +502,25 @@ export async function AccountsTab({
             <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1">
               {r.tiles.map((t) => (
                 <div key={t.key} className="w-32 shrink-0">
-                  <div className="relative aspect-[9/16] overflow-hidden rounded-xl border border-border/40 bg-muted/30">
+                  <div
+                    className={`relative aspect-[9/16] overflow-hidden rounded-xl border bg-muted/30 ${
+                      t.lift != null && t.lift >= 5
+                        ? "border-amber-400 ring-2 ring-amber-400/60"
+                        : t.lift != null && t.lift >= 2
+                          ? "border-emerald-400 ring-2 ring-emerald-400/50"
+                          : "border-border/40"
+                    }`}
+                  >
+                    {t.lift != null && t.lift >= 2 && (
+                      <span
+                        className={`absolute left-1.5 top-1.5 z-10 rounded-full px-1.5 py-0.5 text-[10px] font-bold text-black ${
+                          t.lift >= 5 ? "bg-amber-400" : "bg-emerald-400"
+                        }`}
+                        title={`${t.lift.toFixed(1)}× this account's median views`}
+                      >
+                        {t.lift >= 5 ? "🔥" : "▲"} {t.lift.toFixed(1)}×
+                      </span>
+                    )}
                     {t.src ? (
                       <video
                         src={t.src}

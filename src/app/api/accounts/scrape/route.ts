@@ -15,7 +15,7 @@ import { scrapeAccounts } from "@/lib/account-scrape";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -40,6 +40,9 @@ export async function GET() {
     membership?.role === "manager";
   if (!allowed) return NextResponse.json({ error: "owners and managers only" }, { status: 403 });
 
-  const summary = await scrapeAccounts(createAdminClient(), personaId);
+  // ?full=1 reads every reel an account has, for the first read of a new
+  // account or to backfill the list; the daily run takes the newest only.
+  const full = new URL(req.url).searchParams.get("full") === "1";
+  const summary = await scrapeAccounts(createAdminClient(), personaId, { full });
   return NextResponse.json({ ok: true, summary });
 }

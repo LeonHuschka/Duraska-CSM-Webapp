@@ -44,6 +44,14 @@ const IG_PROFILE_ACTOR = "apify~instagram-profile-scraper";
 const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
 const IG_POSTS_PER_ACCOUNT = 12;
 
+/**
+ * A full read takes every reel the account has, not just the newest. Done
+ * once when an account is added, so the list and the totals are the
+ * account's whole life; the daily read then only needs the newest few,
+ * and a reel that has left that window keeps the last reading it got.
+ */
+const FULL_POSTS_PER_ACCOUNT = 100;
+
 /** Followers only. $0.012 a page — the dearest line left, and it is 1¢. */
 const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
 
@@ -169,14 +177,14 @@ type AccountReading = {
   viaFeed?: boolean;
 };
 
-async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
+async function readInstagram(accounts: Account[], perAccount: number): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byName = new Map(accounts.map((a) => [igUsername(a.handle), a]));
   const usernames = Array.from(byName.keys());
 
   const [profiles, posts] = await Promise.all([
     runActor(IG_PROFILE_ACTOR, { usernames }),
-    runActor(IG_POSTS_ACTOR, { usernames, postsPerProfile: IG_POSTS_PER_ACCOUNT }),
+    runActor(IG_POSTS_ACTOR, { usernames, postsPerProfile: perAccount }),
   ]);
   if (profiles.error) console.error("[scrape] instagram profiles:", profiles.error);
   if (posts.error) console.error("[scrape] instagram posts:", posts.error);
@@ -205,6 +213,9 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
     const a = byName.get(str(r.scraped_username)?.toLowerCase() ?? "");
     const shortcode = str(r.code);
     if (!a || !shortcode) continue;
+    // Reels only. media_type 2 is video; 1 is an image and 8 a carousel,
+    // neither of which has plays or belongs in a row of reels.
+    if (num(r.media_type) !== 2) continue;
     const takenAt = num(r.taken_at);
     out.get(a.id)!.posts.push({
       shortcode,
@@ -230,14 +241,14 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
   return Array.from(out.values());
 }
 
-async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
+async function readFacebook(accounts: Account[], perPage: number): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byKey = new Map(accounts.map((a) => [fbKey(fbPageUrl(a.handle)), a]));
   const urls = accounts.map((a) => fbPageUrl(a.handle));
 
   const [pages, reels] = await Promise.all([
     runActor(FB_PAGES_ACTOR, { startUrls: urls.map((url) => ({ url })) }),
-    runActor(FB_REELS_ACTOR, { startUrls: urls, resultsLimit: FB_REELS_PER_PAGE }),
+    runActor(FB_REELS_ACTOR, { startUrls: urls, resultsLimit: perPage }),
   ]);
   if (pages.error) console.error("[scrape] facebook pages:", pages.error);
   if (reels.error) console.error("[scrape] facebook reels:", reels.error);
@@ -287,13 +298,15 @@ async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
   if (empty.length > 0) {
     const feed = await runActor(FB_POSTS_ACTOR, {
       startUrls: empty.map((a) => ({ url: fbPageUrl(a.handle) })),
-      resultsLimit: FB_REELS_PER_PAGE,
+      resultsLimit: perPage,
     });
     if (feed.error) console.error("[scrape] facebook feed:", feed.error);
     for (const r of feed.rows) {
       const a = find(r);
       const shortcode = str(r.postId);
       if (!a || !shortcode) continue;
+      // The feed carries everything; the row is for reels.
+      if (r.isVideo !== true) continue;
       const media = Array.isArray(r.media) ? (r.media as Row[]) : [];
       out.get(a.id)!.posts.push({
         shortcode,
@@ -414,8 +427,14 @@ export type ScrapeSummary = {
   notes: string[];
 };
 
-/** One persona's accounts, read and written. */
-export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<ScrapeSummary> {
+/** One persona's accounts, read and written. `full` reads every reel, not just the newest. */
+export async function scrapeAccounts(
+  supabase: Sb,
+  personaId: string,
+  opts: { full?: boolean } = {}
+): Promise<ScrapeSummary> {
+  const perAccount = opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT;
+  const perPage = opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE;
   const { data: rows } = await supabase
     .from("accounts")
     .select("id, handle, platform, status")
@@ -427,7 +446,10 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
   const ig = accounts.filter((a) => a.platform === "instagram");
   const fb = accounts.filter((a) => a.platform === "facebook");
 
-  const [igReadings, fbReadings] = await Promise.all([readInstagram(ig), readFacebook(fb)]);
+  const [igReadings, fbReadings] = await Promise.all([
+    readInstagram(ig, perAccount),
+    readFacebook(fb, perPage),
+  ]);
   const readings = [...igReadings, ...fbReadings];
   const matches = await matchToCuts(supabase, personaId, readings);
 
@@ -524,10 +546,10 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
   const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =
     ig.length * 0.0026 +
-    (ig.length ? 0.005 + ig.length * IG_POSTS_PER_ACCOUNT * 0.0003 : 0) +
+    (ig.length ? 0.005 + ig.length * perAccount * 0.0003 : 0) +
     fb.length * 0.012 +
-    (fb.length ? 0.0005 + (fb.length - viaFeed) * FB_REELS_PER_PAGE * 0.0003 : 0) +
-    (viaFeed ? 0.001 + viaFeed * FB_REELS_PER_PAGE * 0.005 : 0);
+    (fb.length ? 0.0005 + (fb.length - viaFeed) * perPage * 0.0003 : 0) +
+    (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
       (notes.length ? ` — ${notes.join("; ")}` : "")
