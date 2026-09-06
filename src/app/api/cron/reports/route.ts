@@ -14,11 +14,14 @@ export const maxDuration = 60;
  */
 
 export async function GET(req: Request) {
-  const isVercelCron = req.headers.get("x-vercel-cron") !== null;
+  // Vercel's scheduler sends "Authorization: Bearer <CRON_SECRET>". The
+  // x-vercel-cron header it also sends proves nothing — any client can set
+  // it — so it is no longer enough on its own.
   const secret = process.env.CRON_SECRET;
   const url = new URL(req.url);
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
   const authed =
-    isVercelCron || (secret && url.searchParams.get("secret") === secret);
+    !!secret && (bearer === secret || url.searchParams.get("secret") === secret);
   if (!authed) return NextResponse.json({ ok: false }, { status: 401 });
 
   const force = url.searchParams.get("force"); // "daily" | "weekly" for testing
