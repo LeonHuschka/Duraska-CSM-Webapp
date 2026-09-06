@@ -245,6 +245,13 @@ async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
       caption: str(r.text),
     });
   }
+  // A page the scrapers never answered for is almost always a handle that
+  // is not a page: "Lyza tbd" is a placeholder, not facebook.com/Lyza%20tbd.
+  out.forEach((reading) => {
+    if (reading.followers == null && reading.posts.length === 0 && !reading.note) {
+      reading.note = `nothing found at ${fbPageUrl(reading.account.handle)} — is the handle the page's name?`;
+    }
+  });
   return Array.from(out.values());
 }
 
