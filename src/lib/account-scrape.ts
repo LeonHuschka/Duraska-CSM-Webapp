@@ -145,6 +145,8 @@ type PostReading = {
   comments: number | null;
   shares: number | null;
   caption: string | null;
+  /** The post's own cover image, so an unmatched post is still a picture. */
+  thumbnailUrl: string | null;
 };
 
 type AccountReading = {
@@ -203,6 +205,7 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
       comments: num(r.comment_count),
       shares: null,
       caption: str(r.caption),
+      thumbnailUrl: str(r.image_url),
     });
   }
   out.forEach((reading) => {
@@ -262,6 +265,7 @@ async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
       comments: num(r.commentsCount),
       shares: num(r.sharesCount),
       caption: str(r.caption),
+      thumbnailUrl: str(r.thumbnailUrl) ?? str(r.previewImageUrl),
     });
   }
   // A page the scrapers never answered for is almost always a handle that
@@ -441,6 +445,11 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
           comments: p.comments,
           shares: p.shares,
           caption: p.caption,
+          // tile_path once held the crop of a screenshot tile; with the
+          // screenshot pipeline gone it carries the post's cover URL from
+          // the platform's CDN, which is what the accounts tab shows when
+          // the post is not one of ours.
+          tile_path: p.thumbnailUrl,
           request_id: m?.requestId ?? null,
           asset_id: m?.assetId ?? null,
           match_method: m?.method ?? null,

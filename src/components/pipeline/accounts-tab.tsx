@@ -73,7 +73,7 @@ export async function AccountsTab({
       supabase
         .from("reel_metrics")
         .select(
-          "account_id, captured_at, position, request_id, asset_id, views, likes, comments, shares, caption, needs_review, shortcode, post_url, posted_at, source"
+          "account_id, captured_at, position, request_id, asset_id, views, likes, comments, shares, caption, needs_review, shortcode, post_url, posted_at, source, tile_path"
         )
         .eq("persona_id", personaId)
         .order("captured_at", { ascending: false }),
@@ -236,6 +236,9 @@ export async function AccountsTab({
           caption: r.caption,
           postUrl: r.post_url,
           postedAt: r.posted_at,
+          // The platform's own cover for the post — the picture when there
+          // is no cut of ours to play.
+          cover: r.source === "scrape" ? r.tile_path : null,
           title: titles.get(requestId) ?? null,
           seenAt: r.captured_at,
           src: clip ? (signed.get(clip.path) ?? null) : null,
@@ -496,6 +499,17 @@ export async function AccountsTab({
                         preload="none"
                         className="h-full w-full bg-black object-cover"
                       />
+                    ) : t.cover ? (
+                      <a href={t.postUrl ?? undefined} target="_blank" rel="noreferrer" className="block h-full w-full">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={t.cover}
+                          alt=""
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                      </a>
                     ) : (
                       <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-muted-foreground">
                         no cut in the vault
