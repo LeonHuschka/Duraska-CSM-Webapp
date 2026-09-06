@@ -32,6 +32,18 @@ const SHARE_TONE = [
 
 const nf = new Intl.NumberFormat("de-DE");
 
+/**
+ * A handle can be a pasted page URL — the only way to name a Facebook page
+ * that has no vanity name. Shown, it should read like a name, not a URL.
+ */
+function displayHandle(handle: string): string {
+  if (!/^https?:\/\//i.test(handle)) return `@${handle}`;
+  return handle
+    .replace(/^https?:\/\/(www\.|m\.)?/i, "")
+    .replace(/\/+$/, "")
+    .replace(/^facebook\.com\/people\/([^/]+)\/\d+$/i, "$1 (fb)");
+}
+
 export async function AccountsTab({
   personaId,
   canEdit = false,
@@ -255,7 +267,7 @@ export async function AccountsTab({
   // followers wearing a views label.
   const share = rows
     .filter((r) => r.views > 0)
-    .map((r) => ({ label: `@${r.handle}`, value: r.views, color: r.tone }));
+    .map((r) => ({ label: displayHandle(r.handle), value: r.views, color: r.tone }));
 
   // Each screenshot is a reading of the whole account, not an increment, so
   // a day's figure is the newest reading per account summed across accounts.
@@ -411,7 +423,7 @@ export async function AccountsTab({
                 <PlatformGlyph platform={r.platform} className="h-4 w-4 fill-white" />
               </span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">@{r.handle}</p>
+                <p className="truncate text-sm font-semibold">{displayHandle(r.handle)}</p>
                 <p className="text-[11px] text-muted-foreground">
                   {r.platform}
                   {r.telegram_thread_id
