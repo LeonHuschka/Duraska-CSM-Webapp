@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
+import { scrapeAccounts, type ScrapeSummary } from "@/lib/account-scrape";
 
 type Leg = "inspo" | "edit" | "post";
 
@@ -85,5 +87,80 @@ export async function setAccountManager(accountId: string, handle: string) {
 
   if (error) return { error: error.message };
   revalidatePath("/");
+  return { error: null };
+}
+
+
+/** Owners and managers only — the people who run the accounts. */
+async function requireStaff(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  personaId: string
+): Promise<{ userId: string } | { error: string }> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    supabase.from("user_profiles").select("global_role").eq("id", user.id).maybeSingle(),
+    supabase
+      .from("persona_members")
+      .select("role")
+      .eq("persona_id", personaId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+  ]);
+  const ok =
+    profile?.global_role === "owner" ||
+    membership?.role === "owner" ||
+    membership?.role === "manager";
+  return ok ? { userId: user.id } : { error: "Only owners and managers can do that" };
+}
+
+/**
+ * Today's numbers, now. The same read the 7:17 run does, for the moment
+ * somebody has just fixed a handle or added an account and wants to see
+ * it work rather than wait for tomorrow.
+ */
+export async function scrapeAccountsNow(): Promise<{
+  error: string | null;
+  summary?: ScrapeSummary;
+}> {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+
+  const summary = await scrapeAccounts(createAdminClient(), personaId);
+  revalidatePath("/");
+  return { error: null, summary };
+}
+
+/** Add a posting account from the dashboard, manager included. */
+export async function addPostingAccount(data: {
+  platform: string;
+  handle: string;
+  manager?: string;
+}) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+
+  const handle = data.handle.trim().replace(/^@/, "");
+  if (!handle) return { error: "Handle is required" };
+  const manager = (data.manager ?? "").trim().replace(/^@/, "");
+
+  const { error } = await supabase.from("accounts").insert({
+    persona_id: personaId,
+    platform: data.platform,
+    handle,
+    status: "graduated",
+    manager_username: manager === "" ? null : manager,
+    created_by: who.userId,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  revalidatePath("/settings/accounts");
+  revalidatePath("/vault");
   return { error: null };
 }

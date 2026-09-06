@@ -28,6 +28,18 @@ import type { Database } from "@/lib/types/database";
  */
 
 const IG_ACTOR = "apify~instagram-profile-scraper";
+
+/**
+ * The profile scraper's videoViewCount is not the number on the profile.
+ * Instagram's grid shows plays — every play, replays included — and only a
+ * per-post read returns that field: Reel #25 read 25,622 from the profile
+ * and 51,333 from the post, which is what the app showed. So reels inside
+ * the tracking window get a second, per-post read at $0.0027 each. Older
+ * posts keep the last plays figure they had rather than dropping to the
+ * smaller metric, which would read as a loss of views overnight.
+ */
+const IG_POSTS_ACTOR = "apify~instagram-scraper";
+const PLAYS_WINDOW_MS = 5 * 86_400_000;
 const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
 const FB_POSTS_ACTOR = "apify~facebook-posts-scraper";
 
@@ -123,6 +135,8 @@ type PostReading = {
   comments: number | null;
   shares: number | null;
   caption: string | null;
+  /** True when `views` is the plays figure the profile shows. */
+  viewsArePlays?: boolean;
 };
 
 type AccountReading = {
@@ -184,6 +198,43 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
       });
     }
   }
+
+  // Plays for everything inside the tracking window, in one run.
+  const cutoff = Date.now() - PLAYS_WINDOW_MS;
+  const fresh: PostReading[] = [];
+  out.forEach((r) => {
+    for (const p of r.posts) {
+      if (p.postedAt && new Date(p.postedAt).getTime() >= cutoff && p.url) fresh.push(p);
+    }
+  });
+  const plays = new Map<string, Row>();
+  if (fresh.length > 0) {
+    const res = await runActor(IG_POSTS_ACTOR, {
+      directUrls: fresh.map((p) => p.url),
+      resultsType: "posts",
+      resultsLimit: fresh.length,
+    });
+    if (res.error) console.error("[scrape] instagram plays:", res.error);
+    for (const row of res.rows) {
+      const code = str(row.shortCode);
+      if (code) plays.set(code, row);
+    }
+  }
+  out.forEach((r) => {
+    for (const p of r.posts) {
+      const row = plays.get(p.shortcode);
+      if (row) {
+        p.views = num(row.videoPlayCount) ?? num(row.videoViewCount) ?? p.views;
+        p.likes = num(row.likesCount) ?? p.likes;
+        p.comments = num(row.commentsCount) ?? p.comments;
+        p.viewsArePlays = true;
+      } else {
+        // Outside the window, or unanswered: not this metric. The writer
+        // carries the last plays figure forward instead.
+        p.views = null;
+      }
+    }
+  });
   return Array.from(out.values());
 }
 
@@ -368,6 +419,28 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
   const notes: string[] = [];
   let posts = 0;
   let matched = 0;
+  let playsRead = 0;
+
+  // The last views figure stored for each post, for the ones not re-read
+  // today — so a reel leaving the tracking window keeps its number.
+  const carry = new Map<string, number>();
+  const unread = readings.flatMap((r) =>
+    r.posts.filter((p) => p.views == null && !p.viewsArePlays).map((p) => p.shortcode)
+  );
+  if (unread.length > 0) {
+    const { data: prev } = await supabase
+      .from("reel_metrics")
+      .select("account_id, shortcode, views, captured_at")
+      .eq("persona_id", personaId)
+      .eq("source", "scrape")
+      .in("shortcode", unread)
+      .not("views", "is", null)
+      .order("captured_at", { ascending: false });
+    for (const p of prev ?? []) {
+      const k = `${p.account_id}|${p.shortcode}`;
+      if (!carry.has(k) && p.views != null) carry.set(k, Number(p.views));
+    }
+  }
 
   for (const r of readings) {
     if (r.note) notes.push(`@${r.account.handle}: ${r.note}`);
@@ -410,6 +483,8 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
       r.posts.map((p, i) => {
         const m = matches.get(`${r.account.id}|${p.shortcode}`);
         if (m?.requestId) matched++;
+        if (p.viewsArePlays) playsRead++;
+        const views = p.views ?? carry.get(`${r.account.id}|${p.shortcode}`) ?? null;
         return {
           persona_id: personaId,
           account_id: r.account.id,
@@ -418,7 +493,7 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
           shortcode: p.shortcode,
           post_url: p.url,
           posted_at: p.postedAt,
-          views: p.views,
+          views,
           likes: p.likes,
           comments: p.comments,
           shares: p.shares,
@@ -438,7 +513,10 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
   }
 
   const estimatedUsd =
-    ig.length * 0.0026 + fb.length * (0.012 + FB_POSTS_PER_PAGE * 0.005) + (fb.length ? 0.001 : 0);
+    ig.length * 0.0026 +
+    playsRead * 0.0027 +
+    fb.length * (0.012 + FB_POSTS_PER_PAGE * 0.005) +
+    (fb.length ? 0.001 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
       (notes.length ? ` — ${notes.join("; ")}` : "")

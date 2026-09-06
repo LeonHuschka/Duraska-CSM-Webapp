@@ -6,6 +6,7 @@ import {
   PLATFORM_STYLE,
 } from "@/components/dashboard/pipeline-donut";
 import { AccountControls } from "@/components/pipeline/account-controls";
+import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
 
 /**
  * Accounts tab: the whole operation summarised, then one card per account
@@ -335,6 +336,8 @@ export async function AccountsTab({
 
   return (
     <div className="space-y-5">
+      {canEdit && <AccountsActionsBar />}
+
       {/* Summary */}
       <div className="rounded-2xl border border-border/50 bg-card p-5">
         <h2 className="text-sm font-medium">Accounts summarized</h2>

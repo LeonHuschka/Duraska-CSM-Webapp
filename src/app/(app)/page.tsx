@@ -11,6 +11,10 @@ import {
   PlatformBadges,
 } from "@/components/dashboard/pipeline-donut";
 import { PipelineTab } from "@/components/pipeline/pipeline-tab";
+
+// The "Scrape now" action on the accounts tab runs inside this route and
+// reads every account off its platform; Facebook can take two minutes.
+export const maxDuration = 300;
 import { AccountsTab } from "@/components/pipeline/accounts-tab";
 import { dailyDemand } from "@/lib/demand";
 
