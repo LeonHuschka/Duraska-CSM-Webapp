@@ -11,11 +11,14 @@ import { AccountControls } from "@/components/pipeline/account-controls";
  * Accounts tab: the whole operation summarised, then one card per account
  * with the reels running on it.
  *
- * Everything here is read off the screenshots the VAs post in each
- * account's Telegram topic — the profile shot gives followers, the grid
- * shot gives a view count per tile. Tiles are matched to our own reels by
- * posting order, which is the only link the screenshots offer: neither
- * carries an id.
+ * The numbers come from a daily scrape of each account on its platform
+ * (account-scrape.ts): followers, and the latest posts with views, likes,
+ * comments and — on Facebook — shares. Every post is keyed on the
+ * platform's own id, so a reel is one row however many days it is seen,
+ * and a day-over-day change is the same post read twice.
+ *
+ * Rows from the older screenshot pipeline are still in the tables and are
+ * used only for an account the scrape has never reached.
  */
 
 const SHARE_TONE = [
@@ -51,13 +54,13 @@ export async function AccountsTab({
         .order("handle"),
       supabase
         .from("account_metrics")
-        .select("account_id, captured_at, followers, needs_review")
+        .select("account_id, captured_at, followers, needs_review, source")
         .eq("persona_id", personaId)
         .order("captured_at", { ascending: false }),
       supabase
         .from("reel_metrics")
         .select(
-          "account_id, captured_at, position, request_id, asset_id, views, likes, caption, needs_review"
+          "account_id, captured_at, position, request_id, asset_id, views, likes, comments, shares, caption, needs_review, shortcode, post_url, posted_at, source"
         )
         .eq("persona_id", personaId)
         .order("captured_at", { ascending: false }),
@@ -134,9 +137,31 @@ export async function AccountsTab({
     }
   }
 
+  // Once the scrape has reached an account, only its rows count; mixing in
+  // the screenshot readings would put the same reel in twice under two keys.
+  const scrapedAccounts = new Set(
+    (reels ?? []).filter((r) => r.source === "scrape").map((r) => r.account_id)
+  );
+  const reelKey = (r: {
+    shortcode: string | null;
+    asset_id: string | null;
+    request_id: string | null;
+    account_id: string | null;
+    captured_at: string;
+    position: number;
+  }) =>
+    r.shortcode ??
+    r.asset_id ??
+    r.request_id ??
+    `${r.account_id}|${r.captured_at}|${r.position}`;
+
   const rows = (accounts ?? []).map((a, i) => {
     const followerRows = (metrics ?? []).filter(
-      (m) => m.account_id === a.id && !m.needs_review && m.followers != null
+      (m) =>
+        m.account_id === a.id &&
+        !m.needs_review &&
+        m.followers != null &&
+        (!scrapedAccounts.has(a.id) || m.source === "scrape")
     );
     const latest = followerRows[0];
     const previous = followerRows.find(
@@ -151,26 +176,53 @@ export async function AccountsTab({
     // reading wins and the same video is one row rather than ten. Tiles we
     // couldn't identify fall back to their position within one capture, so
     // they at least don't merge with each other.
-    const mine = (reels ?? []).filter((r) => r.account_id === a.id);
+    const mine = (reels ?? []).filter(
+      (r) => r.account_id === a.id && (!scrapedAccounts.has(a.id) || r.source === "scrape")
+    );
+    // Newest reading per reel, and the reading from at least half a day
+    // earlier, so each tile can say how far it moved since yesterday.
     const latestPerReel = new Map<string, (typeof mine)[number]>();
+    const earlierPerReel = new Map<string, (typeof mine)[number]>();
     for (const r of mine) {
-      // The cut is the reel. Keying on the job would merge its three to
-      // five distinct cuts into one and add up their views.
-      const key = r.asset_id ?? r.request_id ?? `pos:${r.captured_at}:${r.position}`;
+      const key = reelKey(r);
       const seen = latestPerReel.get(key);
       if (!seen || r.captured_at > seen.captured_at) latestPerReel.set(key, r);
     }
-    const tiles = Array.from(latestPerReel.values())
-      .sort((x, y) => (y.views ?? 0) - (x.views ?? 0))
-      .map((r) => {
+    for (const r of mine) {
+      const key = reelKey(r);
+      const latest = latestPerReel.get(key)!;
+      const age = new Date(latest.captured_at).getTime() - new Date(r.captured_at).getTime();
+      if (age < 12 * 60 * 60 * 1000) continue;
+      const seen = earlierPerReel.get(key);
+      if (!seen || r.captured_at > seen.captured_at) earlierPerReel.set(key, r);
+    }
+    const tiles = Array.from(latestPerReel.entries())
+      .sort(([, x], [, y]) => {
+        // Newest post first when we know when it went up; views otherwise.
+        if (x.posted_at && y.posted_at) return x.posted_at < y.posted_at ? 1 : -1;
+        return (y.views ?? 0) - (x.views ?? 0);
+      })
+      .map(([key, r]) => {
         const requestId = r.request_id ?? "";
         const clip = clips.get(requestId);
+        const earlier = earlierPerReel.get(key);
+        const engagement =
+          r.views && r.views > 0
+            ? ((r.likes ?? 0) + (r.comments ?? 0) + (r.shares ?? 0)) / r.views
+            : null;
         return {
-          key: `${r.captured_at}-${r.position}`,
+          key,
           position: r.position,
           views: r.views,
+          viewsDelta:
+            r.views != null && earlier?.views != null ? r.views - earlier.views : null,
           likes: r.likes,
+          comments: r.comments,
+          shares: r.shares,
+          engagement,
           caption: r.caption,
+          postUrl: r.post_url,
+          postedAt: r.posted_at,
           title: titles.get(requestId) ?? null,
           seenAt: r.captured_at,
           src: clip ? (signed.get(clip.path) ?? null) : null,
@@ -252,8 +304,8 @@ export async function AccountsTab({
       if (r.needs_review || r.views == null || !r.account_id) continue;
       const at = new Date(r.captured_at).getTime();
       if (at > upto) continue;
-      const key =
-        r.asset_id ?? r.request_id ?? `${r.account_id}|${r.captured_at}|${r.position}`;
+      if (scrapedAccounts.has(r.account_id) && r.source !== "scrape") continue;
+      const key = reelKey(r);
       const seen = latest.get(key);
       if (!seen || at > seen.at) latest.set(key, { at, views: Number(r.views) });
     }
@@ -274,7 +326,7 @@ export async function AccountsTab({
   );
 
   const fmtAgo = (iso: string | null) => {
-    if (!iso) return "no screenshots yet";
+    if (!iso) return "not read yet";
     const h = (Date.now() - new Date(iso).getTime()) / (60 * 60 * 1000);
     if (h < 1) return "just now";
     if (h < 24) return `${Math.round(h)}h ago`;
@@ -314,7 +366,7 @@ export async function AccountsTab({
               />
             ) : (
               <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 px-4 text-center text-xs text-muted-foreground">
-                No views yet — they come from the reel grid screenshot.
+                No views yet — the daily scrape fills this in.
               </div>
             )}
           </div>
@@ -408,8 +460,8 @@ export async function AccountsTab({
 
           {r.tiles.length === 0 ? (
             <p className="mt-4 text-xs text-muted-foreground">
-              No reel grid read yet — the second screenshot from this topic is
-              what fills this row.
+              Nothing read from this account yet — the daily scrape fills this
+              row. A private account shows followers only.
             </p>
           ) : (
             <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1">
@@ -436,19 +488,57 @@ export async function AccountsTab({
 
                   </div>
                   <p className="mt-1.5 truncate text-xs font-medium">
-                    {t.title ?? (
-                      <span className="text-muted-foreground">
-                        {t.caption ?? "not in the app"}
-                      </span>
+                    {t.postUrl ? (
+                      <a
+                        href={t.postUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:underline"
+                        title="Open on the platform"
+                      >
+                        {t.title ?? (
+                          <span className="text-muted-foreground">
+                            {t.caption ?? "untitled post"}
+                          </span>
+                        )}
+                      </a>
+                    ) : (
+                      t.title ?? (
+                        <span className="text-muted-foreground">
+                          {t.caption ?? "not in the app"}
+                        </span>
+                      )
                     )}
                   </p>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="tabular-nums">
                       ▶ {t.views != null ? nf.format(t.views) : "—"}
+                      {t.viewsDelta != null && t.viewsDelta !== 0 && (
+                        <span
+                          className={`ml-1 ${t.viewsDelta > 0 ? "text-emerald-400" : "text-rose-400"}`}
+                          title="since the previous reading"
+                        >
+                          {t.viewsDelta > 0 ? "+" : ""}
+                          {nf.format(t.viewsDelta)}
+                        </span>
+                      )}
                     </span>
-                    {t.likes != null && (
-                      <span className="tabular-nums text-muted-foreground">
-                        ♥ {nf.format(t.likes)}
+                    {t.engagement != null && (
+                      <span
+                        className="tabular-nums text-muted-foreground"
+                        title="likes + comments + shares, per view"
+                      >
+                        {(t.engagement * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2 text-[10px] tabular-nums text-muted-foreground">
+                    {t.likes != null && <span>♥ {nf.format(t.likes)}</span>}
+                    {t.comments != null && <span>💬 {nf.format(t.comments)}</span>}
+                    {t.shares != null && <span>↗ {nf.format(t.shares)}</span>}
+                    {t.postedAt && (
+                      <span className="ml-auto">
+                        {new Date(t.postedAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}
                       </span>
                     )}
                   </div>

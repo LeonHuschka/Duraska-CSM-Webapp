@@ -322,6 +322,8 @@ async function handleMessage(msg: TgMessage) {
  * way to know: 👀 picked up, 💯 numbers stored, 🤔 stored but flagged for
  * review, 🤨 nothing readable.
  */
+const SCREENSHOT_EXTRACTION_ENABLED = false;
+
 async function handleScreenshot(msg: TgMessage) {
   const supabase = createAdminClient();
 
@@ -402,6 +404,16 @@ async function handleScreenshot(msg: TgMessage) {
 
   // Confirmed an account topic, so say "got it" before the slow part.
   await react(REACTION.seen);
+
+  // Off since 2026-09-06: the numbers come from a daily scrape of the
+  // platform now (account-scrape.ts), which names every post by its own id
+  // and never has to guess which tile is which reel. Screenshots are still
+  // welcome as a record, and get their "seen" so nobody wonders — but
+  // nothing is read off them any more.
+  if (!SCREENSHOT_EXTRACTION_ENABLED) {
+    console.log(`[telegram] screenshot for @${account.handle} noted, not read — extraction is off`);
+    return;
+  }
 
   // Already processed? (Telegram can redeliver.)
   const { data: existing } = await supabase

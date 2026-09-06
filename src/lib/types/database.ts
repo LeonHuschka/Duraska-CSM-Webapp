@@ -512,6 +512,12 @@ export type Database = {
           match_confirmed: boolean;
           tile_path: string | null;
           match_score: number | null;
+          shortcode: string | null;
+          post_url: string | null;
+          comments: number | null;
+          shares: number | null;
+          posted_at: string | null;
+          source: string;
           created_at: string;
         };
         Insert: {
@@ -534,6 +540,12 @@ export type Database = {
           match_confirmed?: boolean;
           tile_path?: string | null;
           match_score?: number | null;
+          shortcode?: string | null;
+          post_url?: string | null;
+          comments?: number | null;
+          shares?: number | null;
+          posted_at?: string | null;
+          source?: string;
           created_at?: string;
         };
         Update: {
@@ -555,6 +567,12 @@ export type Database = {
           match_confirmed?: boolean;
           tile_path?: string | null;
           match_score?: number | null;
+          shortcode?: string | null;
+          post_url?: string | null;
+          comments?: number | null;
+          shares?: number | null;
+          posted_at?: string | null;
+          source?: string;
           created_at?: string;
         };
         Relationships: [];
@@ -587,6 +605,7 @@ export type Database = {
           raw: Json | null;
           confidence: number | null;
           needs_review: boolean;
+          source: string;
           created_at: string;
         };
         Insert: {
@@ -616,6 +635,7 @@ export type Database = {
           raw?: Json | null;
           confidence?: number | null;
           needs_review?: boolean;
+          source?: string;
           match_method?: string | null;
           match_confirmed?: boolean;
           tile_path?: string | null;

@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { dailyDemand } from "@/lib/demand";
 import { fingerprintPending } from "@/lib/fingerprint-job";
+import { scrapeAccounts } from "@/lib/account-scrape";
 import {
   checkInstagramAlive,
   deleteMessage,
@@ -12,7 +13,18 @@ import {
 } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Hobby allows 300. The account scrape needs up to two and a half minutes
+// when Facebook is slow, and it runs alongside everything else here because
+// the plan's two cron slots are both taken.
+export const maxDuration = 300;
+
+/**
+ * Off since 2026-09-06. The screenshots are read by the platform scrape
+ * instead — see account-scrape.ts — so the fingerprints that let a
+ * screenshot tile be recognised are no longer needed. The VAs can keep
+ * sending screenshots; nothing is read off them.
+ */
+const SCREENSHOT_EXTRACTION_ENABLED = false;
 
 /**
  * Scheduled job: verify inspo links are still live, and warn the group when
@@ -54,6 +66,9 @@ export async function GET(req: Request) {
   const supabase = createAdminClient();
   const summary: Record<string, unknown> = {};
   const deadline = Date.now() + CHECK_BUDGET_MS;
+  // "?only=scrape" runs the account scrape and nothing else — for trying it
+  // by hand without also firing the pipeline alert.
+  const only = new URL(req.url).searchParams.get("only");
 
   const { data: configs } = await supabase
     .from("telegram_config")
@@ -61,16 +76,24 @@ export async function GET(req: Request) {
       "persona_id, chat_id, talk_thread_id, model_username, va_username, manager_username, min_ready_to_post, min_open_links, max_unedited, last_alert_at"
     );
 
+  // The daily read of every posting account, all personas side by side. It
+  // goes first because it is the slowest thing here and must not be cut off
+  // by whatever the checks below take.
+  const scrape = await Promise.all(
+    (configs ?? []).map(async (cfg) => [cfg.persona_id, await scrapeAccounts(supabase, cfg.persona_id)] as const)
+  );
+  summary.scrape = Object.fromEntries(scrape);
+  if (only === "scrape") return NextResponse.json({ ok: true, summary });
+
   for (const cfg of configs ?? []) {
     summary[cfg.persona_id] = await runForPersona(supabase, cfg, deadline);
   }
 
-  // New cuts need a hash and their hook text before a screenshot can
-  // recognise them. Riding along here keeps it inside the two scheduled
-  // jobs the plan allows, at the cost of up to twelve hours' delay.
-  summary.fingerprint = await fingerprintPending(
-    Math.min(deadline + 10_000, Date.now() + 12_000)
-  );
+  if (SCREENSHOT_EXTRACTION_ENABLED) {
+    summary.fingerprint = await fingerprintPending(
+      Math.min(deadline + 10_000, Date.now() + 12_000)
+    );
+  }
 
   return NextResponse.json({ ok: true, summary });
 }
