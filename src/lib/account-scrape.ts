@@ -27,24 +27,34 @@ import type { Database } from "@/lib/types/database";
  * Every account is one call, so the bill grows with accounts, not posts.
  */
 
-const IG_ACTOR = "apify~instagram-profile-scraper";
+/**
+ * Followers only. $0.0026 a profile. It also carries the twelve latest
+ * posts, but their videoViewCount is not the number on the profile — that
+ * is plays, replays included, and this actor does not return it.
+ */
+const IG_PROFILE_ACTOR = "apify~instagram-profile-scraper";
 
 /**
- * The profile scraper's videoViewCount is not the number on the profile.
- * Instagram's grid shows plays — every play, replays included — and only a
- * per-post read returns that field: Reel #25 read 25,622 from the profile
- * and 51,333 from the post, which is what the app showed. So reels inside
- * the tracking window get a second, per-post read at $0.0027 each. Older
- * posts keep the last plays figure they had rather than dropping to the
- * smaller metric, which would read as a loss of views overnight.
+ * The posts, with plays. $0.0003 a post and $0.005 a run, one run for every
+ * account at once. Measured on the real account: play_count 51,441 for the
+ * reel the profile shows at 51k, in six seconds; the per-post read from
+ * Apify's own scraper gave 51,333 for $0.0027 — nine times the price for
+ * the same answer.
  */
-const IG_POSTS_ACTOR = "apify~instagram-scraper";
-const PLAYS_WINDOW_MS = 5 * 86_400_000;
-const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
-const FB_POSTS_ACTOR = "apify~facebook-posts-scraper";
+const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
+const IG_POSTS_PER_ACCOUNT = 12;
 
-/** Two posts a day, tracked for five: ten covers the window with room. */
-const FB_POSTS_PER_PAGE = 10;
+/** Followers only. $0.012 a page — the dearest line left, and it is 1¢. */
+const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
+
+/**
+ * The reels, with views, reactions, comments and shares. $0.0003 a reel and
+ * $0.0005 a run. Measured on Harold's page against Apify's posts scraper at
+ * $0.005 a post: the same numbers, a sixteenth of the price. Reels only —
+ * which is all these pages post.
+ */
+const FB_REELS_ACTOR = "dami_studio~facebook-reels-scraper";
+const FB_REELS_PER_PAGE = 10;
 
 /** One actor run may take this long; three run side by side. */
 const RUN_TIMEOUT_MS = 150_000;
@@ -135,8 +145,6 @@ type PostReading = {
   comments: number | null;
   shares: number | null;
   caption: string | null;
-  /** True when `views` is the plays figure the profile shows. */
-  viewsArePlays?: boolean;
 };
 
 type AccountReading = {
@@ -151,88 +159,55 @@ type AccountReading = {
 async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byName = new Map(accounts.map((a) => [igUsername(a.handle), a]));
-  const { rows, error } = await runActor(IG_ACTOR, {
-    usernames: Array.from(byName.keys()),
-  });
-  if (error) console.error("[scrape] instagram:", error);
+  const usernames = Array.from(byName.keys());
+
+  const [profiles, posts] = await Promise.all([
+    runActor(IG_PROFILE_ACTOR, { usernames }),
+    runActor(IG_POSTS_ACTOR, { usernames, postsPerProfile: IG_POSTS_PER_ACCOUNT }),
+  ]);
+  if (profiles.error) console.error("[scrape] instagram profiles:", profiles.error);
+  if (posts.error) console.error("[scrape] instagram posts:", posts.error);
 
   const out = new Map<string, AccountReading>();
-  for (const r of rows) {
-    const name = str(r.username)?.toLowerCase();
-    const account = name ? byName.get(name) : undefined;
-    if (!account) continue;
-    const posts = (Array.isArray(r.latestPosts) ? (r.latestPosts as Row[]) : [])
-      .map((p): PostReading | null => {
-        const shortcode = str(p.shortCode);
-        if (!shortcode) return null;
-        return {
-          shortcode,
-          url: str(p.url) ?? `https://www.instagram.com/p/${shortcode}/`,
-          postedAt: str(p.timestamp),
-          views: num(p.videoViewCount) ?? num(p.videoPlayCount),
-          likes: num(p.likesCount),
-          comments: num(p.commentsCount),
-          shares: null,
-          caption: str(p.caption),
-        };
-      })
-      .filter((p): p is PostReading => p !== null);
-    out.set(account.id, {
-      account,
-      followers: num(r.followersCount),
-      follows: num(r.followsCount),
-      postsCount: num(r.postsCount),
-      posts,
-      note: r.private === true ? "private — posts not visible" : null,
-    });
-  }
   for (const a of accounts) {
-    if (!out.has(a.id)) {
-      out.set(a.id, {
-        account: a,
-        followers: null,
-        follows: null,
-        postsCount: null,
-        posts: [],
-        note: error ?? "not in the scraper's answer",
-      });
-    }
-  }
-
-  // Plays for everything inside the tracking window, in one run.
-  const cutoff = Date.now() - PLAYS_WINDOW_MS;
-  const fresh: PostReading[] = [];
-  out.forEach((r) => {
-    for (const p of r.posts) {
-      if (p.postedAt && new Date(p.postedAt).getTime() >= cutoff && p.url) fresh.push(p);
-    }
-  });
-  const plays = new Map<string, Row>();
-  if (fresh.length > 0) {
-    const res = await runActor(IG_POSTS_ACTOR, {
-      directUrls: fresh.map((p) => p.url),
-      resultsType: "posts",
-      resultsLimit: fresh.length,
+    out.set(a.id, {
+      account: a,
+      followers: null,
+      follows: null,
+      postsCount: null,
+      posts: [],
+      note: profiles.error && posts.error ? profiles.error : null,
     });
-    if (res.error) console.error("[scrape] instagram plays:", res.error);
-    for (const row of res.rows) {
-      const code = str(row.shortCode);
-      if (code) plays.set(code, row);
-    }
   }
-  out.forEach((r) => {
-    for (const p of r.posts) {
-      const row = plays.get(p.shortcode);
-      if (row) {
-        p.views = num(row.videoPlayCount) ?? num(row.videoViewCount) ?? p.views;
-        p.likes = num(row.likesCount) ?? p.likes;
-        p.comments = num(row.commentsCount) ?? p.comments;
-        p.viewsArePlays = true;
-      } else {
-        // Outside the window, or unanswered: not this metric. The writer
-        // carries the last plays figure forward instead.
-        p.views = null;
-      }
+  for (const r of profiles.rows) {
+    const a = byName.get(str(r.username)?.toLowerCase() ?? "");
+    if (!a) continue;
+    const reading = out.get(a.id)!;
+    reading.followers = num(r.followersCount);
+    reading.follows = num(r.followsCount);
+    reading.postsCount = num(r.postsCount);
+    if (r.private === true) reading.note = "private — posts not visible";
+  }
+  for (const r of posts.rows) {
+    const a = byName.get(str(r.scraped_username)?.toLowerCase() ?? "");
+    const shortcode = str(r.code);
+    if (!a || !shortcode) continue;
+    const takenAt = num(r.taken_at);
+    out.get(a.id)!.posts.push({
+      shortcode,
+      url: str(r.post_url) ?? `https://www.instagram.com/p/${shortcode}/`,
+      postedAt: takenAt ? new Date(takenAt * 1000).toISOString() : null,
+      // Plays — the figure on the profile. Null on images, which have none.
+      views: num(r.play_count),
+      likes: num(r.like_count),
+      comments: num(r.comment_count),
+      shares: null,
+      caption: str(r.caption),
+    });
+  }
+  out.forEach((reading) => {
+    if (reading.followers == null && reading.posts.length === 0 && !reading.note) {
+      reading.note = "not in the scrapers' answer — is the handle right?";
     }
   });
   return Array.from(out.values());
@@ -241,24 +216,19 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
 async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byKey = new Map(accounts.map((a) => [fbKey(fbPageUrl(a.handle)), a]));
-  const startUrls = accounts.map((a) => ({ url: fbPageUrl(a.handle) }));
+  const urls = accounts.map((a) => fbPageUrl(a.handle));
 
-  const [pages, posts] = await Promise.all([
-    runActor(FB_PAGES_ACTOR, { startUrls }),
-    runActor(FB_POSTS_ACTOR, { startUrls, resultsLimit: FB_POSTS_PER_PAGE }),
+  const [pages, reels] = await Promise.all([
+    runActor(FB_PAGES_ACTOR, { startUrls: urls.map((url) => ({ url })) }),
+    runActor(FB_REELS_ACTOR, { startUrls: urls, resultsLimit: FB_REELS_PER_PAGE }),
   ]);
   if (pages.error) console.error("[scrape] facebook pages:", pages.error);
-  if (posts.error) console.error("[scrape] facebook posts:", posts.error);
+  if (reels.error) console.error("[scrape] facebook reels:", reels.error);
 
   const find = (r: Row): Account | undefined => {
     for (const k of ["inputUrl", "pageUrl", "facebookUrl", "url"]) {
       const a = byKey.get(fbKey(str(r[k])));
       if (a) return a;
-    }
-    // Posts carry the page in their own URL: facebook.com/<page>/posts/…
-    const u = fbKey(str(r.url) ?? str(r.topLevelUrl));
-    for (const [k, a] of Array.from(byKey.entries())) {
-      if (u.startsWith(k + "/")) return a;
     }
     return undefined;
   };
@@ -271,29 +241,27 @@ async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
       follows: null,
       postsCount: null,
       posts: [],
-      note: pages.error && posts.error ? pages.error : null,
+      note: pages.error && reels.error ? pages.error : null,
     });
   }
   for (const r of pages.rows) {
     const a = find(r);
     if (!a) continue;
-    const reading = out.get(a.id)!;
-    reading.followers = num(r.followers) ?? num(r.likes);
+    out.get(a.id)!.followers = num(r.followers) ?? num(r.likes);
   }
-  for (const r of posts.rows) {
+  for (const r of reels.rows) {
     const a = find(r);
-    if (!a) continue;
-    const shortcode = str(r.postId);
-    if (!shortcode) continue;
+    const shortcode = str(r.reelId) ?? str(r.postId);
+    if (!a || !shortcode || r.ok === false) continue;
     out.get(a.id)!.posts.push({
       shortcode,
-      url: str(r.url) ?? str(r.topLevelUrl),
+      url: str(r.reelUrl),
       postedAt: str(r.time),
-      views: num(r.viewsCount),
-      likes: num(r.likes),
-      comments: num(r.comments),
-      shares: num(r.shares),
-      caption: str(r.text),
+      views: num(r.viewCount),
+      likes: num(r.reactionsCount),
+      comments: num(r.commentsCount),
+      shares: num(r.sharesCount),
+      caption: str(r.caption),
     });
   }
   // A page the scrapers never answered for is almost always a handle that
@@ -419,6 +387,65 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
   const notes: string[] = [];
   let posts = 0;
   let matched = 0;
+  for (const r of readings) {
+    const mine = marks.filter((m) => m.accountId === r.account.id);
+    const posts = r.posts
+      .filter((p) => p.postedAt && !result.has(key(r.account.id, p.shortcode)))
+      .sort((a, b) => (a.postedAt! < b.postedAt! ? -1 : 1));
+    for (const p of posts) {
+      const at = new Date(p.postedAt!).getTime();
+      let best: (typeof mine)[number] | null = null;
+      let bestD = MATCH_WINDOW_MS;
+      for (const m of mine) {
+        if (m.assetId && taken.has(`asset:${m.assetId}`)) continue;
+        const d = Math.abs(m.at - at);
+        if (d < bestD) {
+          bestD = d;
+          best = m;
+        }
+      }
+      if (!best) continue;
+      if (best.assetId) taken.add(`asset:${best.assetId}`);
+      result.set(key(r.account.id, p.shortcode), {
+        requestId: best.requestId,
+        assetId: best.assetId,
+        method: "posted-time",
+      });
+    }
+  }
+  return result;
+}
+
+export type ScrapeSummary = {
+  accounts: number;
+  posts: number;
+  matched: number;
+  estimatedUsd: number;
+  notes: string[];
+};
+
+/** One persona's accounts, read and written. */
+export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<ScrapeSummary> {
+  const { data: rows } = await supabase
+    .from("accounts")
+    .select("id, handle, platform, status")
+    .eq("persona_id", personaId)
+    .not("status", "in", '("dead","paused")')
+    .order("platform")
+    .limit(MAX_ACCOUNTS);
+  const accounts = (rows ?? []) as Account[];
+  const ig = accounts.filter((a) => a.platform === "instagram");
+  const fb = accounts.filter((a) => a.platform === "facebook");
+
+  const [igReadings, fbReadings] = await Promise.all([readInstagram(ig), readFacebook(fb)]);
+  const readings = [...igReadings, ...fbReadings];
+  const matches = await matchToCuts(supabase, personaId, readings);
+
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const notes: string[] = [];
+  let posts = 0;
+  let matched = 0;
   let playsRead = 0;
 
   // The last views figure stored for each post, for the ones not re-read
@@ -483,8 +510,6 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
       r.posts.map((p, i) => {
         const m = matches.get(`${r.account.id}|${p.shortcode}`);
         if (m?.requestId) matched++;
-        if (p.viewsArePlays) playsRead++;
-        const views = p.views ?? carry.get(`${r.account.id}|${p.shortcode}`) ?? null;
         return {
           persona_id: personaId,
           account_id: r.account.id,
@@ -493,7 +518,7 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
           shortcode: p.shortcode,
           post_url: p.url,
           posted_at: p.postedAt,
-          views,
+          views: p.views,
           likes: p.likes,
           comments: p.comments,
           shares: p.shares,
@@ -524,9 +549,9 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
 
   const estimatedUsd =
     ig.length * 0.0026 +
-    playsRead * 0.0027 +
-    fb.length * (0.012 + FB_POSTS_PER_PAGE * 0.005) +
-    (fb.length ? 0.001 : 0);
+    (ig.length ? 0.005 + ig.length * IG_POSTS_PER_ACCOUNT * 0.0003 : 0) +
+    fb.length * 0.012 +
+    (fb.length ? 0.0005 + fb.length * FB_REELS_PER_PAGE * 0.0003 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
       (notes.length ? ` — ${notes.join("; ")}` : "")
