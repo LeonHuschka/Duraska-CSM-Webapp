@@ -56,6 +56,15 @@ const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
 const FB_REELS_ACTOR = "dami_studio~facebook-reels-scraper";
 const FB_REELS_PER_PAGE = 10;
 
+/**
+ * The fallback, for pages the cheap actor cannot read. A page made from a
+ * profile — facebook.com/people/Name/ID — has no public Reels tab, and the
+ * cheap actor answers NO_REELS for it while the reels sit in its feed. This
+ * one reads the feed, at $0.005 a post — sixteen times the price, so it is
+ * asked only about the pages that came back empty.
+ */
+const FB_POSTS_ACTOR = "apify~facebook-posts-scraper";
+
 /** One actor run may take this long; three run side by side. */
 const RUN_TIMEOUT_MS = 150_000;
 
@@ -156,6 +165,8 @@ type AccountReading = {
   postsCount: number | null;
   posts: PostReading[];
   note: string | null;
+  /** Read through the dear feed scraper rather than the cheap reels one. */
+  viaFeed?: boolean;
 };
 
 async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
@@ -204,7 +215,10 @@ async function readInstagram(accounts: Account[]): Promise<AccountReading[]> {
       likes: num(r.like_count),
       comments: num(r.comment_count),
       shares: null,
-      caption: str(r.caption),
+      // sones wraps the caption: { pk, text }.
+      caption: str(
+        r.caption && typeof r.caption === "object" ? (r.caption as Row).text : r.caption
+      ),
       thumbnailUrl: str(r.image_url),
     });
   }
@@ -268,6 +282,37 @@ async function readFacebook(accounts: Account[]): Promise<AccountReading[]> {
       thumbnailUrl: str(r.thumbnailUrl) ?? str(r.previewImageUrl),
     });
   }
+  // Pages the cheap actor could not read get the dear one, feed and all.
+  const empty = accounts.filter((a) => out.get(a.id)!.posts.length === 0);
+  if (empty.length > 0) {
+    const feed = await runActor(FB_POSTS_ACTOR, {
+      startUrls: empty.map((a) => ({ url: fbPageUrl(a.handle) })),
+      resultsLimit: FB_REELS_PER_PAGE,
+    });
+    if (feed.error) console.error("[scrape] facebook feed:", feed.error);
+    for (const r of feed.rows) {
+      const a = find(r);
+      const shortcode = str(r.postId);
+      if (!a || !shortcode) continue;
+      const media = Array.isArray(r.media) ? (r.media as Row[]) : [];
+      out.get(a.id)!.posts.push({
+        shortcode,
+        url: str(r.url) ?? str(r.topLevelUrl),
+        postedAt: str(r.time),
+        views: num(r.viewsCount),
+        likes: num(r.likes),
+        comments: num(r.comments),
+        shares: num(r.shares),
+        caption: str(r.text),
+        thumbnailUrl: str(media[0]?.thumbnail) ?? str(media[0]?.photo_image?.["uri" as keyof object]),
+      });
+    }
+    for (const a of empty) {
+      const reading = out.get(a.id)!;
+      if (reading.posts.length > 0) reading.viaFeed = true;
+    }
+  }
+
   // A page the scrapers never answered for is almost always a handle that
   // is not a page: "Lyza tbd" is a placeholder, not facebook.com/Lyza%20tbd.
   out.forEach((reading) => {
@@ -421,6 +466,18 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
       if (error) notes.push(`@${r.account.handle}: profile not stored — ${error.message}`);
     }
 
+    // The screenshot readings this replaces. They keyed unmatched tiles on
+    // their position in the picture, so one reel was five rows; once the
+    // platform has answered for the account at all — followers count — they
+    // are noise and they go, whether or not any post came back today.
+    if (hasProfile || r.posts.length > 0) {
+      await supabase
+        .from("reel_metrics")
+        .delete()
+        .eq("account_id", r.account.id)
+        .eq("source", "screenshot");
+    }
+
     if (r.posts.length === 0) continue;
     await supabase
       .from("reel_metrics")
@@ -461,24 +518,16 @@ export async function scrapeAccounts(supabase: Sb, personaId: string): Promise<S
       })
     );
     if (error) notes.push(`@${r.account.handle}: posts not stored — ${error.message}`);
-    else {
-      posts += r.posts.length;
-      // The screenshot readings this replaces. They keyed unmatched tiles
-      // on their position in the picture, so one reel was five rows; once
-      // the platform has been read they are noise, and they go.
-      await supabase
-        .from("reel_metrics")
-        .delete()
-        .eq("account_id", r.account.id)
-        .eq("source", "screenshot");
-    }
+    else posts += r.posts.length;
   }
 
+  const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =
     ig.length * 0.0026 +
     (ig.length ? 0.005 + ig.length * IG_POSTS_PER_ACCOUNT * 0.0003 : 0) +
     fb.length * 0.012 +
-    (fb.length ? 0.0005 + fb.length * FB_REELS_PER_PAGE * 0.0003 : 0);
+    (fb.length ? 0.0005 + (fb.length - viaFeed) * FB_REELS_PER_PAGE * 0.0003 : 0) +
+    (viaFeed ? 0.001 + viaFeed * FB_REELS_PER_PAGE * 0.005 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
       (notes.length ? ` — ${notes.join("; ")}` : "")
