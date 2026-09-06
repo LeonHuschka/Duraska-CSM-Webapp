@@ -56,11 +56,14 @@ const CHECK_BUDGET_MS = 40_000;
 
 export async function GET(req: Request) {
   // Vercel Cron sends this header; also allow a manual secret for testing.
-  const isVercelCron = req.headers.get("x-vercel-cron") !== null;
+  // Vercel's scheduler sends "Authorization: Bearer <CRON_SECRET>". The
+  // x-vercel-cron header it also sends is not proof of anything — any
+  // client can set it, and until 2026-09-06 that was enough to run this.
   const secret = process.env.CRON_SECRET;
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? null;
   const authed =
-    isVercelCron ||
-    (secret && new URL(req.url).searchParams.get("secret") === secret);
+    !!secret &&
+    (bearer === secret || new URL(req.url).searchParams.get("secret") === secret);
   if (!authed) return NextResponse.json({ ok: false }, { status: 401 });
 
   const supabase = createAdminClient();
