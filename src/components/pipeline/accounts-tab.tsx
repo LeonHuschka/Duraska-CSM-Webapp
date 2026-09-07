@@ -341,6 +341,17 @@ export async function AccountsTab({
         .map((r) => dayKey(r.captured_at))
     )
   ).sort();
+  // The day each account was first read off its platform. Before it, the
+  // screenshot readings are the history; from it on, only the scrape
+  // counts — the two key reels differently, and mixing them on one day
+  // would count a reel twice.
+  const firstScrape = new Map<string, number>();
+  for (const r of reels ?? []) {
+    if (r.source !== "scrape" || !r.account_id) continue;
+    const at = new Date(r.captured_at).getTime();
+    const seen = firstScrape.get(r.account_id);
+    if (seen === undefined || at < seen) firstScrape.set(r.account_id, at);
+  }
   const viewSeries = viewDays.map((day) => {
     const upto = new Date(`${day}T23:59:59.999Z`).getTime();
     const latest = new Map<string, { at: number; views: number }>();
@@ -349,7 +360,8 @@ export async function AccountsTab({
       if (!postingIds.has(r.account_id)) continue;
       const at = new Date(r.captured_at).getTime();
       if (at > upto) continue;
-      if (scrapedAccounts.has(r.account_id) && r.source !== "scrape") continue;
+      const switched = firstScrape.get(r.account_id);
+      if (r.source !== "scrape" && switched !== undefined && upto >= switched) continue;
       const key = reelKey(r);
       const seen = latest.get(key);
       if (!seen || at > seen.at) latest.set(key, { at, views: Number(r.views) });

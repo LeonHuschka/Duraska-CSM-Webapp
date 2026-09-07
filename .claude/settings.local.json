@@ -254,7 +254,8 @@
       "mcp__claude-in-chrome__read_network_requests",
       "Bash(set -o pipefail)",
       "Bash(psql --version)",
-      "Bash(python3 -c \"import psycopg2\")"
+      "Bash(python3 -c \"import psycopg2\")",
+      "Bash(python3 /tmp/edit_views.py)"
     ]
   }
 }
