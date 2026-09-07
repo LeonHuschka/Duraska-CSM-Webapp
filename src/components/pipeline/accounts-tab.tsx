@@ -7,6 +7,7 @@ import {
 } from "@/components/dashboard/pipeline-donut";
 import { AccountControls } from "@/components/pipeline/account-controls";
 import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
+import { ReelCover } from "@/components/pipeline/reel-cover";
 
 /**
  * Accounts tab: the whole operation summarised, then one card per account
@@ -28,6 +29,14 @@ const SHARE_TONE = [
   "stroke-amber-400",
   "stroke-blue-400",
   "stroke-rose-400",
+];
+/** The same palette for lines, which take a text colour. */
+const LINE_TONE = [
+  "text-purple-400",
+  "text-emerald-400",
+  "text-amber-400",
+  "text-blue-400",
+  "text-rose-400",
 ];
 
 const nf = new Intl.NumberFormat("de-DE");
@@ -278,13 +287,20 @@ export async function AccountsTab({
     };
   });
 
-  const totalViews = rows.reduce((a, r) => a + r.views, 0);
-  const totalFollowers = rows.reduce((a, r) => a + (r.followers ?? 0), 0);
+  // The summary is about the accounts being worked. One that posts nothing
+  // — the model's own page with 138k followers, kept for reference — would
+  // otherwise be the whole chart: every other line a flat floor under it,
+  // and a step the size of a cliff on the day it was first read.
+  const posting = rows.filter((r) => Number(r.posts_per_day ?? 0) > 0);
+  const parked = rows.filter((r) => Number(r.posts_per_day ?? 0) === 0);
+  const postingIds = new Set(posting.map((r) => r.id));
+  const totalViews = posting.reduce((a, r) => a + r.views, 0);
+  const totalFollowers = posting.reduce((a, r) => a + (r.followers ?? 0), 0);
 
   // Views only, as asked — no follower stand-in. Until the first reel grid
   // is read this is empty, and saying so is more use than a donut of
   // followers wearing a views label.
-  const share = rows
+  const share = posting
     .filter((r) => r.views > 0)
     .map((r) => ({ label: displayHandle(r.handle), value: r.views, color: r.tone }));
 
@@ -334,6 +350,7 @@ export async function AccountsTab({
     const latest = new Map<string, { at: number; views: number }>();
     for (const r of reels ?? []) {
       if (r.needs_review || r.views == null || !r.account_id) continue;
+      if (!postingIds.has(r.account_id)) continue;
       const at = new Date(r.captured_at).getTime();
       if (at > upto) continue;
       if (scrapedAccounts.has(r.account_id) && r.source !== "scrape") continue;
@@ -346,16 +363,30 @@ export async function AccountsTab({
     return { t: new Date(day).getTime(), value: total };
   });
 
-  const followerSeries = seriesFrom(
-    (metrics ?? [])
-      .filter((m) => !m.needs_review && m.followers != null)
-      .map((m) => ({
-        captured_at: m.captured_at,
-        account_id: m.account_id,
-        value: Number(m.followers),
-      })),
-    "last"
-  );
+  // One follower line per posting account rather than a sum. Summed, the
+  // first reading of a new account is a step in the total; apart, it is a
+  // new line starting on that day, which is what happened.
+  const followerLines = posting.map((acc, i) => ({
+    key: `followers-${acc.id}`,
+    label: displayHandle(acc.handle),
+    color: LINE_TONE[(i + 1) % LINE_TONE.length],
+    points: seriesFrom(
+      (metrics ?? [])
+        .filter(
+          (m) =>
+            m.account_id === acc.id &&
+            !m.needs_review &&
+            m.followers != null &&
+            (!scrapedAccounts.has(acc.id) || m.source === "scrape")
+        )
+        .map((m) => ({
+          captured_at: m.captured_at,
+          account_id: m.account_id,
+          value: Number(m.followers),
+        })),
+      "last"
+    ),
+  }));
 
   const fmtAgo = (iso: string | null) => {
     if (!iso) return "not read yet";
@@ -385,6 +416,13 @@ export async function AccountsTab({
             </p>
             <p className="text-xs text-muted-foreground">All followers</p>
           </div>
+          {parked.length > 0 && (
+            <p className="self-end text-[11px] text-muted-foreground">
+              Posting accounts only.{" "}
+              {parked.map((r) => displayHandle(r.handle)).join(", ")} (0 reels a day) counted
+              on its own card.
+            </p>
+          )}
         </div>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -416,12 +454,7 @@ export async function AccountsTab({
                   color: "text-purple-400",
                   points: viewSeries,
                 },
-                {
-                  key: "followers",
-                  label: "Followers",
-                  color: "text-emerald-400",
-                  points: followerSeries,
-                },
+                ...followerLines,
               ]}
             />
           </div>
@@ -534,16 +567,7 @@ export async function AccountsTab({
                         className="h-full w-full bg-black object-cover"
                       />
                     ) : t.cover ? (
-                      <a href={t.postUrl ?? undefined} target="_blank" rel="noreferrer" className="block h-full w-full">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={t.cover}
-                          alt=""
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-cover"
-                        />
-                      </a>
+                      <ReelCover src={t.cover} href={t.postUrl} fallback="no cut in the vault" />
                     ) : (
                       <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-muted-foreground">
                         no cut in the vault

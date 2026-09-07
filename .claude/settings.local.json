@@ -250,7 +250,8 @@
       "Bash(grep -n '^ [a-z_]*: {$' src/lib/types/database.ts)",
       "Bash(grep -rn '\"Reel\\\\|`Reel\\\\|Reel #\\\\|Reel ' src --include='*.ts' --include='*.tsx')",
       "Bash(grep -iv 'Vercel CLI\\\\|^$')",
-      "mcp__claude-in-chrome__read_console_messages"
+      "mcp__claude-in-chrome__read_console_messages",
+      "mcp__claude-in-chrome__read_network_requests"
     ]
   }
 }
