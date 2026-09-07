@@ -252,7 +252,9 @@
       "Bash(grep -iv 'Vercel CLI\\\\|^$')",
       "mcp__claude-in-chrome__read_console_messages",
       "mcp__claude-in-chrome__read_network_requests",
-      "Bash(set -o pipefail)"
+      "Bash(set -o pipefail)",
+      "Bash(psql --version)",
+      "Bash(python3 -c \"import psycopg2\")"
     ]
   }
 }
