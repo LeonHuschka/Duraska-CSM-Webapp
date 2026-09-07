@@ -179,11 +179,7 @@ export async function AccountsTab({
 
   const rows = (accounts ?? []).map((a, i) => {
     const followerRows = (metrics ?? []).filter(
-      (m) =>
-        m.account_id === a.id &&
-        !m.needs_review &&
-        m.followers != null &&
-        (!scrapedAccounts.has(a.id) || m.source === "scrape")
+      (m) => m.account_id === a.id && !m.needs_review && m.followers != null
     );
     const latest = followerRows[0];
     const previous = followerRows.find(
@@ -372,13 +368,10 @@ export async function AccountsTab({
     color: LINE_TONE[(i + 1) % LINE_TONE.length],
     points: seriesFrom(
       (metrics ?? [])
-        .filter(
-          (m) =>
-            m.account_id === acc.id &&
-            !m.needs_review &&
-            m.followers != null &&
-            (!scrapedAccounts.has(acc.id) || m.source === "scrape")
-        )
+        // Every reading, screenshot and scrape alike: a follower count is
+        // one number per day whichever way it was read, and the screenshot
+        // months are the only history there is.
+        .filter((m) => m.account_id === acc.id && !m.needs_review && m.followers != null)
         .map((m) => ({
           captured_at: m.captured_at,
           account_id: m.account_id,
