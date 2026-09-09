@@ -210,6 +210,11 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
       note: profiles.error && posts.error ? profiles.error : null,
     });
   }
+  // Accounts Instagram named but would not describe: the profile scraper
+  // gets an id and a display name, no counts, no posts. That is what
+  // Instagram serves a logged-out visitor for an account it has put
+  // behind the login wall — the handle is right, there is nothing to fix.
+  const hidden = new Set<string>();
   for (const r of profiles.rows) {
     const a = byName.get(str(r.username)?.toLowerCase() ?? "");
     if (!a) continue;
@@ -218,6 +223,7 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
     reading.follows = num(r.followsCount);
     reading.postsCount = num(r.postsCount);
     if (r.private === true) reading.note = "private — posts not visible";
+    else if (reading.followers == null && str(r.id)) hidden.add(a.id);
   }
   for (const r of posts.rows) {
     const a = byName.get(str(r.scraped_username)?.toLowerCase() ?? "");
@@ -245,7 +251,9 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
   }
   out.forEach((reading) => {
     if (reading.followers == null && reading.posts.length === 0 && !reading.note) {
-      reading.note = "not in the scrapers' answer — is the handle right?";
+      reading.note = hidden.has(reading.account.id)
+        ? "Instagram is showing this account to logged-in visitors only right now — the handle is right; readings resume when Instagram lifts it"
+        : "not in the scrapers' answer — is the handle right?";
     }
   });
   return Array.from(out.values());
