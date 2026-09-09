@@ -16,6 +16,7 @@ import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 // reads every account off its platform; Facebook can take two minutes.
 export const maxDuration = 300;
 import { AccountsTab } from "@/components/pipeline/accounts-tab";
+import { PERIODS, type PeriodKey } from "@/lib/account-analytics";
 import { dailyDemand } from "@/lib/demand";
 
 // One colour per pipeline stage, used by the stat boxes and the donut alike
@@ -52,10 +53,11 @@ function StatBox({
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ view?: string; tab?: string }>;
+  searchParams?: Promise<{ view?: string; tab?: string; period?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
   const tab = sp.tab === "accounts" ? "accounts" : "pipeline";
+  const period = PERIODS.some((p) => p.key === sp.period) ? (sp.period as PeriodKey) : "30d";
   const supabase = await createClient();
   const {
     data: { user },
@@ -416,6 +418,7 @@ export default async function DashboardPage({
             <AccountsTab
               personaId={personaId}
               canEdit={active.role === "owner" || active.role === "manager"}
+              period={period}
             />
           ) : (
             <PipelineTab

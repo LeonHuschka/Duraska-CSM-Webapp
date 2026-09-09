@@ -488,17 +488,10 @@ export async function scrapeAccounts(
       if (error) notes.push(`@${r.account.handle}: profile not stored — ${error.message}`);
     }
 
-    // The screenshot readings this replaces. They keyed unmatched tiles on
-    // their position in the picture, so one reel was five rows; once the
-    // platform has answered for the account at all — followers count — they
-    // are noise and they go, whether or not any post came back today.
-    if (hasProfile || r.posts.length > 0) {
-      await supabase
-        .from("reel_metrics")
-        .delete()
-        .eq("account_id", r.account.id)
-        .eq("source", "screenshot");
-    }
+    // The screenshot readings from before the scrape stay: they are the
+    // only history an account has for the months before it was first read
+    // here. The dashboard uses them up to the day of the first scrape and
+    // the scrape rows from then on, so the two never meet on one day.
 
     if (r.posts.length === 0) continue;
     await supabase

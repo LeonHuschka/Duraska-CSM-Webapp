@@ -1,10 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
+import { PlatformGlyph, PLATFORM_STYLE } from "@/components/dashboard/pipeline-donut";
 import {
-  PipelineDonut,
-  TrendChart,
-  PlatformGlyph,
-  PLATFORM_STYLE,
-} from "@/components/dashboard/pipeline-donut";
+  PLATFORM_COLOR,
+  accountLabel as displayHandle,
+  computeAnalytics,
+  type PeriodKey,
+} from "@/lib/account-analytics";
+import { ViewsOverTime } from "@/components/pipeline/analytics/views-over-time";
+import { ViewDistribution } from "@/components/pipeline/analytics/view-distribution";
+import { MomentumChart } from "@/components/pipeline/analytics/momentum-chart";
+import { AccountTable } from "@/components/pipeline/analytics/account-table";
+import {
+  EngagementSection,
+  KpiRow,
+  PeriodSelector,
+  PerformanceList,
+} from "@/components/pipeline/analytics/sections";
 import { AccountControls } from "@/components/pipeline/account-controls";
 import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
 import { ReelCover } from "@/components/pipeline/reel-cover";
@@ -23,42 +34,16 @@ import { ReelCover } from "@/components/pipeline/reel-cover";
  * used only for an account the scrape has never reached.
  */
 
-const SHARE_TONE = [
-  "stroke-purple-400",
-  "stroke-emerald-400",
-  "stroke-amber-400",
-  "stroke-blue-400",
-  "stroke-rose-400",
-];
-/** The same palette for lines, which take a text colour. */
-const LINE_TONE = [
-  "text-purple-400",
-  "text-emerald-400",
-  "text-amber-400",
-  "text-blue-400",
-  "text-rose-400",
-];
-
 const nf = new Intl.NumberFormat("de-DE");
-
-/**
- * A handle can be a pasted page URL — the only way to name a Facebook page
- * that has no vanity name. Shown, it should read like a name, not a URL.
- */
-function displayHandle(handle: string): string {
-  if (!/^https?:\/\//i.test(handle)) return `@${handle}`;
-  return handle
-    .replace(/^https?:\/\/(www\.|m\.)?/i, "")
-    .replace(/\/+$/, "")
-    .replace(/^facebook\.com\/people\/([^/]+)\/\d+$/i, "$1 (fb)");
-}
 
 export async function AccountsTab({
   personaId,
   canEdit = false,
+  period = "30d",
 }: {
   personaId: string;
   canEdit?: boolean;
+  period?: PeriodKey;
 }) {
   const supabase = await createClient();
 
@@ -177,7 +162,7 @@ export async function AccountsTab({
     r.request_id ??
     `${r.account_id}|${r.captured_at}|${r.position}`;
 
-  const rows = (accounts ?? []).map((a, i) => {
+  const rows = (accounts ?? []).map((a) => {
     const followerRows = (metrics ?? []).filter(
       (m) => m.account_id === a.id && !m.needs_review && m.followers != null
     );
@@ -269,7 +254,6 @@ export async function AccountsTab({
 
     return {
       ...a,
-      tone: SHARE_TONE[i % SHARE_TONE.length],
       followers: latest?.followers ?? null,
       followerDelta:
         latest?.followers != null && previous?.followers != null
@@ -289,109 +273,34 @@ export async function AccountsTab({
   // and a step the size of a cliff on the day it was first read.
   const posting = rows.filter((r) => Number(r.posts_per_day ?? 0) > 0);
   const parked = rows.filter((r) => Number(r.posts_per_day ?? 0) === 0);
-  const postingIds = new Set(posting.map((r) => r.id));
-  const totalViews = posting.reduce((a, r) => a + r.views, 0);
-  const totalFollowers = posting.reduce((a, r) => a + (r.followers ?? 0), 0);
 
-  // Views only, as asked — no follower stand-in. Until the first reel grid
-  // is read this is empty, and saying so is more use than a donut of
-  // followers wearing a views label.
-  const share = posting
-    .filter((r) => r.views > 0)
-    .map((r) => ({ label: displayHandle(r.handle), value: r.views, color: r.tone }));
-
-  // Each screenshot is a reading of the whole account, not an increment, so
-  // a day's figure is the newest reading per account summed across accounts.
-  // Adding the readings up would count the same followers again every
-  // morning and draw a rising curve out of a flat account.
-  const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
-  const seriesFrom = (
-    entries: { captured_at: string; account_id: string | null; value: number }[],
-    within: "sum" | "last"
-  ) => {
-    const perDay = new Map<string, Map<string, number>>();
-    for (const e of entries) {
-      if (!e.account_id) continue;
-      const day = dayKey(e.captured_at);
-      const accounts = perDay.get(day) ?? new Map<string, number>();
-      accounts.set(
-        e.account_id,
-        within === "sum"
-          ? (accounts.get(e.account_id) ?? 0) + e.value
-          : Math.max(accounts.get(e.account_id) ?? 0, e.value)
-      );
-      perDay.set(day, accounts);
-    }
-    return Array.from(perDay.entries())
-      .map(([day, accounts]) => ({
-        t: new Date(day).getTime(),
-        value: Array.from(accounts.values()).reduce((a, b) => a + b, 0),
-      }))
-      .sort((a, b) => a.t - b.t);
-  };
-
-  // Views over time, counted per reel: the newest reading of each reel on
-  // or before a given day, summed. Counting per screenshot instead would
-  // double a day where two grids arrived and would drop reels that simply
-  // weren't in the latest one.
-  const viewDays = Array.from(
-    new Set(
-      (reels ?? [])
-        .filter((r) => !r.needs_review && r.views != null)
-        .map((r) => dayKey(r.captured_at))
-    )
-  ).sort();
-  // The day each account was first read off its platform. Before it, the
-  // screenshot readings are the history; from it on, only the scrape
-  // counts — the two key reels differently, and mixing them on one day
-  // would count a reel twice.
-  const firstScrape = new Map<string, number>();
-  for (const r of reels ?? []) {
-    if (r.source !== "scrape" || !r.account_id) continue;
-    const at = new Date(r.captured_at).getTime();
-    const seen = firstScrape.get(r.account_id);
-    if (seen === undefined || at < seen) firstScrape.set(r.account_id, at);
-  }
-  const viewSeries = viewDays.map((day) => {
-    const upto = new Date(`${day}T23:59:59.999Z`).getTime();
-    const latest = new Map<string, { at: number; views: number }>();
-    for (const r of reels ?? []) {
-      if (r.needs_review || r.views == null || !r.account_id) continue;
-      if (!postingIds.has(r.account_id)) continue;
-      const at = new Date(r.captured_at).getTime();
-      if (at > upto) continue;
-      const switched = firstScrape.get(r.account_id);
-      if (r.source !== "scrape" && switched !== undefined && upto >= switched) continue;
-      const key = reelKey(r);
-      const seen = latest.get(key);
-      if (!seen || at > seen.at) latest.set(key, { at, views: Number(r.views) });
-    }
-    let total = 0;
-    latest.forEach((v) => (total += v.views));
-    return { t: new Date(day).getTime(), value: total };
-  });
-
-  // One follower line per posting account rather than a sum. Summed, the
-  // first reading of a new account is a step in the total; apart, it is a
-  // new line starting on that day, which is what happened.
-  const followerLines = posting.map((acc, i) => ({
-    key: `followers-${acc.id}`,
-    label: displayHandle(acc.handle),
-    color: LINE_TONE[(i + 1) % LINE_TONE.length],
-    points: seriesFrom(
-      (metrics ?? [])
-        // Every reading, screenshot and scrape alike: a follower count is
-        // one number per day whichever way it was read, and the screenshot
-        // months are the only history there is.
-        .filter((m) => m.account_id === acc.id && !m.needs_review && m.followers != null)
-        .map((m) => ({
-          captured_at: m.captured_at,
-          account_id: m.account_id,
-          value: Number(m.followers),
-        })),
-      "last"
-    ),
-  }));
+  // Everything above the cards is about the period: what the network
+  // gained, who gained it, and who is moving faster than their size.
+  const analytics = computeAnalytics(
+    posting.map((r) => ({ id: r.id, handle: r.handle, platform: r.platform })),
+    reels ?? [],
+    metrics ?? [],
+    period
+  );
+  const hasPeriod = period !== "all";
+  const colorOf = new Map(analytics.accounts.map((a) => [a.id, a.color]));
+  const viewSeries = [
+    { key: "total", label: "Total", color: "#a78bfa", points: analytics.series.total },
+    ...Object.entries(analytics.series.byPlatform)
+      .filter(([, pts]) => pts.some((v) => v > 0))
+      .map(([platform, pts]) => ({
+        key: `platform-${platform}`,
+        label: platform[0].toUpperCase() + platform.slice(1),
+        color: PLATFORM_COLOR[platform] ?? "#9ca3af",
+        points: pts,
+      })),
+    ...analytics.accounts.map((a) => ({
+      key: `account-${a.id}`,
+      label: a.label,
+      color: a.color,
+      points: analytics.series.byAccount[a.id],
+    })),
+  ];
 
   const fmtAgo = (iso: string | null) => {
     if (!iso) return "not read yet";
@@ -405,70 +314,100 @@ export async function AccountsTab({
     <div className="space-y-5">
       {canEdit && <AccountsActionsBar />}
 
-      {/* Summary */}
-      <div className="rounded-2xl border border-border/50 bg-card p-5">
-        <h2 className="text-sm font-medium">Accounts summarized</h2>
-        <div className="mt-4 flex flex-wrap gap-8">
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {nf.format(totalViews)}
-            </p>
-            <p className="text-xs text-muted-foreground">All views</p>
-          </div>
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {nf.format(totalFollowers)}
-            </p>
-            <p className="text-xs text-muted-foreground">All followers</p>
-          </div>
-          {parked.length > 0 && (
-            <p className="self-end text-[11px] text-muted-foreground">
-              Posting accounts only.{" "}
-              {parked.map((r) => displayHandle(r.handle)).join(", ")} (0 reels a day) counted
-              on its own card.
-            </p>
-          )}
-        </div>
-
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div>
-            <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-              All views comparison
-            </h3>
-            {share.length > 0 ? (
-              <PipelineDonut
-                segments={share}
-                centerLabel="views"
-                centerValue={nf.format(totalViews)}
-              />
-            ) : (
-              <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/40 px-4 text-center text-xs text-muted-foreground">
-                No views yet — the daily scrape fills this in.
-              </div>
+      {/* 1 · The network at a glance */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">Accounts</h2>
+          <p className="text-[11px] text-muted-foreground">
+            {analytics.accounts.length} posting account{analytics.accounts.length === 1 ? "" : "s"}
+            {parked.length > 0 && (
+              <>
+                {" · "}
+                {parked.map((r) => displayHandle(r.handle)).join(", ")} parked (0 reels a day), on its own card below
+              </>
             )}
-          </div>
-          <div>
-            <h3 className="mb-3 text-xs font-medium text-muted-foreground">
-              Engagement over time
-            </h3>
-            <TrendChart
-              series={[
-                {
-                  key: "views",
-                  label: "Views",
-                  color: "text-purple-400",
-                  points: viewSeries,
-                },
-                ...followerLines,
-              ]}
-            />
-          </div>
+          </p>
+        </div>
+        <PeriodSelector period={period} />
+      </div>
+      <KpiRow kpis={analytics.kpis} hasPeriod={hasPeriod} />
+      {hasPeriod && analytics.scrapeSince != null && analytics.start < analytics.scrapeSince && (
+        <p className="-mt-2 text-[11px] text-muted-foreground">
+          Views gained are counted since the first scrape on{" "}
+          {new Date(analytics.scrapeSince).toLocaleDateString("de-DE", { day: "numeric", month: "long" })}
+          . The screenshot months before it are drawn dotted in the chart and make no number — a
+          cropped grid is not a reading of the whole account.
+        </p>
+      )}
+
+      {/* 2 · Growth */}
+      <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+        <div className="mb-1 flex items-baseline justify-between">
+          <h3 className="text-sm font-medium">Views over time</h3>
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">absolute · dashed line marks the period start</span>
+        </div>
+        <ViewsOverTime
+          days={analytics.series.days}
+          series={viewSeries}
+          periodStart={analytics.start}
+          seams={analytics.series.seams}
+        />
+      </div>
+
+      {/* 3 · Who and how fast */}
+      <div className="grid gap-5 lg:grid-cols-[2fr_3fr]">
+        <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+          <h3 className="mb-4 text-sm font-medium">View distribution</h3>
+          <ViewDistribution
+            slices={analytics.accounts.map((a) => ({
+              id: a.id,
+              label: a.label,
+              value: a.views,
+              color: colorOf.get(a.id) ?? "#9ca3af",
+            }))}
+          />
+          <p className="mt-3 text-[10px] text-muted-foreground/70">
+            {hasPeriod ? "Views gained in the period" : "All views"}, share per account
+          </p>
+        </div>
+        <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+          <h3 className="mb-1 text-sm font-medium">Account momentum</h3>
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            Size against speed: followers along the bottom, views per follower up the side.
+          </p>
+          <MomentumChart accounts={analytics.accounts} />
         </div>
       </div>
 
-      {/* One card per account */}
+      {/* 4 · Ranking and interaction */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+          <h3 className="mb-4 text-sm font-medium">Account performance</h3>
+          <PerformanceList accounts={analytics.accounts} hasPeriod={hasPeriod} />
+        </div>
+        <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+          <h3 className="mb-1 text-sm font-medium">Engagement</h3>
+          <p className="mb-4 text-[11px] text-muted-foreground">
+            Likes, comments and shares per view — reels {hasPeriod ? "posted in the period" : "on the accounts"}.
+          </p>
+          <EngagementSection accounts={analytics.accounts} hasPeriod={hasPeriod} />
+        </div>
+      </div>
+
+      {/* 5 · The numbers */}
+      <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
+        <h3 className="mb-2 text-sm font-medium">Account table</h3>
+        <AccountTable accounts={analytics.accounts} showPeriod={hasPeriod} />
+      </div>
+
+      {/* 6 · One card per account, with its reels */}
+      <h3 className="pt-2 text-sm font-medium">Per account</h3>
       {rows.map((r) => (
-        <div key={r.id} className="rounded-2xl border border-border/50 bg-card p-5">
+        <div
+          key={r.id}
+          id={`account-${r.id}`}
+          className="scroll-mt-4 rounded-2xl border border-border/50 bg-card p-5"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <span
