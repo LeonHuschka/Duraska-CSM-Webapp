@@ -14,7 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { headers } from "next/headers";
 import { buildAlert } from "@/lib/pipeline-alert";
 import { linkInspoToRequest, markInspoEdited } from "@/lib/content-links";
-import { dailyDemand } from "@/lib/demand";
+import { pipelineCounts } from "@/lib/pipeline-counts";
 
 export async function saveTelegramConfig(data: {
   chat_id: string;
@@ -436,28 +436,7 @@ export async function simulatePipeline() {
     );
 
     // 7 — the alert the cron would post, without posting it
-    const { data: allLinks } = await supabase
-      .from("content_links")
-      .select("status")
-      .eq("persona_id", personaId);
-    const { data: reqs } = await supabase
-      .from("content_requests")
-      .select("status")
-      .eq("persona_id", personaId);
-    const openLinks = (allLinks ?? []).filter((l) => l.status === "open").length;
-    const shotNotUploaded = (allLinks ?? []).filter((l) => l.status === "shot").length;
-    const unedited = (reqs ?? []).filter((r) => r.status === "shooted").length;
-    const readyToPost = (reqs ?? []).filter((r) => r.status === "edited").length;
-    const alert = buildAlert({
-      cfg,
-      openLinks,
-      shotNotUploaded,
-      unedited,
-      readyToPost,
-      runwayDays: Math.floor(
-        readyToPost / Math.max(1, (await dailyDemand(supabase, personaId)).perDay)
-      ),
-    });
+    const alert = buildAlert({ cfg, ...(await pipelineCounts(supabase, personaId)) });
     say(
       "Pipeline alert (not sent)",
       true,

@@ -762,6 +762,9 @@ export type Database = {
           reports_thread_id: number | null;
           last_daily_report_at: string | null;
           last_weekly_report_at: string | null;
+          shoot_notice_message_id: number | null;
+          shoot_notice_started_at: string | null;
+          shoot_notice_last_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -787,6 +790,9 @@ export type Database = {
           reports_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
+          shoot_notice_message_id?: number | null;
+          shoot_notice_started_at?: string | null;
+          shoot_notice_last_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -812,6 +818,9 @@ export type Database = {
           reports_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
+          shoot_notice_message_id?: number | null;
+          shoot_notice_started_at?: string | null;
+          shoot_notice_last_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

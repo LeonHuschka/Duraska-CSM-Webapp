@@ -19,54 +19,56 @@ export type Cfg = {
 };
 
 /**
- * Work out where the pipeline is actually blocked and address the person
- * who can unblock it — a generic "we need content" helps nobody.
+ * Where the pipeline is about to run dry, and who can do something about
+ * it today. The pool is measured in reels, not cuts — four cuts of one
+ * reel are a day of posting — and when it is low the editing queue says
+ * whose turn it is: empty, the model has to shoot; full, the editor has to
+ * catch up; somewhere between, both. Friendly on purpose: these land in a
+ * group chat every morning it applies, and nagging wears off.
  */
 export function buildAlert(x: {
   cfg: Cfg;
+  readyReels: number;
+  readyCuts: number;
+  toEdit: number;
   openLinks: number;
   shotNotUploaded: number;
-  unedited: number;
-  readyToPost: number;
-  runwayDays: number;
 }): string | null {
   const { cfg } = x;
   const at = (u: string | null) => (u ? `@${u.replace(/^@/, "")}` : "");
   const lines: string[] = [];
 
-  const runwayLow = x.readyToPost < cfg.min_ready_to_post;
+  const poolLow = x.readyReels < cfg.min_ready_to_post;
+  const queueFull = x.toEdit >= cfg.max_unedited;
+  const queueEmpty = x.toEdit === 0;
+  const pool =
+    x.readyReels === 1
+      ? `1 reel (${x.readyCuts} ${x.readyCuts === 1 ? "cut" : "cuts"})`
+      : `${x.readyReels} reels (${x.readyCuts} cuts)`;
 
-  // Editing is the bottleneck: plenty shot, little finished.
-  if (runwayLow && x.unedited >= cfg.max_unedited) {
-    lines.push(
-      `✂️ <b>Editing is the bottleneck</b> ${at(cfg.va_username)}`,
-      `${x.unedited} takes waiting, only ${x.readyToPost} ready to post (~${x.runwayDays}d left).`,
-      `Please prioritise cutting today.`
-    );
-  }
-  // Model is the bottleneck: links available, not enough shot.
-  else if (runwayLow && x.openLinks > 0 && x.unedited < cfg.max_unedited) {
-    lines.push(
-      `🎬 <b>We need more raw takes</b> ${at(cfg.model_username)}`,
-      `Only ${x.readyToPost} reels ready to post (~${x.runwayDays}d left) and ${x.openLinks} inspo links are still open.`,
-      `Could you shoot a few today? 💪`
-    );
-  }
-  // Inspo is the bottleneck.
-  else if (x.openLinks < cfg.min_open_links) {
-    lines.push(
-      `🔗 <b>Inspo running low</b> ${at(cfg.manager_username)}`,
-      `Only ${x.openLinks} open links left. Time to drop new references.`
-    );
+  if (poolLow) {
+    lines.push(`☀️ Ready-to-post is getting low — ${pool} left.`);
+    if (queueEmpty || !queueFull) {
+      lines.push(`${at(cfg.model_username)}, try to shoot 10–15 nice reels today pls 💃🏻`);
+    }
+    if (queueFull || !queueEmpty) {
+      lines.push(
+        `${at(cfg.va_username)}, ${x.toEdit} ${x.toEdit === 1 ? "job is" : "jobs are"} waiting for a cut — please catch up with editing 💯`
+      );
+    }
   }
 
-  // Nudge for shot-but-not-uploaded, appended to whatever else we say.
+  if (x.openLinks < cfg.min_open_links) {
+    lines.push(
+      `${lines.length ? "\n" : ""}🔗 Inspo is running low too — ${x.openLinks} open ${x.openLinks === 1 ? "idea" : "ideas"} left. ${at(cfg.manager_username)}, keep the links coming 🙏`
+    );
+  }
+
   if (x.shotNotUploaded >= 3) {
     lines.push(
-      ``,
-      `📤 ${at(cfg.model_username)} ${x.shotNotUploaded} reels are marked as shot but not uploaded yet.`
+      `${lines.length ? "\n" : ""}📤 ${at(cfg.model_username)}, ${x.shotNotUploaded} reels are marked as shot but not uploaded yet — whenever you get a minute 🙌`
     );
   }
 
-  return lines.length > 0 ? lines.join("\n") : null;
+  return lines.length > 0 ? lines.join("\n").trim() : null;
 }

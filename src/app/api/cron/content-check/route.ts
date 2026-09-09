@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { pipelineCounts } from "@/lib/pipeline-counts";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
-import { dailyDemand } from "@/lib/demand";
 import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
 import {
@@ -193,32 +193,9 @@ async function runForPersona(
   }
 
   // ── 2. Pipeline health ──
-  const { data: links } = await supabase
-    .from("content_links")
-    .select("status")
-    .eq("persona_id", cfg.persona_id);
-  const openLinks = (links ?? []).filter((l) => l.status === "open").length;
-  const shotNotUploaded = (links ?? []).filter((l) => l.status === "shot").length;
+  const counts = await pipelineCounts(supabase, cfg.persona_id);
 
-  const { data: reqs } = await supabase
-    .from("content_requests")
-    .select("status")
-    .eq("persona_id", cfg.persona_id);
-  const unedited = (reqs ?? []).filter((r) => r.status === "shooted").length;
-  const readyToPost = (reqs ?? []).filter((r) => r.status === "edited").length;
-
-  // What the accounts actually consume, summed from their own rates.
-  const { perDay } = await dailyDemand(supabase, cfg.persona_id);
-  const runwayDays = Math.floor(readyToPost / Math.max(1, perDay));
-
-  const alert = buildAlert({
-    cfg,
-    openLinks,
-    shotNotUploaded,
-    unedited,
-    readyToPost,
-    runwayDays,
-  });
+  const alert = buildAlert({ cfg, ...counts });
 
   // At most one alert per persona per 12h so the group doesn't get spammed.
   const lastAlert = cfg.last_alert_at ? new Date(cfg.last_alert_at).getTime() : 0;
@@ -244,11 +221,7 @@ async function runForPersona(
     dead,
     deleted,
     detectorTrusted: trustworthy,
-    openLinks,
-    shotNotUploaded,
-    unedited,
-    readyToPost,
-    runwayDays,
+    ...counts,
     alerted: !!alert && !quiet,
   };
 }
