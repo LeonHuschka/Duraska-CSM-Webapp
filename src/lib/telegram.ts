@@ -38,6 +38,55 @@ async function call<T = unknown>(
   }
 }
 
+/**
+ * Post a video file as a video (inline player, not a document). Multipart
+ * upload, which is how a bot sends bytes it holds itself; Telegram takes
+ * up to 50 MB this way.
+ */
+export async function sendVideo(opts: {
+  chat_id: number | string;
+  video: Uint8Array;
+  filename?: string;
+  message_thread_id?: number | null;
+  reply_to_message_id?: number | null;
+  caption?: string;
+}): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
+  const t = token();
+  if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
+  const form = new FormData();
+  form.append("chat_id", String(opts.chat_id));
+  if (opts.message_thread_id) form.append("message_thread_id", String(opts.message_thread_id));
+  if (opts.reply_to_message_id) {
+    form.append("reply_to_message_id", String(opts.reply_to_message_id));
+    // Still post if the link message has since been deleted.
+    form.append("allow_sending_without_reply", "true");
+  }
+  if (opts.caption) form.append("caption", opts.caption);
+  form.append("supports_streaming", "true");
+  form.append("disable_notification", "true");
+  form.append(
+    "video",
+    new Blob([opts.video as BlobPart], { type: "video/mp4" }),
+    opts.filename ?? "video.mp4"
+  );
+  try {
+    const res = await fetch(`${API}/bot${t}/sendVideo`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+    });
+    const json = (await res.json()) as {
+      ok: boolean;
+      result?: { message_id: number };
+      description?: string;
+    };
+    if (!json.ok) return { ok: false, error: json.description ?? "unknown error" };
+    return { ok: true, result: json.result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "network error" };
+  }
+}
+
 export async function sendMessage(opts: {
   chat_id: number | string;
   text: string;

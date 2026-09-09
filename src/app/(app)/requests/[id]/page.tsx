@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RequestDetail } from "@/components/requests/request-detail";
 import type { ContentRequest, ContentAsset } from "@/lib/types/database";
+import { instagramKey } from "@/lib/telegram";
 
 export type AssetWithUrl = ContentAsset & {
   signedUrl: string;
@@ -51,8 +52,25 @@ export default async function RequestDetailPage({
 
   const contentAssets = (assets ?? []) as ContentAsset[];
 
+  // The inspo reel, if the bot kept a copy when its link was posted. Found
+  // through the link tied to this job, or failing that by the post itself,
+  // so a job created by hand with the same link still gets its picture.
+  const inspoKey = request.inspo_link ? instagramKey(request.inspo_link) : null;
+  const { data: inspoLinks } = await supabase
+    .from("content_links")
+    .select("request_id, url_key, video_path")
+    .eq("persona_id", personaId)
+    .not("video_path", "is", null)
+    .or(`request_id.eq.${id}${inspoKey ? `,url_key.eq.${inspoKey}` : ""}`)
+    .limit(2);
+  const inspoVideoPath =
+    inspoLinks?.find((l) => l.request_id === id)?.video_path ??
+    inspoLinks?.[0]?.video_path ??
+    null;
+
   // Generate signed URLs for all assets (originals + thumbnails) in one batch
   const allPaths = new Set<string>();
+  if (inspoVideoPath) allPaths.add(inspoVideoPath);
   for (const a of contentAssets) {
     if (a.file_path) allPaths.add(a.file_path);
     if (a.thumbnail_path) allPaths.add(a.thumbnail_path);
@@ -78,6 +96,7 @@ export default async function RequestDetailPage({
       request={request as ContentRequest}
       assets={assetsWithUrls}
       personaId={personaId}
+      inspoVideoUrl={inspoVideoPath ? (urlByPath[inspoVideoPath] ?? null) : null}
     />
   );
 }

@@ -692,6 +692,11 @@ export type Database = {
           checked_at: string | null;
           unreachable_since: string | null;
           unreachable_runs: number;
+          video_path: string | null;
+          video_size: number | null;
+          video_fetched_at: string | null;
+          video_error: string | null;
+          video_message_id: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -713,6 +718,11 @@ export type Database = {
           checked_at?: string | null;
           unreachable_since?: string | null;
           unreachable_runs?: number;
+          video_path?: string | null;
+          video_size?: number | null;
+          video_fetched_at?: string | null;
+          video_error?: string | null;
+          video_message_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -734,6 +744,11 @@ export type Database = {
           checked_at?: string | null;
           unreachable_since?: string | null;
           unreachable_runs?: number;
+          video_path?: string | null;
+          video_size?: number | null;
+          video_fetched_at?: string | null;
+          video_error?: string | null;
+          video_message_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };

@@ -104,7 +104,7 @@ export async function POST(req: Request) {
     // An edited message carries the same payload as a fresh one. Telegram
     // sends it whenever the sender fixes a typo — or when a client rewrites
     // the message after posting — and dropping it silently loses the link.
-    if (msg) await handleMessage(msg);
+    if (msg) await handleMessage(req, msg);
     else if (update.message_reaction) await handleReaction(update.message_reaction);
   } catch (err) {
     // Always 200 — a non-2xx makes Telegram retry the same update forever.
@@ -181,10 +181,18 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
 
 /** Hand the job to its own invocation and stop caring about the answer. */
 function fireCleanup(req: Request, personaId: string, secret: string) {
+  fire(req, `/api/links/check?persona=${encodeURIComponent(personaId)}`, secret, "cleanup");
+}
+
+/** Fetch the reel behind a freshly posted link and reply with it. */
+function fireVideo(req: Request, linkId: string, secret: string) {
+  fire(req, `/api/links/video?link=${encodeURIComponent(linkId)}`, secret, "video");
+}
+
+function fire(req: Request, path: string, secret: string, what: string) {
   const host = req.headers.get("host");
   if (!host) return;
-  const url =
-    `https://${host}/api/links/check?persona=${encodeURIComponent(personaId)}`;
+  const url = `https://${host}${path}`;
   // waitUntil keeps this function alive past the response long enough for
   // the request to actually leave; without it Vercel may freeze us first.
   waitUntil(
@@ -197,14 +205,14 @@ function fireCleanup(req: Request, personaId: string, secret: string) {
         // middleware answered 307 and the redirect landed on /login, so
         // nothing ran and nothing anywhere said so.
         if (!res.ok) {
-          console.error("[telegram] cleanup answered", res.status, res.url);
+          console.error(`[telegram] ${what} answered`, res.status, res.url);
         }
       })
-      .catch((err) => console.error("[telegram] cleanup call failed", err))
+      .catch((err) => console.error(`[telegram] ${what} call failed`, err))
   );
 }
 
-async function handleMessage(msg: TgMessage) {
+async function handleMessage(req: Request, msg: TgMessage) {
   // A screenshot in an account group → read the stats off it.
   if (msg.photo && msg.photo.length > 0) {
     await handleScreenshot(msg);
@@ -308,6 +316,19 @@ async function handleMessage(msg: TgMessage) {
         .upsert(row, { onConflict: "chat_id,message_id", ignoreDuplicates: true });
     }
   }
+
+  // Now, while the post is still up: fetch the reel and reply with it. In
+  // its own invocation — Telegram is waiting for this one to answer.
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return;
+  const { data: stored } = await supabase
+    .from("content_links")
+    .select("id")
+    .eq("chat_id", msg.chat.id)
+    .eq("message_id", msg.message_id)
+    .is("video_path", null)
+    .is("video_error", null);
+  for (const l of stored ?? []) fireVideo(req, l.id, secret);
 }
 
 /**

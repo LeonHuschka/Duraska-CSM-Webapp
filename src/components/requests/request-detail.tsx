@@ -80,12 +80,15 @@ interface RequestDetailProps {
   request: ContentRequest;
   assets: AssetWithUrl[];
   personaId: string;
+  /** The inspo reel the bot saved when its link was posted, signed. */
+  inspoVideoUrl?: string | null;
 }
 
 export function RequestDetail({
   request,
   assets,
   personaId,
+  inspoVideoUrl = null,
 }: RequestDetailProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -226,6 +229,20 @@ export function RequestDetail({
             </a>
           )}
         </div>
+        {/* The reel itself, kept from the day its link was posted — so the
+            model sees what to shoot even after Instagram took it down. */}
+        {inspoVideoUrl && (
+          <div className="shrink-0 sm:ml-4">
+            <video
+              src={inspoVideoUrl}
+              controls
+              playsInline
+              preload="metadata"
+              className="aspect-[9/16] w-32 rounded-xl border border-border/50 bg-black object-cover sm:w-36"
+            />
+            <p className="mt-1 text-center text-[10px] text-muted-foreground">Inspo reel</p>
+          </div>
+        )}
         <Button
           variant="outline"
           size="sm"
