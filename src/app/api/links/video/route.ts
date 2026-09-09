@@ -3,11 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePersonaId } from "@/lib/persona";
 import { fetchInspoVideo, pendingVideoLinks } from "@/lib/inspo-video";
+import { instagramKey } from "@/lib/telegram";
 
 /**
  * Fetch the reel behind an inspo link and post it into the topic.
  *
  *   ?link=<id>              one link — what the webhook fires after a post
+ *   ?url=<instagram url>    the same, found by the post
  *   ?persona=<id>&limit=N   the backlog, newest first, until time runs out
  *
  * Own invocation on purpose: the webhook has to answer Telegram within
@@ -58,9 +60,20 @@ export async function GET(req: Request) {
 async function run(url: URL, personaId: string | undefined) {
   const supabase = createAdminClient();
   const one = url.searchParams.get("link");
+  const byUrl = url.searchParams.get("url");
+  const key = byUrl ? instagramKey(byUrl) : null;
   const ids = one
     ? [one]
-    : await pendingVideoLinks(supabase, {
+    : key
+      ? ((
+          await supabase
+            .from("content_links")
+            .select("id")
+            .eq("url_key", key)
+            .order("posted_at", { ascending: false })
+            .limit(1)
+        ).data ?? []).map((r) => r.id)
+      : await pendingVideoLinks(supabase, {
         personaId,
         limit: Math.min(200, Number(url.searchParams.get("limit") ?? 20)),
       });
