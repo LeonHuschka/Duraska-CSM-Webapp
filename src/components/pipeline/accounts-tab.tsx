@@ -511,7 +511,7 @@ export async function AccountsTab({
                         className="h-full w-full bg-black object-cover"
                       />
                     ) : t.cover ? (
-                      <ReelCover src={t.cover} href={t.postUrl} fallback="no cut in the vault" />
+                      <ReelCover src={t.cover} href={t.postUrl} fallback="cover not available" />
                     ) : (
                       <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-muted-foreground">
                         no cut in the vault

@@ -94,6 +94,16 @@ type Row = Record<string, unknown>;
 type Sb = SupabaseClient<Database>;
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/** A picture URL the browser can actually fetch; lookaside needs a login. */
+const usable = (u: string | null) => {
+  if (!u) return null;
+  try {
+    return /(^|\.)lookaside\.fbsbx\.com$/i.test(new URL(u).hostname) ? null : u;
+  } catch {
+    return null;
+  }
+};
 const num = (v: unknown) => {
   if (typeof v === "number" && Number.isFinite(v)) return Math.round(v);
   if (typeof v === "string" && /^\d+$/.test(v)) return Number(v);
@@ -290,7 +300,10 @@ async function readFacebook(accounts: Account[], perPage: number): Promise<Accou
       comments: num(r.commentsCount),
       shares: num(r.sharesCount),
       caption: str(r.caption),
-      thumbnailUrl: str(r.thumbnailUrl) ?? str(r.previewImageUrl),
+      // The actor hands back two pictures. `thumbnailUrl` sits behind
+      // lookaside.fbsbx.com, which answers a plain request with a login
+      // page; `previewImageUrl` is on the ordinary CDN and just loads.
+      thumbnailUrl: usable(str(r.previewImageUrl)) ?? usable(str(r.thumbnailUrl)),
     });
   }
   // Pages the cheap actor could not read get the dear one, feed and all.

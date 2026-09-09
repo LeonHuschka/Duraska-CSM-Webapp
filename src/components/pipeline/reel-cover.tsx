@@ -20,10 +20,18 @@ export function ReelCover({
 }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
-    return (
-      <div className="flex h-full items-center justify-center px-2 text-center text-[10px] text-muted-foreground">
-        {fallback}
+    const text = (
+      <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-[10px] text-muted-foreground">
+        <span>{fallback}</span>
+        {href && <span className="underline">open post ↗</span>}
       </div>
+    );
+    return href ? (
+      <a href={href} target="_blank" rel="noreferrer" className="block h-full w-full">
+        {text}
+      </a>
+    ) : (
+      text
     );
   }
   const img = (

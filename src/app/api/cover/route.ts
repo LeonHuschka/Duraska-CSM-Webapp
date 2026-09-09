@@ -32,6 +32,11 @@ export async function GET(req: Request) {
   if (target.protocol !== "https:" || !ALLOWED.some((re) => re.test(target.hostname))) {
     return new NextResponse("host not allowed", { status: 403 });
   }
+  // lookaside serves a login page to anyone without a session; asking it
+  // only makes the tile wait fifteen seconds for the same answer.
+  if (/(^|\.)lookaside\.fbsbx\.com$/i.test(target.hostname)) {
+    return new NextResponse("needs a session", { status: 502 });
+  }
 
   const upstream = await fetch(target, {
     headers: {
