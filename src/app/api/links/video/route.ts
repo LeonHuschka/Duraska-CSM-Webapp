@@ -78,11 +78,14 @@ async function run(url: URL, personaId: string | undefined) {
         limit: Math.min(200, Number(url.searchParams.get("limit") ?? 20)),
       });
 
+  // Notes travel with a single link only — they are what the sender wrote
+  // beside it, and a backlog run has no such thing.
+  const note = one ? url.searchParams.get("note") : null;
   const deadline = Date.now() + 270_000;
   const results = [];
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    results.push(await fetchInspoVideo(supabase, id));
+    results.push(await fetchInspoVideo(supabase, id, note));
   }
   return NextResponse.json({ ok: true, done: results.length, of: ids.length, results });
 }

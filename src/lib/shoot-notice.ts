@@ -44,6 +44,7 @@ export async function announceShoot(requestId: string) {
       : new Date(now - 60_000).toISOString();
     const count = await countTakes(supabase, req.persona_id, startedAt);
     const text = notice(cfg.model_username, cfg.va_username, count);
+    if (count.files === 0) return;
 
     if (continuing) {
       await editMessageText({
@@ -100,26 +101,37 @@ async function countTakes(
   supabase: ReturnType<typeof createAdminClient>,
   personaId: string,
   since: string
-): Promise<number> {
+): Promise<{ files: number; reels: number }> {
   const { data: reqs } = await supabase
     .from("content_requests")
     .select("id")
     .eq("persona_id", personaId);
   const ids = (reqs ?? []).map((r) => r.id);
-  if (ids.length === 0) return 0;
-  const { count } = await supabase
+  if (ids.length === 0) return { files: 0, reels: 0 };
+  const { data } = await supabase
     .from("content_assets")
-    .select("id", { count: "exact", head: true })
+    .select("request_id")
     .in("request_id", ids)
     .eq("stage", "raw")
     .is("deleted_at", null)
     .gte("uploaded_at", since);
-  return count ?? 0;
+  const rows = data ?? [];
+  return { files: rows.length, reels: new Set(rows.map((r) => r.request_id)).size };
 }
 
-function notice(model: string | null, va: string | null, count: number): string {
+/** "2 reels · 5 video files" — a reel is a job, a file is one take of it. */
+function notice(
+  model: string | null,
+  va: string | null,
+  count: { files: number; reels: number }
+): string {
   const at = (u: string | null) => (u ? `@${u.replace(/^@/, "")}` : null);
   const who = at(model) ?? "the model";
-  const n = Math.max(1, count);
-  return `🎬 ${at(va) ?? "fyi"} — ${who} shot new content (${n} ${n === 1 ? "take" : "takes"}) ✨ ready for cutting whenever you are`;
+  const reels = Math.max(1, count.reels);
+  const files = Math.max(1, count.files);
+  return (
+    `🎬 ${at(va) ?? "fyi"} — ${who} shot new content: ` +
+    `${reels} ${reels === 1 ? "reel" : "reels"} · ${files} video ${files === 1 ? "file" : "files"} ✨ ` +
+    `ready for cutting whenever you are`
+  );
 }

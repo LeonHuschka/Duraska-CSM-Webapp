@@ -184,9 +184,11 @@ function fireCleanup(req: Request, personaId: string, secret: string) {
   fire(req, `/api/links/check?persona=${encodeURIComponent(personaId)}`, secret, "cleanup");
 }
 
-/** Fetch the reel behind a freshly posted link and reply with it. */
-function fireVideo(req: Request, linkId: string, secret: string) {
-  fire(req, `/api/links/video?link=${encodeURIComponent(linkId)}`, secret, "video");
+/** Fetch the reel behind a freshly posted link and repost it as a video. */
+function fireVideo(req: Request, linkId: string, note: string, secret: string) {
+  const q = new URLSearchParams({ link: linkId });
+  if (note) q.set("note", note.slice(0, 900));
+  fire(req, `/api/links/video?${q}`, secret, "video");
 }
 
 function fire(req: Request, path: string, secret: string, what: string) {
@@ -328,7 +330,12 @@ async function handleMessage(req: Request, msg: TgMessage) {
     .eq("message_id", msg.message_id)
     .is("video_path", null)
     .is("video_error", null);
-  for (const l of stored ?? []) fireVideo(req, l.id, secret);
+  // Whatever was written around the links is the note for the video.
+  const note = links
+    .reduce((t, u) => t.split(u).join(" "), text)
+    .replace(/\s+/g, " ")
+    .trim();
+  for (const l of stored ?? []) fireVideo(req, l.id, note, secret);
 }
 
 /**

@@ -50,6 +50,7 @@ export async function sendVideo(opts: {
   message_thread_id?: number | null;
   reply_to_message_id?: number | null;
   caption?: string;
+  parse_mode?: "HTML" | "Markdown";
 }): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
   const t = token();
   if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
@@ -61,7 +62,10 @@ export async function sendVideo(opts: {
     // Still post if the link message has since been deleted.
     form.append("allow_sending_without_reply", "true");
   }
-  if (opts.caption) form.append("caption", opts.caption);
+  if (opts.caption) {
+    form.append("caption", opts.caption);
+    if (opts.parse_mode) form.append("parse_mode", opts.parse_mode);
+  }
   form.append("supports_streaming", "true");
   form.append("disable_notification", "true");
   form.append(

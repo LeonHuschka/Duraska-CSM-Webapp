@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
-import { sendVideo } from "@/lib/telegram";
+import { deleteMessage, sendVideo } from "@/lib/telegram";
 
 /**
  * Keep the inspo reel, not just its link.
@@ -10,9 +10,10 @@ import { sendVideo } from "@/lib/telegram";
  * Instagram takes posts down, age-gates them, hides them from logged-out
  * visitors — and the link is then a dead end for the model days later.
  * So the moment a link lands, the reel is fetched, stored under the
- * persona in our own bucket, and posted back into the topic as a video
- * reply she can play without leaving Telegram. The stored copy is what the
- * request page shows next to the job.
+ * persona in our own bucket, and posted into the topic as the bot's own
+ * message: the video, the link and any notes under it, in place of the
+ * message that carried only the link. The stored copy is what the request
+ * page shows next to the job.
  *
  * Fetching goes through an Apify actor that resolves a post to its CDN
  * video URL (about 0.2 cent a link); the bytes come straight from the CDN.
@@ -28,7 +29,12 @@ type Db = SupabaseClient<Database>;
 
 export type VideoResult = { linkId: string; ok: boolean; note: string };
 
-export async function fetchInspoVideo(supabase: Db, linkId: string): Promise<VideoResult> {
+export async function fetchInspoVideo(
+  supabase: Db,
+  linkId: string,
+  /** What the person wrote next to the link, if anything. */
+  note?: string | null
+): Promise<VideoResult> {
   const { data: link } = await supabase
     .from("content_links")
     .select(
@@ -81,7 +87,10 @@ export async function fetchInspoVideo(supabase: Db, linkId: string): Promise<Vid
       .eq("id", linkId);
   }
 
-  // Into the topic, as a reply to the link, so it sits where she looks.
+  // Into the topic as the bot's own message: the video with the link and
+  // any notes under it, in place of the message that only had the link.
+  // The link row moves to the new message id, because that is the message
+  // the model will react to from now on.
   if (link.video_message_id == null) {
     if (!bytes) {
       const { data: blob } = await supabase.storage.from("content-assets").download(path);
@@ -91,15 +100,21 @@ export async function fetchInspoVideo(supabase: Db, linkId: string): Promise<Vid
     const sent = await sendVideo({
       chat_id: link.chat_id,
       message_thread_id: link.message_thread_id,
-      reply_to_message_id: Number(link.message_id),
       video: bytes,
       filename: "inspo.mp4",
+      caption: caption(link.url, note ?? null),
+      parse_mode: "HTML",
     });
-    if (!sent.ok) return fail(`telegram: ${sent.error}`);
+    if (!sent.ok || !sent.result) return fail(`telegram: ${sent.error ?? "no message id"}`);
+    const newId = sent.result.message_id;
     await supabase
       .from("content_links")
-      .update({ video_message_id: sent.result?.message_id ?? null, video_error: null })
+      .update({ message_id: newId, video_message_id: newId, video_error: null })
       .eq("id", linkId);
+    // The original had nothing the new message does not. Best effort —
+    // Telegram refuses to delete what is older than two days.
+    const gone = await deleteMessage({ chat_id: link.chat_id, message_id: Number(link.message_id) });
+    if (!gone.ok) console.warn("[inspo-video] original not deleted:", gone.error);
   }
 
   return { linkId, ok: true, note: "stored and posted" };
@@ -125,6 +140,15 @@ export async function pendingVideoLinks(
   if (opts.personaId) q = q.eq("persona_id", opts.personaId);
   const { data } = await q;
   return (data ?? []).map((r) => r.id);
+}
+
+function caption(url: string, note: string | null): string {
+  const esc = (t: string) =>
+    t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return [
+    `🔗 <b>Link:</b> ${esc(url)}`,
+    `📝 <b>Notes:</b> ${note?.trim() ? esc(note.trim()) : "—"}`,
+  ].join("\n");
 }
 
 async function resolveVideoUrl(
