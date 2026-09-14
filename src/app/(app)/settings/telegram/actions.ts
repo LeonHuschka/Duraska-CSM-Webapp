@@ -20,6 +20,9 @@ export async function saveTelegramConfig(data: {
   chat_id: string;
   requests_thread_id: string;
   talk_thread_id: string;
+  winners_thread_id: string;
+  viral_lift: string;
+  viral_min_views: string;
   model_username: string;
   va_username: string;
   manager_username: string;
@@ -55,6 +58,9 @@ export async function saveTelegramConfig(data: {
       chat_id: num(data.chat_id),
       requests_thread_id: num(data.requests_thread_id),
       talk_thread_id: num(data.talk_thread_id),
+      winners_thread_id: num(data.winners_thread_id),
+      viral_lift: num(data.viral_lift) ?? 5,
+      viral_min_views: num(data.viral_min_views) ?? 10000,
       model_username: str(data.model_username),
       va_username: str(data.va_username),
       manager_username: str(data.manager_username),

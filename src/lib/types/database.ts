@@ -754,6 +754,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      winners: {
+        Row: {
+          id: string;
+          persona_id: string;
+          account_id: string | null;
+          shortcode: string;
+          request_id: string | null;
+          post_url: string | null;
+          title: string | null;
+          views: number;
+          lift: number | null;
+          message_id: number | null;
+          notified_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          account_id?: string | null;
+          shortcode: string;
+          request_id?: string | null;
+          post_url?: string | null;
+          title?: string | null;
+          views: number;
+          lift?: number | null;
+          message_id?: number | null;
+          notified_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          account_id?: string | null;
+          shortcode?: string;
+          request_id?: string | null;
+          post_url?: string | null;
+          title?: string | null;
+          views?: number;
+          lift?: number | null;
+          message_id?: number | null;
+          notified_at?: string;
+        };
+        Relationships: [];
+      };
       telegram_config: {
         Row: {
           persona_id: string;
@@ -780,6 +822,9 @@ export type Database = {
           shoot_notice_message_id: number | null;
           shoot_notice_started_at: string | null;
           shoot_notice_last_at: string | null;
+          winners_thread_id: number | null;
+          viral_lift: number;
+          viral_min_views: number;
           created_at: string;
           updated_at: string;
         };
@@ -808,6 +853,9 @@ export type Database = {
           shoot_notice_message_id?: number | null;
           shoot_notice_started_at?: string | null;
           shoot_notice_last_at?: string | null;
+          winners_thread_id?: number | null;
+          viral_lift?: number;
+          viral_min_views?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -836,6 +884,9 @@ export type Database = {
           shoot_notice_message_id?: number | null;
           shoot_notice_started_at?: string | null;
           shoot_notice_last_at?: string | null;
+          winners_thread_id?: number | null;
+          viral_lift?: number;
+          viral_min_views?: number;
           created_at?: string;
           updated_at?: string;
         };

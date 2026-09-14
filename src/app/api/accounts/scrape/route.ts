@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePersonaId } from "@/lib/persona";
 import { scrapeAccounts } from "@/lib/account-scrape";
+import { announceWinners } from "@/lib/winners";
 
 /**
  * Read every posting account now, as the person who is logged in.
@@ -43,6 +44,8 @@ export async function GET(req: Request) {
   // ?full=1 reads every reel an account has, for the first read of a new
   // account or to backfill the list; the daily run takes the newest only.
   const full = new URL(req.url).searchParams.get("full") === "1";
-  const summary = await scrapeAccounts(createAdminClient(), personaId, { full });
-  return NextResponse.json({ ok: true, summary });
+  const admin = createAdminClient();
+  const summary = await scrapeAccounts(admin, personaId, { full });
+  const winners = await announceWinners(admin, personaId);
+  return NextResponse.json({ ok: true, summary, winners });
 }

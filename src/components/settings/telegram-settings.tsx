@@ -58,6 +58,9 @@ export function TelegramSettings({
     chat_id: config?.chat_id?.toString() ?? "",
     requests_thread_id: config?.requests_thread_id?.toString() ?? "",
     talk_thread_id: config?.talk_thread_id?.toString() ?? "",
+    winners_thread_id: config?.winners_thread_id?.toString() ?? "",
+    viral_lift: config?.viral_lift?.toString() ?? "5",
+    viral_min_views: config?.viral_min_views?.toString() ?? "10000",
     model_username: config?.model_username ?? "",
     va_username: config?.va_username ?? "",
     manager_username: config?.manager_username ?? "",
@@ -375,6 +378,16 @@ export function TelegramSettings({
           <Field label="Requests topic ID" value={f.requests_thread_id} onChange={(v) => set("requests_thread_id", v)} placeholder="e.g. 12" />
           <Field label="Talk topic ID" value={f.talk_thread_id} onChange={(v) => set("talk_thread_id", v)} placeholder="e.g. 4" />
         </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Winners topic ID" value={f.winners_thread_id} onChange={(v) => set("winners_thread_id", v)} placeholder="e.g. 225" />
+          <Field label="Viral from × account median" type="number" value={f.viral_lift} onChange={(v) => set("viral_lift", v)} />
+          <Field label="Viral from plays" type="number" value={f.viral_min_views} onChange={(v) => set("viral_min_views", v)} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          After each daily scrape, a reel on a posting account with at least this many plays
+          and this many times the account&apos;s median is posted once into the winners topic
+          with the model tagged.
+        </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Model @" value={f.model_username} onChange={(v) => set("model_username", v)} placeholder="username" />
           <Field label="VA @" value={f.va_username} onChange={(v) => set("va_username", v)} placeholder="username" />

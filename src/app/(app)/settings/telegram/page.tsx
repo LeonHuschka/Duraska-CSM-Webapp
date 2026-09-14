@@ -6,6 +6,9 @@ export interface TelegramConfigRow {
   chat_id: number | null;
   requests_thread_id: number | null;
   talk_thread_id: number | null;
+  winners_thread_id: number | null;
+  viral_lift: number;
+  viral_min_views: number;
   model_username: string | null;
   va_username: string | null;
   manager_username: string | null;
@@ -26,7 +29,7 @@ export default async function TelegramSettingsPage() {
   const { data } = await supabase
     .from("telegram_config")
     .select(
-      "chat_id, requests_thread_id, talk_thread_id, model_username, va_username, manager_username, min_ready_to_post, min_open_links, max_unedited, weekly_reel_target, screenshot_senders"
+      "chat_id, requests_thread_id, talk_thread_id, winners_thread_id, viral_lift, viral_min_views, model_username, va_username, manager_username, min_ready_to_post, min_open_links, max_unedited, weekly_reel_target, screenshot_senders"
     )
     .eq("persona_id", personaId)
     .maybeSingle();

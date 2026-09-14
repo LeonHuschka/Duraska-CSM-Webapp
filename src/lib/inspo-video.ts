@@ -59,16 +59,8 @@ export async function fetchInspoVideo(
     const resolved = await resolveVideoUrl(link.url);
     if (!resolved.ok) return fail(resolved.note);
 
-    const res = await fetch(resolved.url, {
-      headers: { "user-agent": UA, accept: "video/mp4,video/*;q=0.9,*/*;q=0.5" },
-      signal: AbortSignal.timeout(60_000),
-    }).catch(() => null);
-    if (!res || !res.ok) return fail(`download failed (${res?.status ?? "no answer"})`);
-    const declared = Number(res.headers.get("content-length") ?? 0);
-    if (declared > MAX_BYTES) return fail(`too large for Telegram (${Math.round(declared / 1e6)} MB)`);
-    bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > MAX_BYTES) return fail(`too large for Telegram (${Math.round(bytes.byteLength / 1e6)} MB)`);
-    if (bytes.byteLength < 10_000) return fail("download was not a video");
+    bytes = await downloadVideo(resolved.url);
+    if (!bytes) return fail("download failed, or not a video Telegram would take");
 
     path = `personas/${link.persona_id}/inspo/${linkId}.mp4`;
     const { error: upErr } = await supabase.storage
@@ -151,7 +143,23 @@ function caption(url: string, note: string | null): string {
   ].join("\n");
 }
 
-async function resolveVideoUrl(
+/**
+ * The bytes of a video on Meta's CDN, or null when it is not there, not a
+ * video, or too big for Telegram to accept from a bot.
+ */
+export async function downloadVideo(url: string): Promise<Uint8Array | null> {
+  const res = await fetch(url, {
+    headers: { "user-agent": UA, accept: "video/mp4,video/*;q=0.9,*/*;q=0.5" },
+    signal: AbortSignal.timeout(60_000),
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  if (Number(res.headers.get("content-length") ?? 0) > MAX_BYTES) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_BYTES || bytes.byteLength < 10_000) return null;
+  return bytes;
+}
+
+export async function resolveVideoUrl(
   postUrl: string
 ): Promise<{ ok: true; url: string } | { ok: false; note: string }> {
   const token = process.env.APIFY_TOKEN;

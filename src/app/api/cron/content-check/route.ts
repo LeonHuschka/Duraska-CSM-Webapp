@@ -4,6 +4,7 @@ import { pipelineCounts } from "@/lib/pipeline-counts";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
+import { announceWinners } from "@/lib/winners";
 import {
   checkInstagramAlive,
   deleteMessage,
@@ -86,6 +87,11 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await scrapeAccounts(supabase, cfg.persona_id)] as const)
   );
   summary.scrape = Object.fromEntries(scrape);
+  // With today's plays in, the reels that took off — reported once each.
+  const winners = await Promise.all(
+    (configs ?? []).map(async (cfg) => [cfg.persona_id, await announceWinners(supabase, cfg.persona_id)] as const)
+  );
+  summary.winners = Object.fromEntries(winners);
   if (only === "scrape") return NextResponse.json({ ok: true, summary });
 
   for (const cfg of configs ?? []) {
