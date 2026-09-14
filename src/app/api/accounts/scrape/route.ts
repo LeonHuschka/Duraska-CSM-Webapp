@@ -43,8 +43,16 @@ export async function GET(req: Request) {
 
   // ?full=1 reads every reel an account has, for the first read of a new
   // account or to backfill the list; the daily run takes the newest only.
-  const full = new URL(req.url).searchParams.get("full") === "1";
+  const params = new URL(req.url).searchParams;
   const admin = createAdminClient();
+  // ?winners=all reports every reel that ever qualified, oldest first, and
+  // scrapes nothing — the one-time catch-up for the months before winners
+  // were watched daily.
+  if (params.get("winners") === "all") {
+    const winners = await announceWinners(admin, personaId, { includeOld: true });
+    return NextResponse.json({ ok: true, winners });
+  }
+  const full = params.get("full") === "1";
   const summary = await scrapeAccounts(admin, personaId, { full });
   const winners = await announceWinners(admin, personaId);
   return NextResponse.json({ ok: true, summary, winners });

@@ -25,7 +25,14 @@ type Db = SupabaseClient<Database>;
 
 export type WinnersSummary = { found: number; announced: number; notes: string[] };
 
-export async function announceWinners(supabase: Db, personaId: string): Promise<WinnersSummary> {
+export async function announceWinners(
+  supabase: Db,
+  personaId: string,
+  opts: {
+    /** Once, for the months before this existed: report old reels too. */
+    includeOld?: boolean;
+  } = {}
+): Promise<WinnersSummary> {
   const out: WinnersSummary = { found: 0, announced: 0, notes: [] };
   const { data: cfg } = await supabase
     .from("telegram_config")
@@ -89,12 +96,16 @@ export async function announceWinners(supabase: Db, personaId: string): Promise<
       const v = Number(r.views);
       if (v < minViews || median <= 0 || v < lift * median) continue;
       if (seen.has(r.shortcode!)) continue;
-      if (r.posted_at && new Date(r.posted_at).getTime() < freshSince) continue;
+      if (!opts.includeOld && r.posted_at && new Date(r.posted_at).getTime() < freshSince) continue;
       candidates.push({ reel: r, median, lift: v / median });
     }
   });
   out.found = candidates.length;
-  candidates.sort((a, b) => Number(b.reel.views) - Number(a.reel.views));
+  candidates.sort((a, b) =>
+    opts.includeOld
+      ? (a.reel.posted_at ?? "").localeCompare(b.reel.posted_at ?? "")
+      : Number(b.reel.views) - Number(a.reel.views)
+  );
 
   // Titles for the reels the app knows.
   const requestIds = Array.from(
@@ -118,6 +129,7 @@ export async function announceWinners(supabase: Db, personaId: string): Promise<
       lift: c.lift,
       url: c.reel.post_url,
       model: cfg.model_username,
+      postedAt: opts.includeOld ? c.reel.posted_at : null,
     });
 
     // The reel itself, if the platform will hand it over; the text alone
@@ -178,13 +190,17 @@ function message(x: {
   lift: number;
   url: string | null;
   model: string | null;
+  postedAt?: string | null;
 }): string {
   const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const nf = new Intl.NumberFormat("de-DE");
   const at = x.model ? `@${x.model.replace(/^@/, "")}` : "";
+  const when = x.postedAt
+    ? ` · posted ${new Date(x.postedAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })}`
+    : "";
   const lines = [
     `🔥 <b>Winner on ${esc(x.account)}</b>`,
-    `${esc(x.title)} · ${nf.format(x.views)} plays · ${x.lift.toFixed(0)}× the account's usual reach`,
+    `${esc(x.title)} · ${nf.format(x.views)} plays · ${x.lift.toFixed(0)}× the account's usual reach${when}`,
     ``,
     `${at ? `${at}, ` : ""}this one hit — please shoot a fresh version of it 💃🏻`,
   ];
