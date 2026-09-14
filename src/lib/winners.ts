@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { accountLabel } from "@/lib/account-analytics";
 import { downloadVideo, resolveVideoUrl } from "@/lib/inspo-video";
-import { sendMessage, sendVideo } from "@/lib/telegram";
+import { sendMessage, sendPhoto, sendVideo } from "@/lib/telegram";
 
 /**
  * Winners: a reel on one of our accounts that took off.
@@ -53,7 +53,7 @@ export async function announceWinners(
       .eq("persona_id", personaId),
     supabase
       .from("reel_metrics")
-      .select("account_id, shortcode, views, captured_at, posted_at, post_url, caption, request_id")
+      .select("account_id, shortcode, views, captured_at, posted_at, post_url, caption, request_id, tile_path")
       .eq("persona_id", personaId)
       .eq("source", "scrape")
       .eq("needs_review", false)
@@ -132,10 +132,13 @@ export async function announceWinners(
       postedAt: opts.includeOld ? c.reel.posted_at : null,
     });
 
-    // The reel itself, if the platform will hand it over; the text alone
-    // otherwise — a winner must not go unreported over a download.
+    // The reel itself when the platform hands it over — Instagram does,
+    // through the same resolver as the inspo links. Facebook does not, so
+    // a Facebook winner carries its cover instead. Text alone as the last
+    // resort: a winner must not go unreported over a download.
     let messageId: number | null = null;
-    if (c.reel.post_url) {
+    const isInstagram = account.platform === "instagram";
+    if (c.reel.post_url && isInstagram) {
       const resolved = await resolveVideoUrl(c.reel.post_url);
       const bytes = resolved.ok ? await downloadVideo(resolved.url) : null;
       if (bytes) {
@@ -151,6 +154,19 @@ export async function announceWinners(
         else out.notes.push(`${c.reel.shortcode}: video not sent — ${sent.error}`);
       } else {
         out.notes.push(`${c.reel.shortcode}: video not fetched — ${resolved.ok ? "download failed" : resolved.note}`);
+      }
+    }
+    if (messageId == null && c.reel.tile_path && /^https:\/\//.test(c.reel.tile_path)) {
+      const cover = await downloadImage(c.reel.tile_path);
+      if (cover) {
+        const sent = await sendPhoto({
+          chat_id: cfg.chat_id,
+          message_thread_id: cfg.winners_thread_id,
+          photo: cover,
+          caption: text,
+          parse_mode: "HTML",
+        });
+        if (sent.ok) messageId = sent.result?.message_id ?? null;
       }
     }
     if (messageId == null) {
@@ -181,6 +197,20 @@ export async function announceWinners(
     else out.announced++;
   }
   return out;
+}
+
+async function downloadImage(url: string): Promise<Uint8Array | null> {
+  const res = await fetch(url, {
+    headers: {
+      "user-agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      accept: "image/avif,image/webp,image/*,*/*;q=0.8",
+    },
+    signal: AbortSignal.timeout(20_000),
+  }).catch(() => null);
+  if (!res || !res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return bytes.byteLength > 1_000 && bytes.byteLength < 10 * 1024 * 1024 ? bytes : null;
 }
 
 function message(x: {
