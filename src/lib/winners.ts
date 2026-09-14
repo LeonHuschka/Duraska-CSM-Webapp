@@ -140,7 +140,7 @@ export async function announceWinners(
       (c.reel.request_id && titles.get(c.reel.request_id)) ||
       (c.reel.caption ? `"${c.reel.caption.slice(0, 60)}${c.reel.caption.length > 60 ? "…" : ""}"` : "this reel");
     const text = message({
-      account: accountLabel(account.handle),
+      account: `${accountLabel(account.handle)} (${platformName(account.platform)})`,
       title,
       views: Number(c.reel.views),
       lift: c.lift,
@@ -229,6 +229,10 @@ async function downloadImage(url: string): Promise<Uint8Array | null> {
   if (!res || !res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) return null;
   const bytes = new Uint8Array(await res.arrayBuffer());
   return bytes.byteLength > 1_000 && bytes.byteLength < 10 * 1024 * 1024 ? bytes : null;
+}
+
+function platformName(p: string): string {
+  return p === "instagram" ? "IG" : p === "facebook" ? "Facebook" : p;
 }
 
 function message(x: {
