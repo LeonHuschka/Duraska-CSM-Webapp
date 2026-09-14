@@ -159,6 +159,38 @@ export async function downloadVideo(url: string): Promise<Uint8Array | null> {
   return bytes;
 }
 
+/**
+ * The same for a Facebook reel or video, through an actor that reads
+ * Facebook (about half a cent a video). Only winners need this — inspo
+ * links are Instagram.
+ */
+const FB_ACTOR = "apple_yang~facebook-video-audio-downloader";
+
+export async function resolveFacebookVideoUrl(
+  postUrl: string
+): Promise<{ ok: true; url: string } | { ok: false; note: string }> {
+  const token = process.env.APIFY_TOKEN;
+  if (!token) return { ok: false, note: "APIFY_TOKEN not set" };
+  const res = await fetch(
+    `https://api.apify.com/v2/acts/${FB_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=${ACTOR_TIMEOUT_S}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ videoUrls: [postUrl] }),
+      signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
+    }
+  ).catch(() => null);
+  if (!res) return { ok: false, note: "resolver unreachable" };
+  const items = (await res.json().catch(() => null)) as Record<string, unknown>[] | null;
+  if (!res.ok || !Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
+  const item = items[0];
+  if (!item) return { ok: false, note: "video not readable" };
+  if (typeof item.errMsg === "string" && item.errMsg) return { ok: false, note: item.errMsg.slice(0, 80) };
+  const url = typeof item.videoUrl === "string" && item.videoUrl ? item.videoUrl : null;
+  if (!url) return { ok: false, note: "no video url in the answer" };
+  return { ok: true, url };
+}
+
 export async function resolveVideoUrl(
   postUrl: string
 ): Promise<{ ok: true; url: string } | { ok: false; note: string }> {

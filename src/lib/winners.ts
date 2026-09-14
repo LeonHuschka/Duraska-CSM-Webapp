@@ -2,8 +2,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { accountLabel } from "@/lib/account-analytics";
-import { downloadVideo, resolveVideoUrl } from "@/lib/inspo-video";
-import { sendMessage, sendPhoto, sendVideo } from "@/lib/telegram";
+import { downloadVideo, resolveFacebookVideoUrl, resolveVideoUrl } from "@/lib/inspo-video";
+import { deleteMessage, sendMessage, sendPhoto, sendVideo } from "@/lib/telegram";
 
 /**
  * Winners: a reel on one of our accounts that took off.
@@ -31,6 +31,8 @@ export async function announceWinners(
   opts: {
     /** Once, for the months before this existed: report old reels too. */
     includeOld?: boolean;
+    /** Take back the winners on this platform and report them again — for the ones that went out without their video. */
+    redoPlatform?: string;
   } = {}
 ): Promise<WinnersSummary> {
   const out: WinnersSummary = { found: 0, announced: 0, notes: [] };
@@ -42,6 +44,21 @@ export async function announceWinners(
   if (!cfg?.chat_id || cfg.winners_thread_id == null) {
     out.notes.push("no winners topic configured");
     return out;
+  }
+
+  if (opts.redoPlatform) {
+    const { data: redo } = await supabase
+      .from("winners")
+      .select("id, message_id, account_id, accounts!inner(platform)")
+      .eq("persona_id", personaId)
+      .eq("accounts.platform", opts.redoPlatform);
+    for (const w of redo ?? []) {
+      if (w.message_id != null) {
+        await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(w.message_id) });
+      }
+      await supabase.from("winners").delete().eq("id", w.id);
+    }
+    out.notes.push(`${redo?.length ?? 0} ${opts.redoPlatform} winners taken back`);
   }
   const lift = Number(cfg.viral_lift ?? 5);
   const minViews = Number(cfg.viral_min_views ?? 10_000);
@@ -132,14 +149,15 @@ export async function announceWinners(
       postedAt: opts.includeOld ? c.reel.posted_at : null,
     });
 
-    // The reel itself when the platform hands it over — Instagram does,
-    // through the same resolver as the inspo links. Facebook does not, so
-    // a Facebook winner carries its cover instead. Text alone as the last
-    // resort: a winner must not go unreported over a download.
+    // The reel itself: Instagram through the inspo-link resolver, Facebook
+    // through its own. The cover when the video is out of reach, text alone
+    // as the last resort — a winner must not go unreported over a download.
     let messageId: number | null = null;
-    const isInstagram = account.platform === "instagram";
-    if (c.reel.post_url && isInstagram) {
-      const resolved = await resolveVideoUrl(c.reel.post_url);
+    if (c.reel.post_url) {
+      const resolved =
+        account.platform === "facebook"
+          ? await resolveFacebookVideoUrl(c.reel.post_url)
+          : await resolveVideoUrl(c.reel.post_url);
       const bytes = resolved.ok ? await downloadVideo(resolved.url) : null;
       if (bytes) {
         const sent = await sendVideo({

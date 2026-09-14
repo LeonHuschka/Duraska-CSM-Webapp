@@ -48,8 +48,12 @@ export async function GET(req: Request) {
   // ?winners=all reports every reel that ever qualified, oldest first, and
   // scrapes nothing — the one-time catch-up for the months before winners
   // were watched daily.
-  if (params.get("winners") === "all") {
-    const winners = await announceWinners(admin, personaId, { includeOld: true });
+  const mode = params.get("winners");
+  if (mode === "all" || mode?.startsWith("redo-")) {
+    const winners = await announceWinners(admin, personaId, {
+      includeOld: true,
+      redoPlatform: mode.startsWith("redo-") ? mode.slice(5) : undefined,
+    });
     return NextResponse.json({ ok: true, winners });
   }
   const full = params.get("full") === "1";
