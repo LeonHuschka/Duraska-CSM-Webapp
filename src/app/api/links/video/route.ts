@@ -59,6 +59,25 @@ export async function GET(req: Request) {
 
 async function run(url: URL, personaId: string | undefined) {
   const supabase = createAdminClient();
+
+  // ?report=failed — the open links whose reel could not be fetched, with
+  // the reason. Not deleted by anything: "not readable" is gone, private
+  // or age-gated, and only a person can tell which.
+  if (url.searchParams.get("report") === "failed") {
+    let q = supabase
+      .from("content_links")
+      .select("url, video_error, posted_at, message_id")
+      .eq("status", "open")
+      .not("video_error", "is", null)
+      .order("posted_at", { ascending: true });
+    if (personaId) q = q.eq("persona_id", personaId);
+    const { data } = await q;
+    return NextResponse.json({ ok: true, failed: data ?? [] });
+  }
+  if (url.searchParams.get("report") === "pending") {
+    const ids = await pendingVideoLinks(supabase, { personaId, limit: 1000, openOnly: true });
+    return NextResponse.json({ ok: true, pending: ids.length });
+  }
   const one = url.searchParams.get("link");
   const byUrl = url.searchParams.get("url");
   const key = byUrl ? instagramKey(byUrl) : null;
@@ -76,6 +95,8 @@ async function run(url: URL, personaId: string | undefined) {
       : await pendingVideoLinks(supabase, {
         personaId,
         limit: Math.min(200, Number(url.searchParams.get("limit") ?? 20)),
+        openOnly: url.searchParams.get("only") === "open",
+        oldestFirst: url.searchParams.get("order") === "oldest",
       });
 
   // Notes travel with a single link only — they are what the sender wrote

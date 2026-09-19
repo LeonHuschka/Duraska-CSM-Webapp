@@ -106,10 +106,14 @@ export async function fetchInspoVideo(
     // The original had nothing the new message does not. Best effort —
     // Telegram refuses to delete what is older than two days.
     const gone = await deleteMessage({ chat_id: link.chat_id, message_id: Number(link.message_id) });
-    if (!gone.ok) console.warn("[inspo-video] original not deleted:", gone.error);
+    if (!gone.ok) {
+      console.warn("[inspo-video] original not deleted:", gone.error);
+      return { linkId, ok: true, note: `posted; original message ${link.message_id} NOT deleted — ${gone.error}` };
+    }
+    return { linkId, ok: true, note: "posted; original deleted" };
   }
 
-  return { linkId, ok: true, note: "stored and posted" };
+  return { linkId, ok: true, note: "already had its video" };
 }
 
 /**
@@ -119,15 +123,22 @@ export async function fetchInspoVideo(
  */
 export async function pendingVideoLinks(
   supabase: Db,
-  opts: { personaId?: string; limit: number }
+  opts: {
+    personaId?: string;
+    limit: number;
+    /** Only links the model has not reacted to yet. */
+    openOnly?: boolean;
+    /** Top of the topic first, so the reposts keep the order. */
+    oldestFirst?: boolean;
+  }
 ): Promise<string[]> {
   let q = supabase
     .from("content_links")
     .select("id")
     .is("video_path", null)
     .is("video_error", null)
-    .in("status", ["open", "shot", "uploaded", "edited"])
-    .order("posted_at", { ascending: false })
+    .in("status", opts.openOnly ? ["open"] : ["open", "shot", "uploaded", "edited"])
+    .order("posted_at", { ascending: !!opts.oldestFirst })
     .limit(opts.limit);
   if (opts.personaId) q = q.eq("persona_id", opts.personaId);
   const { data } = await q;
