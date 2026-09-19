@@ -161,11 +161,7 @@ function VaultCard({
   }, [asset]);
 
   const postedSet = new Set(asset.postedAccountIds);
-  const postedOnMine = accounts.some((a) => postedSet.has(a.id));
   const isUnposted = asset.postedAccountIds.length === 0 && !asset.postedWithoutAccount;
-  // Posted through the schedule, with no account on the row. There is no
-  // account to keep from anybody, so everyone sees a plain "Already posted".
-  const postedUnnamed = !isUnposted && asset.postedAccountIds.length === 0;
 
   function handleMediaClick() {
     if (!isVideo) return;
@@ -636,41 +632,78 @@ function VaultCard({
             not "Available", because it is not, and not whose, because that
             is not the viewer's business. The filter still treats it as
             taken. */}
-        {(isUnposted || postedOnMine || postedUnnamed) && (
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
-            {isUnposted ? (
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-semibold text-white/60">
-                Available
-              </span>
-            ) : postedUnnamed ? (
-              <span className="rounded-full bg-white/25 px-2 py-0.5 text-[9px] font-semibold text-white/90">
-                Already posted
-              </span>
-            ) : (
-              <PostedDetails
-                label="Already posted ✓"
-                className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
-                title={asset.request_title}
-                cuts={reelCuts ?? [asset]}
-                postings={asset.reelPostings}
-                accounts={accounts}
-              />
-            )}
-          </div>
-        )}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2 pointer-events-none">
+          {isUnposted ? (
+            <span className="rounded-full bg-emerald-500/80 px-2 py-0.5 text-[9px] font-semibold text-white">
+              Available
+            </span>
+          ) : (
+            // Spent: a cut goes out once. Where is beside the title.
+            <span className="rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-semibold text-white/80">
+              Posted
+            </span>
+          )}
+        </div>
 
       </div>
 
       {/* ── Meta below thumbnail ── */}
       <div className="px-2.5 py-2">
-        <p className="text-xs font-medium leading-tight line-clamp-1 text-foreground">
-          {asset.request_title}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 text-xs font-medium leading-tight line-clamp-1 text-foreground">
+            {asset.request_title}
+          </p>
+          <RunTally
+            title={asset.request_title}
+            cuts={reelCuts ?? [asset]}
+            postings={asset.reelPostings}
+            accounts={accounts}
+          />
+        </div>
         <p className="mt-0.5 text-[10px] text-muted-foreground/60 truncate">
           {asset.size_bytes ? formatBytes(asset.size_bytes) : asset.file_name}
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * How often the reel has run, per account, beside its title: one platform
+ * dot and a count for each of the viewer's accounts it has been on. A VA
+ * sees her accounts, a manager all of them. Tap for names, dates and cuts.
+ */
+function RunTally({
+  title,
+  cuts,
+  postings,
+  accounts,
+}: {
+  title: string;
+  cuts: VaultAsset[];
+  postings: VaultAsset["reelPostings"];
+  accounts: PostingAccount[];
+}) {
+  const ran = accounts.filter((a) => (postings[a.id]?.count ?? 0) > 0);
+  if (ran.length === 0) return null;
+  return (
+    <PostedDetails
+      title={title}
+      cuts={cuts}
+      postings={postings}
+      accounts={accounts}
+      className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-foreground hover:bg-muted/70"
+      label={
+        <>
+          {ran.map((a) => (
+            <span key={a.id} className="flex items-center gap-0.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT[a.platform] ?? "bg-gray-500"}`} />
+              {postings[a.id].count}×
+            </span>
+          ))}
+        </>
+      }
+    />
   );
 }
 
@@ -689,7 +722,7 @@ function PostedDetails({
   postings,
   accounts,
 }: {
-  label: string;
+  label: React.ReactNode;
   className: string;
   title: string;
   /** Every cut of the reel, filters or no filters, so the variant list is complete. */
@@ -785,7 +818,6 @@ function ReelStack({
   reel,
   allCuts,
   accounts,
-  visibleIds,
   expanded,
   onToggle,
   onUpdateNsfw,
@@ -796,7 +828,6 @@ function ReelStack({
   /** Every cut of the job, whatever the filters hide. */
   allCuts: VaultAsset[];
   accounts: PostingAccount[];
-  visibleIds: Set<string>;
   expanded: boolean;
   onToggle: () => void;
   onUpdateNsfw: (requestId: string, isNsfw: boolean) => void;
@@ -804,14 +835,20 @@ function ReelStack({
   onVisible: (asset: VaultAsset) => void;
 }) {
   const c = reel.cover;
-  // Only the viewer's own accounts count. A VA is not told about postings
-  // on anybody else's — they are not hers to act on — and a manager, who
-  // sees every account, gets the whole picture through the same rule.
-  const note = Object.entries(reel.postings).some(
-    ([id, t]) => visibleIds.has(id) && t.count > 0
-  )
-    ? "Already posted"
-    : null;
+  // What is left of the reel: cuts nobody has posted anywhere.
+  // Finished cuts only — allCuts carries the reel's raw takes as well.
+  const free = allCuts.filter(
+    (x) => x.stage === "edited" && x.postedAccountIds.length === 0 && !x.postedWithoutAccount
+  ).length;
+  const freeLabel = (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${
+        free > 0 ? "bg-emerald-500/80 text-white" : "bg-white/20 text-white/80"
+      }`}
+    >
+      {free > 0 ? `${free} ${free === 1 ? "cut" : "cuts"} free` : "No cut free"}
+    </span>
+  );
 
   if (!expanded) {
     // The two cuts behind the cover, back-most first so the DOM order is
@@ -879,21 +916,15 @@ function ReelStack({
               </div>
             </div>
           </button>
-          {note && (
-            <div className="pointer-events-none absolute bottom-[6%] left-[7%] right-[7%] p-2">
-              <PostedDetails
-                label={note}
-                className="rounded-full bg-green-500/80 px-2 py-0.5 text-[9px] font-semibold text-white hover:bg-green-500"
-                title={reel.title}
-                cuts={allCuts}
-                postings={reel.postings}
-                accounts={accounts}
-              />
-            </div>
-          )}
+          <div className="pointer-events-none absolute bottom-[6%] left-[7%] right-[7%] p-2">
+            {freeLabel}
+          </div>
         </div>
         <div className="px-2.5 py-2">
-          <p className="text-xs font-medium leading-tight line-clamp-1 text-foreground">{reel.title}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 text-xs font-medium leading-tight line-clamp-1 text-foreground">{reel.title}</p>
+            <RunTally title={reel.title} cuts={allCuts} postings={reel.postings} accounts={accounts} />
+          </div>
           <p className="mt-0.5 text-[10px] text-muted-foreground/60">
             {reel.cuts.length} cuts · tap to fan out
           </p>
@@ -916,18 +947,10 @@ function ReelStack({
           <span className="tabular-nums">{reel.cuts.length} cuts</span>
         </button>
         <p className="min-w-0 truncate text-xs font-medium">{reel.title}</p>
-        {note && (
-          <div className="ml-auto shrink-0">
-            <PostedDetails
-              label={note}
-              className="rounded-full bg-green-500/80 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-green-500"
-              title={reel.title}
-              cuts={allCuts}
-              postings={reel.postings}
-              accounts={accounts}
-            />
-          </div>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {freeLabel}
+          <RunTally title={reel.title} cuts={allCuts} postings={reel.postings} accounts={accounts} />
+        </div>
       </div>
       {/* Sideways: on a phone this is a swipe, and two cuts fit the screen. */}
       <div className="-mx-2 flex snap-x gap-3 overflow-x-auto px-2 pb-1">
@@ -969,7 +992,8 @@ const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
 const PLATFORM_FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "available", label: "Available" },
+  { value: "available", label: "Ready to post" },
+  { value: "fresh", label: "Not posted yet" },
   { value: "posted", label: "Posted" },
 ];
 
@@ -1010,7 +1034,6 @@ export function VaultView({
     () => (lens === null ? accounts : accounts.filter((a) => norm(a.manager_username) === norm(lens))),
     [accounts, lens]
   );
-  const visibleIds = useMemo(() => new Set(visibleAccounts.map((a) => a.id)), [visibleAccounts]);
   // Ready for whoever is looking. A cut goes out once, so it must be
   // unposted; a reel runs once per account, so it must still have an
   // account to go to among the ones this viewer posts on. A reel Lyza has
@@ -1027,6 +1050,14 @@ export function VaultView({
       (postingTargets.length === 0 ||
         postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0)),
     [postingTargets]
+  );
+  // Stricter: new to the viewer's audience altogether. A reel with her
+  // second account still open is postable, but it is a repeat for her.
+  const isFreshForViewer = useCallback(
+    (a: VaultAsset) =>
+      isReadyForViewer(a) &&
+      postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
+    [isReadyForViewer, postingTargets]
   );
   // A VA with nothing to see: either nobody typed her handle on her profile,
   // or no account names her as manager. Either way, say so instead of
@@ -1204,6 +1235,8 @@ export function VaultView({
     }
     if (platformFilter === "available") {
       items = items.filter(isReadyForViewer);
+    } else if (platformFilter === "fresh") {
+      items = items.filter(isFreshForViewer);
     } else if (platformFilter === "posted") {
       items = items.filter((a) => a.postedAccountIds.length > 0 || a.postedWithoutAccount);
     }
@@ -1217,7 +1250,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isReadyForViewer]);
+  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isReadyForViewer, isFreshForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
@@ -1230,6 +1263,12 @@ export function VaultView({
     );
     return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
   }, [localAssets, isReadyForViewer]);
+  const fresh = useMemo(() => {
+    const cuts = localAssets.filter(
+      (a) => a.stage === "edited" && !a.is_nsfw && isFreshForViewer(a)
+    );
+    return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
+  }, [localAssets, isFreshForViewer]);
 
   // ── One card per reel ──
   //
@@ -1367,44 +1406,62 @@ export function VaultView({
         )}
       </div>
 
-      {/* One-tap presets, each carrying the count so the VA can see at a
-          glance whether there is anything to do for that platform. */}
-      {(() => {
-        const active =
-          stageFilter === READY_PRESET.stage &&
-          nsfwFilter === READY_PRESET.nsfw &&
-          platformFilter === READY_PRESET.platform;
-        return (
-          <button
-            onClick={() => {
-              if (active) {
-                setStageFilter("all");
-                setNsfwFilter("all");
-                setPlatformFilter("all");
-                return;
-              }
-              setStageFilter(READY_PRESET.stage);
-              setNsfwFilter(READY_PRESET.nsfw);
-              setPlatformFilter(READY_PRESET.platform);
-            }}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-              active
-                ? "border-primary bg-primary/10 text-foreground"
-                : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-            Ready to post
-            <span
-              className="tabular-nums text-muted-foreground"
-              title={`${ready.reels} reels · ${ready.cuts} cuts`}
+      {/* One-tap presets, each carrying its count so the VA sees whether
+          there is anything to do before tapping. Two, because they answer
+          two questions: what can I post at all, and what of it is new to
+          my accounts. */}
+      <div className="flex flex-wrap gap-2">
+        {[
+          {
+            key: "available",
+            label: "Ready to post",
+            hint: "Free cuts of reels that still have one of your accounts open",
+            dot: "bg-emerald-400",
+            count: ready,
+          },
+          {
+            key: "fresh",
+            label: "Not posted yet",
+            hint: "Free cuts of reels that have not run on any of your accounts",
+            dot: "bg-sky-400",
+            count: fresh,
+          },
+        ].map((preset) => {
+          const active =
+            stageFilter === READY_PRESET.stage &&
+            nsfwFilter === READY_PRESET.nsfw &&
+            platformFilter === preset.key;
+          return (
+            <button
+              key={preset.key}
+              title={preset.hint}
+              onClick={() => {
+                if (active) {
+                  setStageFilter("all");
+                  setNsfwFilter("all");
+                  setPlatformFilter("all");
+                  return;
+                }
+                setStageFilter(READY_PRESET.stage);
+                setNsfwFilter(READY_PRESET.nsfw);
+                setPlatformFilter(preset.key);
+              }}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
+              }`}
             >
-              {ready.reels} / {ready.cuts}
-            </span>
-            <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
-          </button>
-        );
-      })()}
+              <span className={`h-2.5 w-2.5 rounded-full ${preset.dot}`} />
+              {preset.label}
+              <span className="tabular-nums text-muted-foreground">
+                {preset.count.reels} / {preset.count.cuts}
+              </span>
+              <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Filters — tap-friendly dropdowns (no horizontal dragging on mobile) */}
       <div className="grid grid-cols-3 gap-2">
@@ -1484,7 +1541,6 @@ export function VaultView({
                   reel={reel}
                   allCuts={cutsByRequest.get(reel.requestId) ?? reel.cuts}
                   accounts={visibleAccounts}
-                  visibleIds={visibleIds}
                   expanded={expandedId === reel.requestId}
                   onToggle={() =>
                     setExpandedId((cur) => (cur === reel.requestId ? null : reel.requestId))
