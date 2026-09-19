@@ -179,10 +179,35 @@ export async function markAssetPostedFromVault(data: {
   asset_id: string;
   request_id: string;
   account_id: string;
+  /** The reel already ran on this account and the poster means it anyway. */
+  allow_repeat?: boolean;
 }) {
   const supabase = await createClient();
   const personaId = await getPersonaId();
   const now = new Date().toISOString();
+
+  // Two rules, checked here as well as in the vault so that two VAs tapping
+  // at the same moment cannot both win. A cut goes out once, anywhere. A
+  // reel runs once per account — a second cut of it there is an exception
+  // somebody has to mean.
+  const { data: reelSlots } = await supabase
+    .from("schedule_slots")
+    .select("asset_id, account_id")
+    .eq("persona_id", personaId)
+    .eq("request_id", data.request_id)
+    .eq("status", "posted");
+  const cutElsewhere = (reelSlots ?? []).some(
+    (s) => s.asset_id === data.asset_id && s.account_id !== data.account_id
+  );
+  if (cutElsewhere) {
+    return { error: "This cut has already been posted — every cut goes out once. Pick another cut.", conflict: "cut" as const };
+  }
+  const reelHere = (reelSlots ?? []).some(
+    (s) => s.account_id === data.account_id && s.asset_id !== data.asset_id
+  );
+  if (reelHere && !data.allow_repeat) {
+    return { error: "This reel has already run on this account.", conflict: "reel" as const };
+  }
 
   // Resolve the account's platform (schedule_slots still stores platform).
   const { data: account } = await supabase
@@ -208,7 +233,7 @@ export async function markAssetPostedFromVault(data: {
       .from("schedule_slots")
       .update({ status: "posted", posted_at: now })
       .eq("id", existing.id);
-    if (error) return { error: error.message };
+    if (error) return { error: error.message, conflict: null };
   } else {
     const { error } = await supabase.from("schedule_slots").insert({
       persona_id: personaId,
@@ -220,7 +245,7 @@ export async function markAssetPostedFromVault(data: {
       asset_id: data.asset_id,
       status: "posted",
     });
-    if (error) return { error: error.message };
+    if (error) return { error: error.message, conflict: null };
   }
 
   await syncRequestStatus(supabase, data.request_id);
@@ -228,7 +253,7 @@ export async function markAssetPostedFromVault(data: {
   revalidatePath("/vault");
   revalidatePath("/editing");
   revalidatePath("/requests");
-  return { error: null };
+  return { error: null, conflict: null };
 }
 
 /**

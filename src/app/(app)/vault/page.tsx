@@ -54,6 +54,8 @@ export interface PostingAccount {
   handle: string;
   /** Telegram handle of whoever runs it, as typed on the accounts tab. */
   manager_username: string | null;
+  /** Reels a day; 0 is an account kept for reference that nobody posts to. */
+  posts_per_day: number | null;
 }
 
 /** Who is looking, and therefore which accounts they get to see. */
@@ -128,7 +130,7 @@ export default async function VaultPage() {
   // Registered posting accounts, with who runs each one.
   const { data: accountRows } = await supabase
     .from("accounts")
-    .select("id, platform, handle, manager_username")
+    .select("id, platform, handle, manager_username, posts_per_day")
     .eq("persona_id", personaId)
     .neq("status", "dead")
     .order("platform", { ascending: true });

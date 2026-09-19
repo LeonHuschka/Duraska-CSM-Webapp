@@ -33,6 +33,7 @@ export function buildAlert(x: {
   toEdit: number;
   openLinks: number;
   shotNotUploaded: number;
+  pools?: { manager: string | null; reels: number; cuts: number }[];
 }): string | null {
   const { cfg } = x;
   const at = (u: string | null) => (u ? `@${u.replace(/^@/, "")}` : "");
@@ -47,7 +48,20 @@ export function buildAlert(x: {
       : `${x.readyReels} reels (${x.readyCuts} cuts)`;
 
   if (poolLow) {
-    lines.push(`☀️ Ready-to-post is getting low — ${pool} left.`);
+    // Per poster when there is more than one: a reel that already ran on
+    // Lyza's accounts is still work for Harold, and the other way round.
+    const low = (x.pools ?? []).filter((p) => p.reels < cfg.min_ready_to_post);
+    if ((x.pools ?? []).length > 1 && low.length > 0) {
+      lines.push(
+        `☀️ Ready-to-post is getting low — ` +
+          low
+            .map((p) => `${p.manager ? `@${p.manager}` : "unassigned accounts"}: ${p.reels} ${p.reels === 1 ? "reel" : "reels"} (${p.cuts} ${p.cuts === 1 ? "cut" : "cuts"})`)
+            .join(" · ") +
+          ` left that haven't run on their accounts yet.`
+      );
+    } else {
+      lines.push(`☀️ Ready-to-post is getting low — ${pool} left.`);
+    }
     if (queueEmpty || !queueFull) {
       lines.push(`${at(cfg.model_username)}, try to shoot 10–15 nice reels today pls 💃🏻`);
     }

@@ -340,6 +340,23 @@ function VaultCard({
 
   function togglePostedAccount(account: PostingAccount) {
     const isPosted = postedSet.has(account.id);
+    let allowRepeat = false;
+    if (!isPosted) {
+      // A cut goes out once. If it is ticked anywhere else — or went out
+      // through the schedule — it is spent.
+      if (asset.postedAccountIds.length > 0 || asset.postedWithoutAccount) {
+        toast.error("This cut has already been posted — every cut goes out once. Pick another cut.");
+        return;
+      }
+      // A reel runs once per account. Another cut of it there is the rare
+      // exception, so it takes a deliberate yes.
+      if ((asset.reelPostings[account.id]?.count ?? 0) > 0) {
+        allowRepeat = window.confirm(
+          `${asset.request_title} has already run on @${account.handle}.\n\nPost another cut of it there anyway?`
+        );
+        if (!allowRepeat) return;
+      }
+    }
     startTransition(async () => {
       // Optimistic update. The tick belongs to this cut alone; the reel
       // tally moves on every sibling card too, so they see it straight away.
@@ -363,6 +380,7 @@ function VaultCard({
             asset_id: asset.id,
             request_id: asset.request_id,
             account_id: account.id,
+            allow_repeat: allowRepeat,
           });
 
       if (result.error) {
@@ -540,12 +558,19 @@ function VaultCard({
                 <div className="max-h-56 overflow-y-auto">
                   {accounts.map((acc) => {
                     const isPosted = postedSet.has(acc.id);
+                    // The reel ran here through another cut: not a free
+                    // choice any more, and the row says so before the tap.
+                    const reelRanHere =
+                      !isPosted && (asset.reelPostings[acc.id]?.count ?? 0) > 0;
                     return (
                       <button
                         key={acc.id}
                         onClick={() => togglePostedAccount(acc)}
                         disabled={pending}
-                        className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+                        title={reelRanHere ? "This reel has already run on this account" : undefined}
+                        className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50 ${
+                          reelRanHere ? "opacity-50" : ""
+                        }`}
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <span
@@ -560,6 +585,9 @@ function VaultCard({
                         </span>
                         {isPosted && (
                           <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                        )}
+                        {reelRanHere && (
+                          <span className="shrink-0 text-[9px] text-amber-400">reel ran here</span>
                         )}
                       </button>
                     );
@@ -983,6 +1011,23 @@ export function VaultView({
     [accounts, lens]
   );
   const visibleIds = useMemo(() => new Set(visibleAccounts.map((a) => a.id)), [visibleAccounts]);
+  // Ready for whoever is looking. A cut goes out once, so it must be
+  // unposted; a reel runs once per account, so it must still have an
+  // account to go to among the ones this viewer posts on. A reel Lyza has
+  // already run on both her accounts is not work for her, however many
+  // cuts of it are left — those are Harold's.
+  const postingTargets = useMemo(() => {
+    const active = visibleAccounts.filter((a) => Number(a.posts_per_day ?? 0) > 0);
+    return active.length > 0 ? active : visibleAccounts;
+  }, [visibleAccounts]);
+  const isReadyForViewer = useCallback(
+    (a: VaultAsset) =>
+      a.postedAccountIds.length === 0 &&
+      !a.postedWithoutAccount &&
+      (postingTargets.length === 0 ||
+        postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0)),
+    [postingTargets]
+  );
   // A VA with nothing to see: either nobody typed her handle on her profile,
   // or no account names her as manager. Either way, say so instead of
   // showing an empty picker.
@@ -1158,7 +1203,7 @@ export function VaultView({
       items = items.filter((a) => a.is_nsfw);
     }
     if (platformFilter === "available") {
-      items = items.filter((a) => a.postedAccountIds.length === 0 && !a.postedWithoutAccount);
+      items = items.filter(isReadyForViewer);
     } else if (platformFilter === "posted") {
       items = items.filter((a) => a.postedAccountIds.length > 0 || a.postedWithoutAccount);
     }
@@ -1172,7 +1217,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search]);
+  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isReadyForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
@@ -1181,14 +1226,10 @@ export function VaultView({
   // much of that week she can actually fill.
   const ready = useMemo(() => {
     const cuts = localAssets.filter(
-      (a) =>
-        a.stage === "edited" &&
-        !a.is_nsfw &&
-        a.postedAccountIds.length === 0 &&
-        !a.postedWithoutAccount
+      (a) => a.stage === "edited" && !a.is_nsfw && isReadyForViewer(a)
     );
     return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
-  }, [localAssets]);
+  }, [localAssets, isReadyForViewer]);
 
   // ── One card per reel ──
   //
