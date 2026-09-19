@@ -10,7 +10,15 @@ import type { Database } from "@/lib/types/database";
  * day of posting, not four. Both are SFW and unposted, the same rule as
  * the vault's "Ready to post", so the alert and the app agree.
  */
-export type Pool = { manager: string | null; reels: number; cuts: number };
+export type Pool = {
+  manager: string | null;
+  /** Reels with a free cut and at least one of her accounts still open. */
+  reels: number;
+  cuts: number;
+  /** Of those, reels that have not run on any of her accounts yet. */
+  fresh: number;
+  accounts: number;
+};
 
 export type PipelineCounts = {
   /**
@@ -97,7 +105,14 @@ export async function pipelineCounts(
   }
   const pools: Pool[] = Array.from(byManager.entries()).map(([manager, ids]) => {
     const mine = ready.filter((a) => ids.some((id) => !ranOn.has(`${a.request_id}|${id}`)));
-    return { manager, reels: new Set(mine.map((a) => a.request_id)).size, cuts: mine.length };
+    const untouched = mine.filter((a) => ids.every((id) => !ranOn.has(`${a.request_id}|${id}`)));
+    return {
+      manager,
+      reels: new Set(mine.map((a) => a.request_id)).size,
+      cuts: mine.length,
+      fresh: new Set(untouched.map((a) => a.request_id)).size,
+      accounts: ids.length,
+    };
   });
   // No posting accounts configured: fall back to the plain count.
   const tightest =

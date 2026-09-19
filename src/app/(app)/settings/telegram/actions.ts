@@ -442,7 +442,20 @@ export async function simulatePipeline() {
     );
 
     // 7 — the alert the cron would post, without posting it
-    const alert = buildAlert({ cfg, ...(await pipelineCounts(supabase, personaId)) });
+    const counts = await pipelineCounts(supabase, personaId);
+    const alert = buildAlert({ cfg, ...counts });
+    say(
+      "Ready pool per poster",
+      true,
+      counts.pools.length
+        ? counts.pools
+            .map(
+              (p) =>
+                `${p.manager ? `@${p.manager}` : "unassigned"} (${p.accounts} accounts): ${p.reels} reels / ${p.cuts} cuts still postable, ${p.fresh} of them never run on any of their accounts`
+            )
+            .join("\n") + `\nalert threshold: fewer than ${cfg.min_ready_to_post} reels · to edit: ${counts.toEdit} · open inspo: ${counts.openLinks}`
+        : "no posting accounts"
+    );
     say(
       "Pipeline alert (not sent)",
       true,
