@@ -33,7 +33,7 @@ export function buildAlert(x: {
   toEdit: number;
   openLinks: number;
   shotNotUploaded: number;
-  pools?: { manager: string | null; reels: number; cuts: number }[];
+  pools?: { manager: string | null; reels: number; cuts: number; fresh: number }[];
 }): string | null {
   const { cfg } = x;
   const at = (u: string | null) => (u ? `@${u.replace(/^@/, "")}` : "");
@@ -50,14 +50,14 @@ export function buildAlert(x: {
   if (poolLow) {
     // Per poster when there is more than one: a reel that already ran on
     // Lyza's accounts is still work for Harold, and the other way round.
-    const low = (x.pools ?? []).filter((p) => p.reels < cfg.min_ready_to_post);
-    if ((x.pools ?? []).length > 1 && low.length > 0) {
+    const low = (x.pools ?? []).filter((p) => p.fresh < cfg.min_ready_to_post);
+    if ((x.pools ?? []).length > 0 && low.length > 0) {
       lines.push(
-        `☀️ Ready-to-post is getting low — ` +
+        `☀️ Fresh reels are running low — ` +
           low
-            .map((p) => `${p.manager ? `@${p.manager}` : "unassigned accounts"}: ${p.reels} ${p.reels === 1 ? "reel" : "reels"} (${p.cuts} ${p.cuts === 1 ? "cut" : "cuts"})`)
+            .map((p) => `${p.manager ? `@${p.manager}` : "unassigned accounts"}: ${p.fresh} new`)
             .join(" · ") +
-          ` left that haven't run on their accounts yet.`
+          `. Everything else has already run on their accounts.`
       );
     } else {
       lines.push(`☀️ Ready-to-post is getting low — ${pool} left.`);

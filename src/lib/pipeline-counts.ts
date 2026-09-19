@@ -22,10 +22,9 @@ export type Pool = {
 
 export type PipelineCounts = {
   /**
-   * Reels the tightest poster can still use. A cut goes out once and a reel
-   * runs once per account, so a free cut is only work for a VA whose
-   * accounts have not had that reel yet. Ten reels with free cuts are no
-   * buffer at all if nine of them already ran on her accounts.
+   * Fresh reels of the tightest poster: a free cut, and the reel has not
+   * run on any of her accounts. Ten reels with free cuts are no buffer at
+   * all if nine of them already ran on her accounts.
    */
   readyReels: number;
   /** Free cuts within those reels. */
@@ -115,13 +114,18 @@ export async function pipelineCounts(
     };
   });
   // No posting accounts configured: fall back to the plain count.
+  // The alert runs on fresh reels: ones that have not run on any of the
+  // poster's accounts. A reel that still has her second account open is
+  // postable, but it is a repeat for her audience, not new content — and
+  // new content is what runs out.
+  const plain = new Set(ready.map((a) => a.request_id)).size;
   const tightest =
     pools.length > 0
-      ? pools.reduce((lo, p) => (p.reels < lo.reels ? p : lo))
-      : { manager: null, reels: new Set(ready.map((a) => a.request_id)).size, cuts: ready.length };
+      ? pools.reduce((lo, p) => (p.fresh < lo.fresh ? p : lo))
+      : { manager: null, reels: plain, cuts: ready.length, fresh: plain, accounts: 0 };
 
   return {
-    readyReels: tightest.reels,
+    readyReels: tightest.fresh,
     readyCuts: tightest.cuts,
     pools,
     toEdit: reqs.filter((r) => r.status === "shooted" && hasRaw.has(r.id)).length,
