@@ -992,8 +992,8 @@ const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
 const PLATFORM_FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "available", label: "Ready to post" },
-  { value: "fresh", label: "Not posted yet" },
+  { value: "available", label: "All Available" },
+  { value: "fresh", label: "New for my Acc" },
   { value: "posted", label: "Posted" },
 ];
 
@@ -1414,14 +1414,16 @@ export function VaultView({
         {[
           {
             key: "available",
-            label: "Ready to post",
+            label: "All Available",
             hint: "Free cuts of reels that still have one of your accounts open",
             dot: "bg-emerald-400",
             count: ready,
           },
           {
             key: "fresh",
-            label: "Not posted yet",
+            // A manager looking at every account is asking about all of
+            // them, and the name says so — otherwise a 0 reads as a bug.
+            label: lens === null && canSwitch ? "New for all Acc" : "New for my Acc",
             hint: "Free cuts of reels that have not run on any of your accounts",
             dot: "bg-sky-400",
             count: fresh,
@@ -1498,7 +1500,7 @@ export function VaultView({
           <SelectContent>
             {PLATFORM_FILTER_OPTIONS.map((p) => (
               <SelectItem key={p.value} value={p.value} className="text-xs">
-                {p.label}
+                {p.value === "fresh" && lens === null && canSwitch ? "New for all Acc" : p.label}
               </SelectItem>
             ))}
           </SelectContent>
