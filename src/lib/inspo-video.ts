@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
-import { deleteMessage, sendVideo } from "@/lib/telegram";
+import { deleteMessage, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
 
 /**
  * Keep the inspo reel, not just its link.
@@ -38,7 +38,7 @@ export async function fetchInspoVideo(
   const { data: link } = await supabase
     .from("content_links")
     .select(
-      "id, persona_id, chat_id, message_thread_id, message_id, url, video_path, video_message_id"
+      "id, persona_id, chat_id, message_thread_id, message_id, url, status, video_path, video_message_id"
     )
     .eq("id", linkId)
     .maybeSingle();
@@ -49,6 +49,17 @@ export async function fetchInspoVideo(
       .from("content_links")
       .update({ video_error: note, video_fetched_at: new Date().toISOString() })
       .eq("id", linkId);
+    // Turn the "fetching" eyes into a shrug, so the sender sees that no
+    // video is coming and the link stays a link. Only on a link nobody has
+    // acted on: further along, the bot's reaction there means shot or cut,
+    // and a bot holds one reaction per message.
+    if (link.status === "open") {
+      await setMessageReaction({
+        chat_id: link.chat_id,
+        message_id: Number(link.message_id),
+        emoji: REACTION.noVideo,
+      });
+    }
     return { linkId, ok: false, note };
   };
 

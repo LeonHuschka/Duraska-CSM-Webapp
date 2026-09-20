@@ -338,6 +338,15 @@ async function handleMessage(req: Request, msg: TgMessage) {
     .replace(/https?:\/\/\S+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // Say "got it, fetching" on the link before the slow part starts. The
+  // message is replaced by the video when it lands, so the eyes go with it.
+  if ((stored ?? []).length > 0) {
+    await setMessageReaction({
+      chat_id: msg.chat.id,
+      message_id: msg.message_id,
+      emoji: REACTION.fetching,
+    });
+  }
   for (const l of stored ?? []) fireVideo(req, l.id, note, secret);
 }
 

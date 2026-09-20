@@ -485,6 +485,10 @@ export const REACTION = {
   uploaded: "👍", // takes are in the app
   edited: "🔥", // final cut is done
   dead: "💔",
+  // The inspo video: Telegram's reaction list has no hourglass, so eyes it
+  // is — "seen, fetching". A shrug when no video is coming after all.
+  fetching: "👀",
+  noVideo: "🤷",
 
   // Screenshot handling, in the account topics
   seen: "👀", // picked up, vision is running
