@@ -216,7 +216,11 @@ export async function setWebhook(url: string, secret: string) {
     url,
     secret_token: secret,
     allowed_updates: ["message", "message_reaction", "edited_message"],
-    drop_pending_updates: true,
+    // Keep what Telegram has queued. Re-registering is what you do after an
+    // outage, and the queue is exactly the links and reactions that were
+    // missed — dropping it once cost a day of them. The handlers upsert, so
+    // replaying an update twice is harmless.
+    drop_pending_updates: false,
   });
 }
 
