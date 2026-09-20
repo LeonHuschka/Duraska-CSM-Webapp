@@ -331,8 +331,11 @@ async function handleMessage(req: Request, msg: TgMessage) {
     .is("video_path", null)
     .is("video_error", null);
   // Whatever was written around the links is the note for the video.
-  const note = links
-    .reduce((t, u) => t.split(u).join(" "), text)
+  // The link regex stops at the shortcode, so a share link leaves its tail
+  // behind ("/?stkn=…", "?igsh=…"). That is part of the URL, not something
+  // the sender wrote — strip whole URLs before calling the rest a note.
+  const note = text
+    .replace(/https?:\/\/\S+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
   for (const l of stored ?? []) fireVideo(req, l.id, note, secret);
