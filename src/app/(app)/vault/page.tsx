@@ -121,7 +121,7 @@ export default async function VaultPage() {
     username: profile?.telegram_username ?? null,
   };
   const members: VaultMember[] = (teammates ?? [])
-    .filter((m) => m.role !== "model" && m.user_profiles?.telegram_username)
+    .filter((m) => m.user_profiles?.telegram_username)
     .map((m) => ({
       username: m.user_profiles!.telegram_username!,
       name: m.user_profiles?.full_name ?? m.user_profiles!.telegram_username!,

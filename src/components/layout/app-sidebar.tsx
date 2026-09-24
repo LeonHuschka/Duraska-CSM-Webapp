@@ -20,7 +20,7 @@ const allNavItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["owner", "manager", "va", "model"] },
   { href: "/upload", label: "Upload", icon: Upload, roles: ["owner", "manager", "va", "model"] },
   { href: "/editing", label: "Editing", icon: Scissors, roles: ["owner", "manager", "va"] },
-  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va"] },
+  { href: "/vault", label: "Vault", icon: Archive, roles: ["owner", "manager", "va", "model"] },
   { href: "/settings/personas", label: "Settings", icon: Settings, roles: ["owner", "manager"] },
 ];
 

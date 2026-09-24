@@ -992,8 +992,8 @@ const NSFW_OPTIONS = ["all", "sfw", "nsfw"] as const;
 
 const PLATFORM_FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "available", label: "All Available" },
-  { value: "fresh", label: "New for my Acc" },
+  { value: "fresh", label: "New" },
+  { value: "available", label: "Available but posted" },
   { value: "posted", label: "Posted" },
 ];
 
@@ -1018,17 +1018,11 @@ export function VaultView({
   // own ticks, her own tallies, her own picker. Owners and managers see
   // everything, and can borrow a VA's eyes to check what she is getting —
   // which is also the only way to notice that a VA has no accounts at all.
-  // The model sees everything too; she never posts, so hiding accounts from
-  // her would only produce a warning she cannot act on.
+  // The model posts on an account of her own now, so she looks through the
+  // same lens as a VA: the accounts that name her as manager.
   const canSwitch = viewer.role === "owner" || viewer.role === "manager";
   const [viewAs, setViewAs] = useState<string>("all");
-  const lens = canSwitch
-    ? viewAs === "all"
-      ? null
-      : viewAs
-    : viewer.role === "model"
-      ? null
-      : (viewer.username ?? "");
+  const lens = canSwitch ? (viewAs === "all" ? null : viewAs) : (viewer.username ?? "");
   const norm = (h: string | null | undefined) => (h ?? "").trim().replace(/^@/, "").toLowerCase();
   const visibleAccounts = useMemo(
     () => (lens === null ? accounts : accounts.filter((a) => norm(a.manager_username) === norm(lens))),
@@ -1043,21 +1037,20 @@ export function VaultView({
     const active = visibleAccounts.filter((a) => Number(a.posts_per_day ?? 0) > 0);
     return active.length > 0 ? active : visibleAccounts;
   }, [visibleAccounts]);
-  const isReadyForViewer = useCallback(
-    (a: VaultAsset) =>
-      a.postedAccountIds.length === 0 &&
-      !a.postedWithoutAccount &&
-      (postingTargets.length === 0 ||
-        postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0)),
-    [postingTargets]
-  );
-  // Stricter: new to the viewer's audience altogether. A reel with her
-  // second account still open is postable, but it is a repeat for her.
+  // The free cuts, split two ways for whoever is looking. "New": the reel
+  // has not run on any of her accounts — post it. "Available but posted":
+  // cuts are left, but the reel already ran on one of her accounts — only
+  // for the rare second cut of something that took off.
+  const isFree = (a: VaultAsset) => a.postedAccountIds.length === 0 && !a.postedWithoutAccount;
   const isFreshForViewer = useCallback(
     (a: VaultAsset) =>
-      isReadyForViewer(a) &&
-      postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
-    [isReadyForViewer, postingTargets]
+      isFree(a) && postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
+    [postingTargets]
+  );
+  const isPostedForViewer = useCallback(
+    (a: VaultAsset) =>
+      isFree(a) && postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) > 0),
+    [postingTargets]
   );
   // A VA with nothing to see: either nobody typed her handle on her profile,
   // or no account names her as manager. Either way, say so instead of
@@ -1234,7 +1227,7 @@ export function VaultView({
       items = items.filter((a) => a.is_nsfw);
     }
     if (platformFilter === "available") {
-      items = items.filter(isReadyForViewer);
+      items = items.filter(isPostedForViewer);
     } else if (platformFilter === "fresh") {
       items = items.filter(isFreshForViewer);
     } else if (platformFilter === "posted") {
@@ -1250,7 +1243,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isReadyForViewer, isFreshForViewer]);
+  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
@@ -1259,10 +1252,10 @@ export function VaultView({
   // much of that week she can actually fill.
   const ready = useMemo(() => {
     const cuts = localAssets.filter(
-      (a) => a.stage === "edited" && !a.is_nsfw && isReadyForViewer(a)
+      (a) => a.stage === "edited" && !a.is_nsfw && isPostedForViewer(a)
     );
     return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
-  }, [localAssets, isReadyForViewer]);
+  }, [localAssets, isPostedForViewer]);
   const fresh = useMemo(() => {
     const cuts = localAssets.filter(
       (a) => a.stage === "edited" && !a.is_nsfw && isFreshForViewer(a)
@@ -1413,20 +1406,18 @@ export function VaultView({
       <div className="flex flex-wrap gap-2">
         {[
           {
-            key: "available",
-            label: "All Available",
-            hint: "Free cuts of reels that still have one of your accounts open",
+            key: "fresh",
+            label: "New",
+            hint: "Free cuts of reels that have not run on any of your accounts — post these",
             dot: "bg-emerald-400",
-            count: ready,
+            count: fresh,
           },
           {
-            key: "fresh",
-            // A manager looking at every account is asking about all of
-            // them, and the name says so — otherwise a 0 reads as a bug.
-            label: lens === null && canSwitch ? "New for all Acc" : "New for my Acc",
-            hint: "Free cuts of reels that have not run on any of your accounts",
-            dot: "bg-sky-400",
-            count: fresh,
+            key: "available",
+            label: "Available but posted",
+            hint: "Cuts are left, but the reel already ran on one of your accounts — only for a second cut of something that took off",
+            dot: "bg-amber-400",
+            count: ready,
           },
         ].map((preset) => {
           const active =
@@ -1500,7 +1491,7 @@ export function VaultView({
           <SelectContent>
             {PLATFORM_FILTER_OPTIONS.map((p) => (
               <SelectItem key={p.value} value={p.value} className="text-xs">
-                {p.value === "fresh" && lens === null && canSwitch ? "New for all Acc" : p.label}
+                {p.label}
               </SelectItem>
             ))}
           </SelectContent>
