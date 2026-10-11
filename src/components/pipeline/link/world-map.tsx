@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import world from "@/lib/world-map.json";
+import { countryName } from "@/lib/country-name";
 
 type Countries = Record<string, { views: number; clicks: number }>;
-const NAMES = new Intl.DisplayNames(["en"], { type: "region" });
 
 /**
  * Where the people came from, as a map: every country with visits is
@@ -42,7 +42,7 @@ export function WorldMap({ countries }: { countries: Countries }) {
       </svg>
       {hover && (
         <div className="pointer-events-none absolute left-3 top-3 rounded-md border border-border/60 bg-card px-2.5 py-1.5 text-xs shadow">
-          <div className="font-medium">{safeName(hover)}</div>
+          <div className="font-medium">{countryName(hover)}</div>
           <div className="text-muted-foreground">
             {active ? `${active.views} views · ${active.clicks} clicks` : "no visits"}
           </div>
@@ -59,12 +59,4 @@ export function WorldMap({ countries }: { countries: Countries }) {
       </div>
     </div>
   );
-}
-
-export function safeName(code: string): string {
-  try {
-    return NAMES.of(code) ?? code;
-  } catch {
-    return code;
-  }
 }

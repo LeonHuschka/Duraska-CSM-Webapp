@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { funnelDashboard, type Period } from "@/lib/funnel-dashboard";
-import { WorldMap, safeName } from "./world-map";
+import { WorldMap } from "./world-map";
+import { countryName } from "@/lib/country-name";
 import { DailyChart, HourlyChart } from "./charts";
 
 const nf = new Intl.NumberFormat("de-DE");
@@ -105,7 +106,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <span className="w-4 text-right tabular-nums text-muted-foreground">{i + 1}</span>
-                    <span className="font-medium">{safeName(code)}</span>
+                    <span className="font-medium">{countryName(code)}</span>
                   </span>
                   <span className="tabular-nums text-muted-foreground">
                     {c.views} · {c.clicks} clicks
@@ -171,7 +172,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
                 {e.reason && <span className="text-muted-foreground">· {e.reason}</span>}
               </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                {e.country ? safeName(e.country) : "—"} · {e.platform ?? "—"}
+                {e.country ? countryName(e.country) : "—"} · {e.platform ?? "—"}
                 {e.in_app ? " · in-app" : ""} ·{" "}
                 {new Date(e.at).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
               </span>
