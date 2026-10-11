@@ -754,6 +754,117 @@ export type Database = {
         };
         Relationships: [];
       };
+      funnel_pages: {
+        Row: {
+          id: string;
+          persona_id: string;
+          domain: string;
+          slug: string;
+          display_name: string;
+          status_text: string;
+          bio_line: string;
+          button_label: string;
+          destination_url: string | null;
+          cover_path: string | null;
+          theme_bg: string;
+          theme_button_bg: string;
+          theme_button_text: string;
+          verified: boolean;
+          age_gate: boolean;
+          breakout: boolean;
+          blocked_countries: string[];
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          domain: string;
+          slug?: string;
+          display_name: string;
+          status_text?: string;
+          bio_line?: string;
+          button_label?: string;
+          destination_url?: string | null;
+          cover_path?: string | null;
+          theme_bg?: string;
+          theme_button_bg?: string;
+          theme_button_text?: string;
+          verified?: boolean;
+          age_gate?: boolean;
+          breakout?: boolean;
+          blocked_countries?: string[];
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          domain?: string;
+          slug?: string;
+          display_name?: string;
+          status_text?: string;
+          bio_line?: string;
+          button_label?: string;
+          destination_url?: string | null;
+          cover_path?: string | null;
+          theme_bg?: string;
+          theme_button_bg?: string;
+          theme_button_text?: string;
+          verified?: boolean;
+          age_gate?: boolean;
+          breakout?: boolean;
+          blocked_countries?: string[];
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      funnel_events: {
+        Row: {
+          id: number;
+          page_id: string;
+          kind: string;
+          bot: boolean;
+          reason: string | null;
+          country: string | null;
+          visitor_hash: string | null;
+          referrer: string | null;
+          in_app: boolean;
+          platform: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          page_id: string;
+          kind: string;
+          bot?: boolean;
+          reason?: string | null;
+          country?: string | null;
+          visitor_hash?: string | null;
+          referrer?: string | null;
+          in_app?: boolean;
+          platform?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          page_id?: string;
+          kind?: string;
+          bot?: boolean;
+          reason?: string | null;
+          country?: string | null;
+          visitor_hash?: string | null;
+          referrer?: string | null;
+          in_app?: boolean;
+          platform?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       winners: {
         Row: {
           id: string;
