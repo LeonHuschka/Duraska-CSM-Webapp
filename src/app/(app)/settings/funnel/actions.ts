@@ -33,6 +33,9 @@ export type FunnelForm = {
   breakout: boolean;
   blocked_countries: string;
   enabled: boolean;
+  handle: string;
+  instagram_url: string;
+  show_followers: boolean;
 };
 
 export async function saveFunnelPage(id: string | null, f: FunnelForm) {
@@ -48,6 +51,10 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
   const destination = f.destination_url.trim();
   if (destination && !/^https:\/\/\S+$/i.test(destination)) return { error: "The destination must be an https:// link", id: null };
   const color = (c: string, fallback: string) => (/^#[0-9a-f]{6}$/i.test(c.trim()) ? c.trim() : fallback);
+  const instagram = f.instagram_url.trim();
+  if (instagram && !/^https:\/\/(www\.)?instagram\.com\/\S+$/i.test(instagram)) {
+    return { error: "The Instagram link must be an https://instagram.com/… address", id: null };
+  }
 
   const row = {
     persona_id: personaId,
@@ -69,6 +76,9 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
       .map((c) => c.trim().toUpperCase())
       .filter((c) => /^[A-Z]{2}$/.test(c)),
     enabled: f.enabled,
+    handle: f.handle.trim().replace(/^@/, "") || null,
+    instagram_url: instagram || null,
+    show_followers: f.show_followers,
     updated_at: new Date().toISOString(),
   };
 
@@ -81,7 +91,7 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
   return { error: null, id: data.id };
 }
 
-export async function setFunnelCover(id: string, path: string | null) {
+export async function setFunnelCover(id: string, path: string | null, slot: "cover" | "button" = "cover") {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
   const who = await requireStaff(supabase, personaId);
@@ -89,7 +99,11 @@ export async function setFunnelCover(id: string, path: string | null) {
   if (path && !path.startsWith(`personas/${personaId}/funnel/`)) return { error: "Bad path" };
   const { error } = await supabase
     .from("funnel_pages")
-    .update({ cover_path: path, updated_at: new Date().toISOString() })
+    .update(
+      slot === "cover"
+        ? { cover_path: path, updated_at: new Date().toISOString() }
+        : { button_image_path: path, updated_at: new Date().toISOString() }
+    )
     .eq("id", id)
     .eq("persona_id", personaId);
   if (error) return { error: error.message };

@@ -8,7 +8,8 @@ import { blockedByCountry, logEvent, readVisitor, tripped } from "@/lib/funnel";
  *   config   the button's address — this site's own /go, never the target
  *   go       the redirect, after the visitor has been checked
  *   c        the canary: whoever lands here is a crawler, remembered a day
- *   cover    the picture, streamed from private storage
+ *   cover    the cover picture, streamed from private storage
+ *   button   the picture on the button card, the same way
  *
  * No session, no cookies. Everything a visitor sends is hashed before it
  * is stored; the destination is read from the row at the moment of the
@@ -59,9 +60,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
     }
 
-    case "cover": {
-      if (!page.cover_path) return new NextResponse("no cover", { status: 404 });
-      const { data: blob } = await supabase.storage.from("content-assets").download(page.cover_path);
+    case "cover":
+    case "button": {
+      const path = action === "cover" ? page.cover_path : page.button_image_path;
+      if (!path) return new NextResponse("no picture", { status: 404 });
+      const { data: blob } = await supabase.storage.from("content-assets").download(path);
       if (!blob) return new NextResponse("no cover", { status: 404 });
       return new NextResponse(blob.stream(), {
         headers: {

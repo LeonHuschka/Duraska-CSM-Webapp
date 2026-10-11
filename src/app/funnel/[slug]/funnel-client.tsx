@@ -3,26 +3,25 @@
 import { useEffect, useState } from "react";
 
 /**
- * The button, and the way out of the in-app browser.
+ * The picture card that is the button, and the way out of the in-app
+ * browser.
  *
  * Instagram opens links in its own browser, where every tap is watched
  * and sessions do not carry over. On Android the page can hand itself to
  * Chrome on its own; on iPhone the person has to agree, so they see a
- * screen for it first. The button's address is fetched after load so it is
+ * screen for it first. The card's address is fetched after load so it is
  * never in the HTML, and it only ever points at this site.
  */
 export function FunnelClient({
   base,
   label,
-  bg,
-  fg,
+  image,
   ageGate,
   breakout,
 }: {
   base: string;
   label: string;
-  bg: string;
-  fg: string;
+  image: string | null;
   ageGate: boolean;
   breakout: boolean;
 }) {
@@ -36,7 +35,6 @@ export function FunnelClient({
     const ios = /iPhone|iPad|iPod/i.test(ua);
     const android = /Android/i.test(ua);
     if (breakout && isInApp && android) {
-      // Chrome takes an intent link straight from the in-app browser.
       const u = new URL(location.href);
       location.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.href)};end`;
       setInApp("android");
@@ -60,27 +58,60 @@ export function FunnelClient({
     location.href = href;
   };
 
-  const button = (
+  const card = (
     <button
       type="button"
       onClick={go}
       disabled={!href}
+      aria-label={label}
       style={{
-        marginTop: 16,
+        marginTop: 14,
+        display: "block",
         width: "100%",
+        aspectRatio: "4 / 3",
+        position: "relative",
         border: 0,
-        borderRadius: 14,
-        padding: "15px 18px",
-        fontSize: 16,
-        fontWeight: 700,
-        background: bg,
-        color: fg,
+        padding: 0,
+        borderRadius: 18,
+        overflow: "hidden",
+        background: "#1a1a1a",
         cursor: href ? "pointer" : "default",
-        opacity: href ? 1 : 0.85,
-        boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+        boxShadow: "0 10px 30px rgba(0,0,0,.5)",
       }}
     >
-      {label}
+      {image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={image} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      )}
+      <span
+        style={{
+          position: "absolute",
+          inset: "auto 0 0 0",
+          height: "45%",
+          background: "linear-gradient(to top, rgba(0,0,0,.85), transparent)",
+        }}
+      />
+      <span style={{ position: "absolute", left: 12, top: 12, width: 34, height: 34, borderRadius: 999, background: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="9" cy="12" r="6" fill="none" stroke="#00AEEF" strokeWidth="3.2" />
+          <path d="M14 12a5 5 0 0 1 5-5h4l-1.6 4.8H19a1.5 1.5 0 0 0-1.5 1.5v.4A5 5 0 0 1 12.5 18" fill="#00AEEF" />
+        </svg>
+      </span>
+      <span
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 12,
+          textAlign: "center",
+          color: "#fff",
+          fontSize: 17,
+          fontWeight: 700,
+          textShadow: "0 1px 8px rgba(0,0,0,.6)",
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 
@@ -91,14 +122,14 @@ export function FunnelClient({
         <button
           type="button"
           onClick={() => href && (location.href = href)}
-          style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 700, background: bg, color: fg }}
+          style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 700, background: "#fff", color: "#000" }}
         >
           Yes, I am 18+
         </button>
         <button
           type="button"
           onClick={() => history.back()}
-          style={{ marginTop: 8, width: "100%", border: 0, borderRadius: 14, padding: "12px", fontSize: 14, background: "#00000014", color: "inherit" }}
+          style={{ marginTop: 8, width: "100%", border: 0, borderRadius: 14, padding: "12px", fontSize: 14, background: "rgba(255,255,255,.12)", color: "#fff" }}
         >
           No
         </button>
@@ -109,30 +140,29 @@ export function FunnelClient({
   if (inApp === "ios") {
     const here = typeof location !== "undefined" ? location.href : "";
     return (
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 14 }}>
         <a
           href={`x-safari-${here}`}
           style={{
             display: "block",
             borderRadius: 14,
-            padding: "15px 18px",
-            fontSize: 16,
+            padding: "14px 18px",
+            fontSize: 15,
             fontWeight: 700,
-            background: bg,
-            color: fg,
+            background: "#fff",
+            color: "#000",
             textDecoration: "none",
-            boxShadow: "0 8px 24px rgba(0,0,0,.18)",
           }}
         >
           Open in Safari to continue
         </a>
-        <p style={{ margin: "10px 0 0", fontSize: 12, opacity: 0.7 }}>
+        <p style={{ margin: "8px 0 0", fontSize: 12, color: "rgba(255,255,255,.7)" }}>
           or tap <b>···</b> at the top right and choose <b>Open in browser</b>
         </p>
-        <div style={{ marginTop: 14, opacity: 0.8 }}>{button}</div>
+        {card}
       </div>
     );
   }
 
-  return button;
+  return card;
 }

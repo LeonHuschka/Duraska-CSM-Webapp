@@ -774,6 +774,10 @@ export type Database = {
           breakout: boolean;
           blocked_countries: string[];
           enabled: boolean;
+          handle: string | null;
+          instagram_url: string | null;
+          show_followers: boolean;
+          button_image_path: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -796,6 +800,10 @@ export type Database = {
           breakout?: boolean;
           blocked_countries?: string[];
           enabled?: boolean;
+          handle?: string | null;
+          instagram_url?: string | null;
+          show_followers?: boolean;
+          button_image_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -818,6 +826,10 @@ export type Database = {
           breakout?: boolean;
           blocked_countries?: string[];
           enabled?: boolean;
+          handle?: string | null;
+          instagram_url?: string | null;
+          show_followers?: boolean;
+          button_image_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };

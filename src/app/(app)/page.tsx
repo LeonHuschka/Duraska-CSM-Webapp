@@ -16,6 +16,7 @@ import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 // reads every account off its platform; Facebook can take two minutes.
 export const maxDuration = 300;
 import { AccountsTab } from "@/components/pipeline/accounts-tab";
+import { LinkTab } from "@/components/pipeline/link/link-tab";
 import { PERIODS, type PeriodKey } from "@/lib/account-analytics";
 import { dailyDemand } from "@/lib/demand";
 
@@ -53,10 +54,11 @@ function StatBox({
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ view?: string; tab?: string; period?: string }>;
+  searchParams?: Promise<{ view?: string; tab?: string; period?: string; days?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const tab = sp.tab === "accounts" ? "accounts" : "pipeline";
+  const tab = sp.tab === "accounts" ? "accounts" : sp.tab === "link" ? "link" : "pipeline";
+  const linkDays = ([7, 30, 90] as const).find((d) => String(d) === sp.days) ?? 7;
   const period = PERIODS.some((p) => p.key === sp.period) ? (sp.period as PeriodKey) : "30d";
   const supabase = await createClient();
   const {
@@ -396,6 +398,7 @@ export default async function DashboardPage({
             [
               { key: "pipeline", label: "Pipeline" },
               { key: "accounts", label: "Accounts" },
+              { key: "link", label: "Link" },
             ] as const
           ).map((t) => (
             <Link
@@ -419,6 +422,12 @@ export default async function DashboardPage({
               personaId={personaId}
               canEdit={active.role === "owner" || active.role === "manager"}
               period={period}
+            />
+          ) : tab === "link" ? (
+            <LinkTab
+              personaId={personaId}
+              days={linkDays}
+              canEdit={active.role === "owner" || active.role === "manager"}
             />
           ) : (
             <PipelineTab

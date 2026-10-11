@@ -21,6 +21,7 @@ export function FunnelSettings({
   personaName,
   page,
   coverUrl,
+  buttonUrl,
   week,
   month,
 }: {
@@ -28,12 +29,14 @@ export function FunnelSettings({
   personaName: string;
   page: Page | null;
   coverUrl: string | null;
+  buttonUrl: string | null;
   week: Stats | null;
   month: Stats | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  const buttonFileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [f, setF] = useState<FunnelForm>({
     domain: page?.domain ?? "",
@@ -51,6 +54,9 @@ export function FunnelSettings({
     breakout: page?.breakout ?? true,
     blocked_countries: (page?.blocked_countries ?? []).join(", "),
     enabled: page?.enabled ?? true,
+    handle: page?.handle ?? "",
+    instagram_url: page?.instagram_url ?? "",
+    show_followers: page?.show_followers ?? true,
   });
   const set = <K extends keyof FunnelForm>(k: K, v: FunnelForm[K]) => setF((s) => ({ ...s, [k]: v }));
 
@@ -65,7 +71,7 @@ export function FunnelSettings({
     });
   }
 
-  async function upload(file: File) {
+  async function upload(file: File, slot: "cover" | "button" = "cover") {
     if (!page) {
       toast.error("Save the page first, then add the picture");
       return;
@@ -73,13 +79,13 @@ export function FunnelSettings({
     setUploading(true);
     try {
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-      const path = `personas/${personaId}/funnel/cover-${Date.now()}.${ext}`;
+      const path = `personas/${personaId}/funnel/${slot}-${Date.now()}.${ext}`;
       const supabase = createClient();
       const { error } = await supabase.storage
         .from("content-assets")
         .upload(path, file, { contentType: file.type || "image/jpeg", upsert: true });
       if (error) throw new Error(error.message);
-      const res = await setFunnelCover(page.id, path);
+      const res = await setFunnelCover(page.id, path, slot);
       if (res.error) throw new Error(res.error);
       toast.success("Picture updated");
       router.refresh();
@@ -112,6 +118,8 @@ export function FunnelSettings({
             <Field label="Domain" value={f.domain} onChange={(v) => set("domain", v)} placeholder="sarahprice.link" />
             <Field label="Path" value={f.slug} onChange={(v) => set("slug", v)} placeholder="ig" hint="/ig for Instagram, /tt for TikTok — each path can be its own page later" />
             <Field label="Name on the page" value={f.display_name} onChange={(v) => set("display_name", v)} />
+            <Field label="Handle under the name" value={f.handle} onChange={(v) => set("handle", v)} placeholder="sarahprice" />
+            <Field label="Instagram link (icon under the name)" value={f.instagram_url} onChange={(v) => set("instagram_url", v)} placeholder="https://instagram.com/…" />
             <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the green dot. Leave empty to hide." />
             <Field label="Text line" value={f.bio_line} onChange={(v) => set("bio_line", v)} />
             <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} />
@@ -128,12 +136,7 @@ export function FunnelSettings({
         </section>
 
         <section className="rounded-xl border border-border/40 bg-card p-5">
-          <h2 className="text-sm font-semibold">Look</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <Field label="Background" value={f.theme_bg} onChange={(v) => set("theme_bg", v)} />
-            <Field label="Button" value={f.theme_button_bg} onChange={(v) => set("theme_button_bg", v)} />
-            <Field label="Button text" value={f.theme_button_text} onChange={(v) => set("theme_button_text", v)} />
-          </div>
+          <h2 className="text-sm font-semibold">Pictures</h2>
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <div className="h-28 w-24 overflow-hidden rounded-lg border border-border/40 bg-muted/30">
               {coverUrl ? (
@@ -158,11 +161,39 @@ export function FunnelSettings({
               <Button type="button" variant="outline" size="sm" disabled={uploading || !page} onClick={() => fileRef.current?.click()}>
                 {uploading ? "Uploading…" : "Upload picture"}
               </Button>
-              <p className="mt-1 text-[11px] text-muted-foreground">Portrait, roughly 4:5. Keep it safe for work — this page is what Instagram sees.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Cover, square. Keep it safe for work — this page is what Instagram sees.</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <div className="h-20 w-28 overflow-hidden rounded-lg border border-border/40 bg-muted/30">
+              {buttonUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={buttonUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">uses the cover</div>
+              )}
+            </div>
+            <div>
+              <input
+                ref={buttonFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) upload(file, "button");
+                  e.target.value = "";
+                }}
+              />
+              <Button type="button" variant="outline" size="sm" disabled={uploading || !page} onClick={() => buttonFileRef.current?.click()}>
+                {uploading ? "Uploading…" : "Upload button picture"}
+              </Button>
+              <p className="mt-1 text-[11px] text-muted-foreground">Landscape, roughly 4:3. The picture on the card that is the button.</p>
             </div>
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <Toggle label="Verified badge next to the name" checked={f.verified} onChange={(v) => set("verified", v)} />
+            <Toggle label="Show the follower total from the scraped accounts" checked={f.show_followers} onChange={(v) => set("show_followers", v)} />
             <Toggle label="Pop fans out of the Instagram browser" checked={f.breakout} onChange={(v) => set("breakout", v)} />
             <Toggle label="Ask “18+?” before the redirect" checked={f.age_gate} onChange={(v) => set("age_gate", v)} />
             <Toggle label="Page enabled" checked={f.enabled} onChange={(v) => set("enabled", v)} />

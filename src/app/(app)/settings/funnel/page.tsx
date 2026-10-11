@@ -24,11 +24,12 @@ export default async function FunnelSettingsPage() {
     page ? funnelStats(supabase, page.id, 30) : Promise.resolve(null),
   ]);
 
-  let coverUrl: string | null = null;
-  if (page?.cover_path) {
-    const { data } = await supabase.storage.from("content-assets").createSignedUrl(page.cover_path, 3600);
-    coverUrl = data?.signedUrl ?? null;
-  }
+  const sign = async (path: string | null) => {
+    if (!path) return null;
+    const { data } = await supabase.storage.from("content-assets").createSignedUrl(path, 3600);
+    return data?.signedUrl ?? null;
+  };
+  const [coverUrl, buttonUrl] = await Promise.all([sign(page?.cover_path ?? null), sign(page?.button_image_path ?? null)]);
 
   return (
     <FunnelSettings
@@ -36,6 +37,7 @@ export default async function FunnelSettingsPage() {
       personaName={persona?.name ?? ""}
       page={page}
       coverUrl={coverUrl}
+      buttonUrl={buttonUrl}
       week={week}
       month={month}
     />
