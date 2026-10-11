@@ -16,5 +16,12 @@ export function createAdminClient() {
   }
   return createClient<Database>(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Next.js caches fetch() responses in route handlers, and Vercel keeps
+    // that cache across deployments. A row read here once came back stale
+    // for hours — the landing page's cover never appeared. Nothing this
+    // client reads may be served from a cache.
+    global: {
+      fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    },
   });
 }
