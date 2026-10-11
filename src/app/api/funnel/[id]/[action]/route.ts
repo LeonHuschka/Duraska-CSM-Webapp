@@ -83,6 +83,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       return new NextResponse(text, { headers: { "content-type": "text/plain; charset=utf-8" } });
     }
 
+    case "debug": {
+      // Which columns the row arrives with — for when a picture will not show.
+      return NextResponse.json({ keys: Object.keys(page), cover: !!page.cover_path, button: !!page.button_image_path, updated: page.updated_at });
+    }
+
     default:
       return new NextResponse("not found", { status: 404 });
   }
