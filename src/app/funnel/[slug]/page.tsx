@@ -147,13 +147,14 @@ export default async function FunnelPage({ params }: { params: Promise<{ slug: s
 }
 
 function Badge() {
+  // Instagram's own verified mark: a blue seal with a white check.
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" aria-label="verified">
       <path
-        fill="#8b7cf6"
-        d="M12 1.5l2.6 2.1 3.3-.5 1.2 3.1 3 1.5-.6 3.3 2 2.7-2 2.7.6 3.3-3 1.5-1.2 3.1-3.3-.5L12 22.5l-2.6-2.1-3.3.5-1.2-3.1-3-1.5.6-3.3L.5 12l2-2.7-.6-3.3 3-1.5 1.2-3.1 3.3.5z"
+        fill="#0095F6"
+        d="M12 1.2l2.45 1.9 3.05-.35 1.1 2.9 2.9 1.1-.35 3.05L23 12l-1.85 2.2.35 3.05-2.9 1.1-1.1 2.9-3.05-.35L12 22.8l-2.45-1.9-3.05.35-1.1-2.9-2.9-1.1.35-3.05L1 12l1.85-2.2-.35-3.05 2.9-1.1 1.1-2.9 3.05.35z"
       />
-      <path d="M7.5 12.2l3 3 6-6.4" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7.2 12.4l3.1 3.1 6.5-6.6" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

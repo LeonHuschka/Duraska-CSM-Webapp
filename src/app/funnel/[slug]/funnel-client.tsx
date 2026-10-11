@@ -91,12 +91,6 @@ export function FunnelClient({
           background: "linear-gradient(to top, rgba(0,0,0,.85), transparent)",
         }}
       />
-      <span style={{ position: "absolute", left: 12, top: 12, width: 34, height: 34, borderRadius: 999, background: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="9" cy="12" r="6" fill="none" stroke="#00AEEF" strokeWidth="3.2" />
-          <path d="M14 12a5 5 0 0 1 5-5h4l-1.6 4.8H19a1.5 1.5 0 0 0-1.5 1.5v.4A5 5 0 0 1 12.5 18" fill="#00AEEF" />
-        </svg>
-      </span>
       <span
         style={{
           position: "absolute",
