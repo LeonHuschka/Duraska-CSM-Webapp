@@ -91,7 +91,9 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
   return { error: null, id: data.id };
 }
 
-export async function setFunnelCover(id: string, path: string | null, slot: "cover" | "button" = "cover") {
+export type PictureSlot = "cover" | "open_cover" | "button";
+
+export async function setFunnelCover(id: string, path: string | null, slot: PictureSlot = "cover") {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
   const who = await requireStaff(supabase, personaId);
@@ -99,11 +101,10 @@ export async function setFunnelCover(id: string, path: string | null, slot: "cov
   if (path && !path.startsWith(`personas/${personaId}/funnel/`)) return { error: "Bad path" };
   const { error } = await supabase
     .from("funnel_pages")
-    .update(
-      slot === "cover"
-        ? { cover_path: path, updated_at: new Date().toISOString() }
-        : { button_image_path: path, updated_at: new Date().toISOString() }
-    )
+    .update({
+      ...(slot === "cover" ? { cover_path: path } : slot === "button" ? { button_image_path: path } : { open_cover_path: path }),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .eq("persona_id", personaId);
   if (error) return { error: error.message };

@@ -10,12 +10,15 @@ export function FunnelShell({
   base,
   followers,
   lang,
+  cover,
   children,
 }: {
   page: FunnelPage;
   base: string;
   followers: number | null;
   lang: string;
+  /** Which header picture: page 1's, or page 2's own when it has one. */
+  cover: "cover" | "open-cover";
   children: React.ReactNode;
 }) {
   const nf = new Intl.NumberFormat("en-US");
@@ -33,9 +36,9 @@ export function FunnelShell({
     >
       <div style={{ width: "100%", maxWidth: 480, minHeight: "100dvh", background: "#000", position: "relative" }}>
         <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#111" }}>
-          {page.cover_path && (
+          {(page.cover_path || page.open_cover_path) && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={`${base}/cover`} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <img src={`${base}/${cover}`} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           )}
           <div
             style={{

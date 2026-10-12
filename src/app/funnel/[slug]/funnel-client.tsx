@@ -21,6 +21,7 @@ type Env = "ios-app" | "android-app" | "browser";
 export function FunnelClient({
   base,
   label,
+  status,
   image,
   ageGate,
   breakout,
@@ -28,6 +29,8 @@ export function FunnelClient({
 }: {
   base: string;
   label: string;
+  /** The line in the green-dot pill — "Available now"; empty hides it. */
+  status: string;
   image: string | null;
   ageGate: boolean;
   breakout: boolean;
@@ -149,18 +152,72 @@ export function FunnelClient({
       <span
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: 12,
-          textAlign: "center",
-          color: "#fff",
-          fontSize: 17,
-          fontWeight: 700,
-          textShadow: "0 1px 8px rgba(0,0,0,.6)",
+          left: 14,
+          right: 14,
+          bottom: 14,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 10,
         }}
       >
-        {label}
+        {status && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 14px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,.92)",
+              color: "#111",
+              fontSize: 14,
+              fontWeight: 600,
+              backdropFilter: "blur(6px)",
+            }}
+          >
+            <span style={{ position: "relative", width: 10, height: 10 }}>
+              <span className="fnl-ping" style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
+              <span style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
+            </span>
+            {status}
+          </span>
+        )}
+        <span
+          className="fnl-cta"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            width: "100%",
+            padding: "15px 18px",
+            borderRadius: 16,
+            background: "#1f2230",
+            color: "#fff",
+            fontSize: 18,
+            fontWeight: 700,
+            boxShadow: "0 10px 30px rgba(0,0,0,.45)",
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          <OnlyFansGlyph />
+          {label}
+          <span className="fnl-shine" />
+        </span>
       </span>
+      <style>{`
+        @keyframes fnl-ping { 0% { transform: scale(1); opacity: .9 } 80%, 100% { transform: scale(2.6); opacity: 0 } }
+        .fnl-ping { animation: fnl-ping 1.6s cubic-bezier(0,0,.2,1) infinite }
+        @keyframes fnl-pulse { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.035) } }
+        .fnl-cta { animation: fnl-pulse 1.8s ease-in-out infinite }
+        @keyframes fnl-shine { 0% { left: -60% } 60%, 100% { left: 130% } }
+        .fnl-shine { position: absolute; top: 0; bottom: 0; width: 40%; left: -60%;
+          background: linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent);
+          transform: skewX(-18deg); animation: fnl-shine 2.6s ease-in-out infinite; pointer-events: none }
+        @media (prefers-reduced-motion: reduce) { .fnl-ping, .fnl-cta, .fnl-shine { animation: none } }
+      `}</style>
     </a>
   );
 
@@ -200,5 +257,21 @@ export function FunnelClient({
         </p>
       )}
     </div>
+  );
+}
+
+/** The OnlyFans mark: the ring and the fan at its shoulder, in its blue. */
+function OnlyFansGlyph() {
+  return (
+    <svg width="26" height="18" viewBox="0 0 52 36" aria-hidden="true">
+      <path
+        fill="#00AFF0"
+        d="M18 0C8.06 0 0 8.06 0 18s8.06 18 18 18 18-8.06 18-18S27.94 0 18 0zm0 23.4a5.4 5.4 0 1 1 0-10.8 5.4 5.4 0 0 1 0 10.8z"
+      />
+      <path
+        fill="#00AFF0"
+        d="M36.2 0c-1.4 7.2-5.3 10.8-12.1 10.8 0-6 4.9-10.8 10.9-10.8h1.2zM30.6 25.2C40.7 25.2 48.4 20 52 10.8H40.5c-2.6 4-5.3 7-9.9 7v7.4z"
+      />
+    </svg>
   );
 }

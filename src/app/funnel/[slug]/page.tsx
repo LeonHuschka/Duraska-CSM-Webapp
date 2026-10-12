@@ -36,11 +36,12 @@ export default async function GatePage({ params }: { params: Promise<{ slug: str
   ]);
 
   return (
-    <FunnelShell page={page} base={base} followers={followers} lang={lang}>
+    <FunnelShell page={page} base={base} followers={followers} lang={lang} cover="cover">
       {realBrowser ? (
         <FunnelClient
           base={base}
           label={page.button_label}
+          status={page.status_text}
           image={page.button_image_path ? `${base}/button` : page.cover_path ? `${base}/cover` : null}
           ageGate={page.age_gate}
           breakout={page.breakout}

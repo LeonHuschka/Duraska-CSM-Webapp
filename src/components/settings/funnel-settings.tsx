@@ -1,5 +1,6 @@
 "use client";
 
+import type { PictureSlot } from "@/app/(app)/settings/funnel/actions";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ export function FunnelSettings({
   personaName,
   page,
   coverUrl,
+  openCoverUrl,
   buttonUrl,
   week,
   month,
@@ -29,6 +31,7 @@ export function FunnelSettings({
   personaName: string;
   page: Page | null;
   coverUrl: string | null;
+  openCoverUrl: string | null;
   buttonUrl: string | null;
   week: Stats | null;
   month: Stats | null;
@@ -37,6 +40,7 @@ export function FunnelSettings({
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
   const buttonFileRef = useRef<HTMLInputElement>(null);
+  const openCoverFileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [f, setF] = useState<FunnelForm>({
     domain: page?.domain ?? "",
@@ -71,7 +75,7 @@ export function FunnelSettings({
     });
   }
 
-  async function upload(file: File, slot: "cover" | "button" = "cover") {
+  async function upload(file: File, slot: PictureSlot = "cover") {
     if (!page) {
       toast.error("Save the page first, then add the picture");
       return;
@@ -130,9 +134,9 @@ export function FunnelSettings({
             <Field label="Name on the page" value={f.display_name} onChange={(v) => set("display_name", v)} />
             <Field label="Handle under the name" value={f.handle} onChange={(v) => set("handle", v)} placeholder="sarahprice" />
             <Field label="Instagram link (icon under the name)" value={f.instagram_url} onChange={(v) => set("instagram_url", v)} placeholder="https://instagram.com/…" />
-            <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the green dot. Leave empty to hide." />
+            <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="The pill with the pulsing green dot on page 2's card. Leave empty to hide." />
             <Field label="Text line" value={f.bio_line} onChange={(v) => set("bio_line", v)} />
-            <Field label="Card text (page 2)" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Page 1's button is fixed: “Press and hold to open”, in the phone's language." />
+            <Field label="Card text (page 2)" value={f.button_label} onChange={(v) => set("button_label", v)} hint="The OnlyFans button on the card. Page 1's button is fixed: “Press and hold to open”, in the phone's language." />
           </div>
           <div className="mt-3">
             <Field
@@ -147,60 +151,41 @@ export function FunnelSettings({
 
         <section className="rounded-xl border border-border/40 bg-card p-5">
           <h2 className="text-sm font-semibold">Pictures</h2>
-          <div className="mt-4 flex flex-wrap items-center gap-4">
-            <div className="h-28 w-24 overflow-hidden rounded-lg border border-border/40 bg-muted/30">
-              {coverUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={coverUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">no picture</div>
-              )}
-            </div>
-            <div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) upload(file);
-                  e.target.value = "";
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" disabled={uploading || !page} onClick={() => fileRef.current?.click()}>
-                {uploading ? "Uploading…" : "Upload picture"}
-              </Button>
-              <p className="mt-1 text-[11px] text-muted-foreground">Cover, square. Keep it safe for work — this page is what Instagram sees.</p>
-            </div>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-4">
-            <div className="h-20 w-28 overflow-hidden rounded-lg border border-border/40 bg-muted/30">
-              {buttonUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={buttonUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">uses the cover</div>
-              )}
-            </div>
-            <div>
-              <input
-                ref={buttonFileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) upload(file, "button");
-                  e.target.value = "";
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" disabled={uploading || !page} onClick={() => buttonFileRef.current?.click()}>
-                {uploading ? "Uploading…" : "Upload button picture"}
-              </Button>
-              <p className="mt-1 text-[11px] text-muted-foreground">Landscape, roughly 4:3. The picture on page 2&apos;s card.</p>
-            </div>
-          </div>
+          <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Page 1 — what Instagram sees</h3>
+          <Picture
+            url={coverUrl}
+            shape="h-28 w-24"
+            fileRef={fileRef}
+            busy={uploading}
+            disabled={!page}
+            onFile={(file) => upload(file, "cover")}
+            button="Upload header"
+            hint="Square. Keep it safe for work — Meta's crawler and the in-app browser get this picture."
+            empty="no picture"
+          />
+          <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Page 2 — the real page</h3>
+          <Picture
+            url={openCoverUrl}
+            shape="h-28 w-24"
+            fileRef={openCoverFileRef}
+            busy={uploading}
+            disabled={!page}
+            onFile={(file) => upload(file, "open_cover")}
+            button="Upload header"
+            hint="Square. Only seen in the phone's own browser; falls back to page 1's header."
+            empty="uses page 1's"
+          />
+          <Picture
+            url={buttonUrl}
+            shape="h-20 w-28"
+            fileRef={buttonFileRef}
+            busy={uploading}
+            disabled={!page}
+            onFile={(file) => upload(file, "button")}
+            button="Upload card picture"
+            hint="Landscape, roughly 4:3. The card carries the status pill and the OnlyFans button on top of it."
+            empty="uses the header"
+          />
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             <Toggle label="Verified badge next to the name" checked={f.verified} onChange={(v) => set("verified", v)} />
             <Toggle label="Show the follower total from the scraped accounts" checked={f.show_followers} onChange={(v) => set("show_followers", v)} />
@@ -312,5 +297,57 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4" />
       {label}
     </label>
+  );
+}
+
+function Picture({
+  url,
+  shape,
+  fileRef,
+  busy,
+  disabled,
+  onFile,
+  button,
+  hint,
+  empty,
+}: {
+  url: string | null;
+  shape: string;
+  fileRef: React.RefObject<HTMLInputElement>;
+  busy: boolean;
+  disabled: boolean;
+  onFile: (file: File) => void;
+  button: string;
+  hint: string;
+  empty: string;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-4">
+      <div className={`${shape} overflow-hidden rounded-lg border border-border/40 bg-muted/30`}>
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">{empty}</div>
+        )}
+      </div>
+      <div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onFile(file);
+            e.target.value = "";
+          }}
+        />
+        <Button type="button" variant="outline" size="sm" disabled={busy || disabled} onClick={() => fileRef.current?.click()}>
+          {busy ? "Uploading…" : button}
+        </Button>
+        <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p>
+      </div>
+    </div>
   );
 }

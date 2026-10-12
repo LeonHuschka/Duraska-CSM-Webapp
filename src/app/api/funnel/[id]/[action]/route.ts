@@ -71,8 +71,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     case "cover":
+    case "open-cover":
     case "button": {
-      const path = action === "cover" ? page.cover_path : page.button_image_path;
+      const path =
+        action === "cover" ? page.cover_path : action === "button" ? page.button_image_path : page.open_cover_path;
       if (!path) return new NextResponse("no picture", { status: 404 });
       const { data: blob } = await supabase.storage.from("content-assets").download(path);
       if (!blob) return new NextResponse("no cover", { status: 404 });

@@ -29,7 +29,11 @@ export default async function FunnelSettingsPage() {
     const { data } = await supabase.storage.from("content-assets").createSignedUrl(path, 3600);
     return data?.signedUrl ?? null;
   };
-  const [coverUrl, buttonUrl] = await Promise.all([sign(page?.cover_path ?? null), sign(page?.button_image_path ?? null)]);
+  const [coverUrl, openCoverUrl, buttonUrl] = await Promise.all([
+    sign(page?.cover_path ?? null),
+    sign(page?.open_cover_path ?? null),
+    sign(page?.button_image_path ?? null),
+  ]);
 
   return (
     <FunnelSettings
@@ -37,6 +41,7 @@ export default async function FunnelSettingsPage() {
       personaName={persona?.name ?? ""}
       page={page}
       coverUrl={coverUrl}
+      openCoverUrl={openCoverUrl}
       buttonUrl={buttonUrl}
       week={week}
       month={month}

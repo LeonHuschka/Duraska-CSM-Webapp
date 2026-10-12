@@ -31,10 +31,17 @@ export default async function OpenPage({ params }: { params: Promise<{ slug: str
   ]);
 
   return (
-    <FunnelShell page={page} base={base} followers={followers} lang={gateLang(h.get("accept-language"))}>
+    <FunnelShell
+      page={page}
+      base={base}
+      followers={followers}
+      lang={gateLang(h.get("accept-language"))}
+      cover={page.open_cover_path ? "open-cover" : "cover"}
+    >
       <FunnelClient
         base={base}
         label={page.button_label}
+        status={page.status_text}
         image={page.button_image_path ? `${base}/button` : page.cover_path ? `${base}/cover` : null}
         ageGate={page.age_gate}
         breakout={page.breakout}
