@@ -28,6 +28,10 @@ export function FunnelClient({
   const [href, setHref] = useState<string | null>(null);
   const [inApp, setInApp] = useState<null | "ios" | "android">(null);
   const [gate, setGate] = useState(false);
+  // On iPhone the page asks Instagram for Safari once, on load. Whoever
+  // says no to that dialog stays here, and the card then goes to the
+  // destination inside the app without asking again.
+  const [declined, setDeclined] = useState(false);
 
   useEffect(() => {
     const ua = navigator.userAgent;
@@ -44,23 +48,36 @@ export function FunnelClient({
     fetch(`${base}/config`, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
-        if (j && typeof j.href === "string") setHref(j.href);
+        if (!j || typeof j.href !== "string") return;
+        setHref(j.href);
+        // Instagram's browser on iPhone shows "open an app outside of
+        // Instagram?" for a location change to the x-safari scheme (not
+        // for a tapped link). Straight to the destination: one "Open" and
+        // the fan is in Safari on the real page. Nothing happening after a
+        // moment means they said no, or this Instagram ignores the scheme.
+        if (breakout && isInApp && ios && !ageGate) {
+          const target = new URL(j.href, location.href).toString();
+          location.href = `x-safari-${target}`;
+          setTimeout(() => {
+            if (document.visibilityState === "visible") setDeclined(true);
+          }, 1500);
+        }
       })
       .catch(() => {});
-  }, [base, breakout]);
+  }, [base, breakout, ageGate]);
 
   const leave = () => {
     if (!href) return;
     const target = new URL(href, location.href).toString();
-    // In Instagram's browser on iPhone there is no API that opens Safari;
-    // the x-safari scheme works on some versions and is ignored on others.
-    // Try it, and if the page is still showing a moment later, go straight
-    // to the destination inside the app — a tap must never do nothing.
-    if (inApp === "ios") {
-      const t0 = Date.now();
+    if (inApp === "ios" && !declined) {
+      // The dialog has not been answered with no yet: ask once more, and
+      // fall back to the app's own browser if nothing happens.
       location.href = `x-safari-${target}`;
       setTimeout(() => {
-        if (document.visibilityState === "visible" && Date.now() - t0 < 2500) location.href = target;
+        if (document.visibilityState === "visible") {
+          setDeclined(true);
+          location.href = target;
+        }
       }, 900);
       return;
     }
@@ -153,9 +170,11 @@ export function FunnelClient({
     return (
       <div>
         {card}
-        <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
-          Best in Safari: tap <b>···</b> top right, then <b>Open in browser</b>
-        </p>
+        {declined && (
+          <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
+            Best in Safari: tap <b>···</b> top right, then <b>Open in browser</b>
+          </p>
+        )}
       </div>
     );
   }
