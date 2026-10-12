@@ -100,9 +100,16 @@ export function FunnelClient({
     leave();
   };
 
+  // What the card links to when it is not tapped but previewed or held:
+  // inside the app that is this page itself, never the redirect — the
+  // app's link preview follows redirects and would show Meta the
+  // destination. "Open Link" then opens this page in Safari, where the
+  // card goes straight through. In a real browser the link is the redirect.
+  const hrefForLink =
+    env === "browser" ? (target ?? "#") : typeof location !== "undefined" ? location.href : "#";
   const card = (
     <a
-      href={target ?? "#"}
+      href={hrefForLink}
       onClick={(e) => {
         e.preventDefault();
         go();
