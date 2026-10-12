@@ -33,9 +33,20 @@ export function FunnelClient({
   // destination inside the app without asking again.
   const [declined, setDeclined] = useState(false);
 
+  // How to ask the app for the real browser. Instagram and Threads each
+  // have a deep link for exactly that; it is what brings up "this web page
+  // is trying to open an app outside of Instagram — Open / Cancel". Other
+  // in-app browsers only understand the x-safari scheme, when they do.
+  const outside = (target: string) => {
+    const ua = navigator.userAgent;
+    if (/\bInstagram\b/i.test(ua)) return `instagram://extbrowser/?url=${encodeURIComponent(target)}`;
+    if (/\bThreads\b|\bBarcelona\b/i.test(ua)) return `barcelona://extbrowser/?url=${encodeURIComponent(target)}`;
+    return `x-safari-${target}`;
+  };
+
   useEffect(() => {
     const ua = navigator.userAgent;
-    const isInApp = /\bInstagram\b|\bFBAN\b|\bFBAV\b|\bFB_IAB\b|\bThreads\b|\bTikTok\b|\bBytedance\b|\bSnapchat\b/i.test(ua);
+    const isInApp = /\bInstagram\b|\bFBAN\b|\bFBAV\b|\bFB_IAB\b|\bThreads\b|\bBarcelona\b|\bTikTok\b|\bBytedance\b|\bSnapchat\b/i.test(ua);
     const ios = /iPhone|iPad|iPod/i.test(ua);
     const android = /Android/i.test(ua);
     if (breakout && isInApp && android) {
@@ -57,13 +68,14 @@ export function FunnelClient({
         // moment means they said no, or this Instagram ignores the scheme.
         if (breakout && isInApp && ios && !ageGate) {
           const target = new URL(j.href, location.href).toString();
-          location.href = `x-safari-${target}`;
+          location.replace(outside(target));
           setTimeout(() => {
             if (document.visibilityState === "visible") setDeclined(true);
           }, 1500);
         }
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, breakout, ageGate]);
 
   const leave = () => {
@@ -72,7 +84,7 @@ export function FunnelClient({
     if (inApp === "ios" && !declined) {
       // The dialog has not been answered with no yet: ask once more, and
       // fall back to the app's own browser if nothing happens.
-      location.href = `x-safari-${target}`;
+      location.replace(outside(target));
       setTimeout(() => {
         if (document.visibilityState === "visible") {
           setDeclined(true);
@@ -93,12 +105,16 @@ export function FunnelClient({
     leave();
   };
 
+  const target = href ? new URL(href, typeof location !== "undefined" ? location.href : "https://x/").toString() : undefined;
   const card = (
-    <button
-      type="button"
-      onClick={go}
-      disabled={!href}
+    <a
+      href={target ?? "#"}
+      onClick={(e) => {
+        e.preventDefault();
+        go();
+      }}
       aria-label={label}
+      aria-disabled={!href}
       style={{
         marginTop: 14,
         display: "block",
@@ -141,7 +157,7 @@ export function FunnelClient({
       >
         {label}
       </span>
-    </button>
+    </a>
   );
 
   if (gate) {
@@ -172,7 +188,7 @@ export function FunnelClient({
         {card}
         {declined && (
           <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
-            Best in Safari: tap <b>···</b> top right, then <b>Open in browser</b>
+            For the best experience: press and hold the picture, then choose <b>Open Link</b>
           </p>
         )}
       </div>
