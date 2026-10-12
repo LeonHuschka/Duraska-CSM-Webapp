@@ -32,6 +32,7 @@ export type FunnelForm = {
   age_gate: boolean;
   breakout: boolean;
   blocked_countries: string;
+  ignored_countries: string;
   enabled: boolean;
   handle: string;
   instagram_url: string;
@@ -71,10 +72,8 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
     verified: f.verified,
     age_gate: f.age_gate,
     breakout: f.breakout,
-    blocked_countries: f.blocked_countries
-      .split(/[,\s]+/)
-      .map((c) => c.trim().toUpperCase())
-      .filter((c) => /^[A-Z]{2}$/.test(c)),
+    blocked_countries: codes(f.blocked_countries),
+    ignored_countries: codes(f.ignored_countries),
     enabled: f.enabled,
     handle: f.handle.trim().replace(/^@/, "") || null,
     instagram_url: instagram || null,
@@ -92,6 +91,12 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
 }
 
 export type PictureSlot = "cover" | "open_cover" | "button";
+
+const codes = (s: string) =>
+  s
+    .split(/[,\s]+/)
+    .map((c) => c.trim().toUpperCase())
+    .filter((c) => /^[A-Z]{2}$/.test(c));
 
 export async function setFunnelCover(id: string, path: string | null, slot: PictureSlot = "cover") {
   const supabase = await createClient();

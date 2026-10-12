@@ -48,7 +48,9 @@ export type FunnelDashboard = {
 export async function funnelDashboard(
   supabase: SupabaseClient<Database>,
   pageId: string,
-  days: Period
+  days: Period,
+  /** Countries left out entirely — where the team tests from. */
+  ignored: string[] = []
 ): Promise<FunnelDashboard> {
   const DAY = 86_400_000;
   const now = Date.now();
@@ -61,7 +63,8 @@ export async function funnelDashboard(
     .gte("created_at", new Date(prevStart).toISOString())
     .order("created_at", { ascending: false })
     .limit(50_000);
-  const rows: Ev[] = data ?? [];
+  const skip = new Set(ignored.map((c) => c.toUpperCase()));
+  const rows: Ev[] = (data ?? []).filter((e) => !e.country || !skip.has(e.country.toUpperCase()));
   const t = (e: Ev) => new Date(e.created_at).getTime();
   const cur = rows.filter((e) => t(e) >= start);
   const prev = rows.filter((e) => t(e) < start);

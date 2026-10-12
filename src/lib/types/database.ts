@@ -773,6 +773,7 @@ export type Database = {
           age_gate: boolean;
           breakout: boolean;
           blocked_countries: string[];
+          ignored_countries: string[];
           enabled: boolean;
           handle: string | null;
           instagram_url: string | null;
@@ -800,6 +801,7 @@ export type Database = {
           age_gate?: boolean;
           breakout?: boolean;
           blocked_countries?: string[];
+          ignored_countries?: string[];
           enabled?: boolean;
           handle?: string | null;
           instagram_url?: string | null;
@@ -827,6 +829,7 @@ export type Database = {
           age_gate?: boolean;
           breakout?: boolean;
           blocked_countries?: string[];
+          ignored_countries?: string[];
           enabled?: boolean;
           handle?: string | null;
           instagram_url?: string | null;

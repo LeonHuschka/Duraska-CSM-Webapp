@@ -15,7 +15,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
   const supabase = await createClient();
   const { data: page } = await supabase
     .from("funnel_pages")
-    .select("id, domain, slug, display_name, destination_url, enabled")
+    .select("id, domain, slug, display_name, destination_url, enabled, ignored_countries")
     .eq("persona_id", personaId)
     .order("created_at", { ascending: true })
     .limit(1)
@@ -34,7 +34,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
     );
   }
 
-  const d = await funnelDashboard(supabase, page.id, days);
+  const d = await funnelDashboard(supabase, page.id, days, page.ignored_countries ?? []);
   const url = `https://${page.domain}/${page.slug}`;
   const top = Object.entries(d.countries)
     .sort((a, b) => b[1].views - a[1].views)

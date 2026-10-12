@@ -57,6 +57,7 @@ export function FunnelSettings({
     age_gate: page?.age_gate ?? false,
     breakout: page?.breakout ?? true,
     blocked_countries: (page?.blocked_countries ?? []).join(", "),
+    ignored_countries: (page?.ignored_countries ?? []).join(", "),
     enabled: page?.enabled ?? true,
     handle: page?.handle ?? "",
     instagram_url: page?.instagram_url ?? "",
@@ -200,6 +201,15 @@ export function FunnelSettings({
               onChange={(v) => set("blocked_countries", v)}
               placeholder="e.g. DE, AT"
               hint="Two-letter codes. Visitors from these countries see the page but the button leads nowhere."
+            />
+          </div>
+          <div className="mt-3">
+            <Field
+              label="Left out of the statistics"
+              value={f.ignored_countries}
+              onChange={(v) => set("ignored_countries", v)}
+              placeholder="e.g. HR"
+              hint="Two-letter codes. Where you test from — visits and clicks from these countries do not count in the Link tab, past ones included."
             />
           </div>
         </section>
