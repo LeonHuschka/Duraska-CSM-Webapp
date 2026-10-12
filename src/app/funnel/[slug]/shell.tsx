@@ -1,4 +1,4 @@
-import type { FunnelPage } from "@/lib/funnel";
+import { pictureUrl, type FunnelPage } from "@/lib/funnel";
 
 /**
  * What both pages share: the cover fading into black, the name with its
@@ -38,7 +38,7 @@ export function FunnelShell({
         <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#111" }}>
           {(page.cover_path || page.open_cover_path) && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={`${base}/${cover}`} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <img src={pictureUrl(base, cover, cover === "cover" ? page.cover_path : page.open_cover_path)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           )}
           <div
             style={{

@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findPage, logEvent, readVisitor } from "@/lib/funnel";
+import { findPage, logEvent, pictureUrl, readVisitor } from "@/lib/funnel";
 import { totalFollowers } from "@/lib/funnel-dashboard";
 import { gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "../shell";
@@ -15,7 +15,11 @@ import { FunnelClient } from "../funnel-client";
  */
 export const dynamic = "force-dynamic";
 
-export default async function OpenPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function OpenPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
   const { slug } = await params;
   const h = await headers();
   const host = h.get("host") ?? "";
@@ -26,7 +30,9 @@ export default async function OpenPage({ params }: { params: Promise<{ slug: str
   const visitor = readVisitor(req);
   const base = `/api/funnel/${page.id}`;
   const [followers] = await Promise.all([
-    page.show_followers ? totalFollowers(createAdminClient(), page.persona_id) : Promise.resolve(null),
+    page.show_followers
+      ? totalFollowers(createAdminClient(), page.persona_id)
+      : Promise.resolve(null),
     logEvent(page, visitor, "view", "open"),
   ]);
 
@@ -42,7 +48,13 @@ export default async function OpenPage({ params }: { params: Promise<{ slug: str
         base={base}
         label={page.button_label}
         status={page.status_text}
-        image={page.button_image_path ? `${base}/button` : page.cover_path ? `${base}/cover` : null}
+        image={
+          page.button_image_path
+            ? pictureUrl(base, "button", page.button_image_path)
+            : page.cover_path
+              ? pictureUrl(base, "cover", page.cover_path)
+              : null
+        }
         ageGate={page.age_gate}
         breakout={page.breakout}
         openUrl={`https://${host}/${page.slug}/open`}
