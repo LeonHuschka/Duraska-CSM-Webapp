@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { blockedByCountry, logEvent, readVisitor, tripped } from "@/lib/funnel";
+import { blockedByCountry, checkTicket, issueTicket, logEvent, readVisitor, tripped } from "@/lib/funnel";
 
 /**
  * The landing page's back end, one route with four jobs:
  *
- *   config   the button's address — this site's own /go, never the target
- *   go       the redirect, after the visitor has been checked
+ *   config   the button's address — this site's own /go with a ticket
+ *            bound to the visitor's address; never the target
+ *   go       the redirect, after the visitor and the ticket have been checked
  *   c        the canary: whoever lands here is a crawler, remembered a day
  *   cover    the cover picture, streamed from private storage
  *   button   the picture on the button card, the same way
@@ -30,7 +31,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       if (v.bot || (await tripped(page, v))) {
         return NextResponse.json({ href: null }, { headers: { "cache-control": "no-store" } });
       }
-      return NextResponse.json({ href: `/api/funnel/${page.id}/go` }, { headers: { "cache-control": "no-store" } });
+      return NextResponse.json(
+        { href: `/api/funnel/${page.id}/go?t=${issueTicket(req)}` },
+        { headers: { "cache-control": "no-store" } }
+      );
     }
 
     case "go": {
@@ -38,6 +42,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       if (v.bot) {
         await logEvent(page, v, "blocked", v.bot);
         // The same page, so a bot following the link learns nothing.
+        return NextResponse.redirect(new URL(`/${page.slug}`, req.url), 302);
+      }
+      if (!checkTicket(req, new URL(req.url).searchParams.get("t"))) {
+        // A redirect address fetched from somewhere else, later, by
+        // someone else. Nothing to see.
+        await logEvent(page, v, "blocked", "no ticket for this address");
         return NextResponse.redirect(new URL(`/${page.slug}`, req.url), 302);
       }
       if (await tripped(page, v)) {

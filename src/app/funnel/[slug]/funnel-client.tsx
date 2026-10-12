@@ -6,12 +6,18 @@ import { useEffect, useState } from "react";
  * The picture card that is the button, and the way out of the in-app
  * browser.
  *
- * Instagram opens links in its own browser, where every tap is watched
- * and sessions do not carry over. On Android the page can hand itself to
- * Chrome on its own; on iPhone the person has to agree, so they see a
- * screen for it first. The card's address is fetched after load so it is
- * never in the HTML, and it only ever points at this site.
+ * Instagram opens links in its own browser, where every address the page
+ * goes to is Meta's to see. So inside that browser the destination is
+ * never opened. The page asks the app for the real browser instead —
+ * Instagram and Threads have a deep link for exactly that, Android takes
+ * an intent for Chrome — pointing straight at the redirect, so one "Open"
+ * puts the fan on the real page in Safari or Chrome. Whoever says no can
+ * press and hold the card and choose Open Link, which the app hands to the
+ * browser as well. The card's address is fetched after load so it is never
+ * in the HTML, and it only ever points at this site.
  */
+type Env = "ios-app" | "android-app" | "browser";
+
 export function FunnelClient({
   base,
   label,
@@ -25,52 +31,46 @@ export function FunnelClient({
   ageGate: boolean;
   breakout: boolean;
 }) {
-  const [href, setHref] = useState<string | null>(null);
-  const [inApp, setInApp] = useState<null | "ios" | "android">(null);
+  const [target, setTarget] = useState<string | null>(null);
+  const [env, setEnv] = useState<Env>("browser");
   const [gate, setGate] = useState(false);
-  // On iPhone the page asks Instagram for Safari once, on load. Whoever
-  // says no to that dialog stays here, and the card then goes to the
-  // destination inside the app without asking again.
-  const [declined, setDeclined] = useState(false);
+  const [asked, setAsked] = useState(false);
 
-  // How to ask the app for the real browser. Instagram and Threads each
-  // have a deep link for exactly that; it is what brings up "this web page
-  // is trying to open an app outside of Instagram — Open / Cancel". Other
-  // in-app browsers only understand the x-safari scheme, when they do.
-  const outside = (target: string) => {
+  const environment = (): Env => {
     const ua = navigator.userAgent;
-    if (/\bInstagram\b/i.test(ua)) return `instagram://extbrowser/?url=${encodeURIComponent(target)}`;
-    if (/\bThreads\b|\bBarcelona\b/i.test(ua)) return `barcelona://extbrowser/?url=${encodeURIComponent(target)}`;
-    return `x-safari-${target}`;
+    const inApp = /\bInstagram\b|\bFBAN\b|\bFBAV\b|\bFB_IAB\b|\bThreads\b|\bBarcelona\b|\bTikTok\b|\bBytedance\b|\bSnapchat\b/i.test(ua);
+    if (!inApp) return "browser";
+    return /Android/i.test(ua) ? "android-app" : "ios-app";
+  };
+
+  // How to ask the app for the real browser, with the redirect as the page
+  // to open there.
+  const outside = (t: string): string => {
+    const ua = navigator.userAgent;
+    if (/Android/i.test(ua)) {
+      const u = new URL(t);
+      return `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.href)};end`;
+    }
+    if (/\bInstagram\b/i.test(ua)) return `instagram://extbrowser/?url=${encodeURIComponent(t)}`;
+    if (/\bThreads\b|\bBarcelona\b/i.test(ua)) return `barcelona://extbrowser/?url=${encodeURIComponent(t)}`;
+    return `x-safari-${t}`;
   };
 
   useEffect(() => {
-    const ua = navigator.userAgent;
-    const isInApp = /\bInstagram\b|\bFBAN\b|\bFBAV\b|\bFB_IAB\b|\bThreads\b|\bBarcelona\b|\bTikTok\b|\bBytedance\b|\bSnapchat\b/i.test(ua);
-    const ios = /iPhone|iPad|iPod/i.test(ua);
-    const android = /Android/i.test(ua);
-    if (breakout && isInApp && android) {
-      const u = new URL(location.href);
-      location.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.href)};end`;
-      setInApp("android");
-    } else if (breakout && isInApp && ios) {
-      setInApp("ios");
-    }
+    const e = environment();
+    setEnv(e);
     fetch(`${base}/config`, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!j || typeof j.href !== "string") return;
-        setHref(j.href);
-        // Instagram's browser on iPhone shows "open an app outside of
-        // Instagram?" for a location change to the x-safari scheme (not
-        // for a tapped link). Straight to the destination: one "Open" and
-        // the fan is in Safari on the real page. Nothing happening after a
-        // moment means they said no, or this Instagram ignores the scheme.
-        if (breakout && isInApp && ios && !ageGate) {
-          const target = new URL(j.href, location.href).toString();
-          location.replace(outside(target));
+        const t = new URL(j.href, location.href).toString();
+        setTarget(t);
+        // Ask once, on load. Nothing happening after a moment means the fan
+        // said no, or this app ignores the scheme; the card then explains.
+        if (breakout && e !== "browser" && !ageGate) {
+          location.replace(outside(t));
           setTimeout(() => {
-            if (document.visibilityState === "visible") setDeclined(true);
+            if (document.visibilityState === "visible") setAsked(true);
           }, 1500);
         }
       })
@@ -79,25 +79,20 @@ export function FunnelClient({
   }, [base, breakout, ageGate]);
 
   const leave = () => {
-    if (!href) return;
-    const target = new URL(href, location.href).toString();
-    if (inApp === "ios" && !declined) {
-      // The dialog has not been answered with no yet: ask once more, and
-      // fall back to the app's own browser if nothing happens.
-      location.replace(outside(target));
-      setTimeout(() => {
-        if (document.visibilityState === "visible") {
-          setDeclined(true);
-          location.href = target;
-        }
-      }, 900);
+    if (!target) return;
+    if (env === "browser" || !breakout) {
+      location.href = target;
       return;
     }
-    location.href = target;
+    // Inside the app: ask again, never open the destination here.
+    location.replace(outside(target));
+    setTimeout(() => {
+      if (document.visibilityState === "visible") setAsked(true);
+    }, 1200);
   };
 
   const go = () => {
-    if (!href) return;
+    if (!target) return;
     if (ageGate && !gate) {
       setGate(true);
       return;
@@ -105,7 +100,6 @@ export function FunnelClient({
     leave();
   };
 
-  const target = href ? new URL(href, typeof location !== "undefined" ? location.href : "https://x/").toString() : undefined;
   const card = (
     <a
       href={target ?? "#"}
@@ -114,7 +108,7 @@ export function FunnelClient({
         go();
       }}
       aria-label={label}
-      aria-disabled={!href}
+      aria-disabled={!target}
       style={{
         marginTop: 14,
         display: "block",
@@ -126,13 +120,14 @@ export function FunnelClient({
         borderRadius: 18,
         overflow: "hidden",
         background: "#1a1a1a",
-        cursor: href ? "pointer" : "default",
+        cursor: target ? "pointer" : "default",
         boxShadow: "0 10px 30px rgba(0,0,0,.5)",
+        WebkitTouchCallout: "default",
       }}
     >
       {image && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={image} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+        <img src={image} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", pointerEvents: "none" }} />
       )}
       <span
         style={{
@@ -182,18 +177,19 @@ export function FunnelClient({
     );
   }
 
-  if (inApp === "ios") {
-    return (
-      <div>
-        {card}
-        {declined && (
-          <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
-            For the best experience: press and hold the picture, then choose <b>Open Link</b>
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return card;
+  return (
+    <div>
+      {card}
+      {asked && env === "ios-app" && (
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
+          Press and hold the picture, then choose <b>Open Link</b> — or tap <b>···</b> top right and <b>Open in browser</b>
+        </p>
+      )}
+      {asked && env === "android-app" && (
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
+          Tap <b>⋮</b> top right and choose <b>Open in Chrome</b>
+        </p>
+      )}
+    </div>
+  );
 }

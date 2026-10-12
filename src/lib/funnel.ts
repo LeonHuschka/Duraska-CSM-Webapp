@@ -1,5 +1,5 @@
 import "server-only";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -60,6 +60,44 @@ export function readVisitor(req: Request): Visitor {
   else if (!(h.get("accept") ?? "").includes("text/html") && !h.get("sec-fetch-mode")) bot = "no browser accept";
 
   return { ua, hash, country, referrer, inApp: IN_APP_UA.test(ua), platform, bot };
+}
+
+/**
+ * The redirect takes a ticket. It is issued with the button's address and
+ * bound to the visitor's network address and the quarter hour, so a link
+ * that was logged somewhere and fetched later — by a crawler, from another
+ * network — is refused. The user agent is left out on purpose: the fan
+ * leaves Instagram's browser for Safari between getting the ticket and
+ * using it, and the two do not call themselves the same thing.
+ */
+const TICKET_WINDOW_MS = 15 * 60_000;
+
+function ipKey(req: Request): string {
+  const h = req.headers;
+  const ip =
+    h.get("cf-connecting-ip") ??
+    h.get("x-real-ip") ??
+    (h.get("x-forwarded-for") ?? "").split(",")[0].trim();
+  return ip;
+}
+
+function ticketFor(req: Request, window: number): string {
+  const secret = process.env.CRON_SECRET ?? "funnel";
+  return createHmac("sha256", secret).update(`${ipKey(req)}|${window}`).digest("base64url").slice(0, 24);
+}
+
+export function issueTicket(req: Request): string {
+  return ticketFor(req, Math.floor(Date.now() / TICKET_WINDOW_MS));
+}
+
+export function checkTicket(req: Request, ticket: string | null): boolean {
+  if (!ticket) return false;
+  const now = Math.floor(Date.now() / TICKET_WINDOW_MS);
+  for (const w of [now, now - 1]) {
+    const want = ticketFor(req, w);
+    if (want.length === ticket.length && timingSafeEqual(Buffer.from(want), Buffer.from(ticket))) return true;
+  }
+  return false;
 }
 
 export async function findPage(host: string, slug: string | null) {
