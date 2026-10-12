@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findPage, logEvent, pictureUrl, readVisitor } from "@/lib/funnel";
+import { findPage, logEvent, readVisitor } from "@/lib/funnel";
+import { pictureUrl } from "@/lib/funnel-pictures";
 import { totalFollowers } from "@/lib/funnel-dashboard";
 import { gateCopy, gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "./shell";
@@ -47,7 +48,7 @@ export default async function GatePage({
       base={base}
       followers={followers}
       lang={lang}
-      cover="cover"
+      coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
     >
       {realBrowser ? (
         <FunnelClient

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { funnelDashboard, type Period } from "@/lib/funnel-dashboard";
 import { WorldMap } from "./world-map";
@@ -26,9 +27,9 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
       <div className="rounded-2xl border border-dashed border-border/50 bg-card/50 p-8 text-center text-sm text-muted-foreground">
         No link-in-bio page yet.{" "}
         {canEdit && (
-          <Link href="/settings/funnel" className="text-primary underline">
-            Set one up in Settings → Link in bio
-          </Link>
+          <a href="/link/editor" target="_blank" rel="noreferrer" className="text-primary underline">
+            Open the editor to set one up
+          </a>
         )}
       </div>
     );
@@ -56,17 +57,21 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
             </a>
             {!page.destination_url && <span className="ml-2 text-amber-400">· no destination set yet</span>}
             {!page.enabled && <span className="ml-2 text-rose-400">· page disabled</span>}
-            {canEdit && (
-              <>
-                {" · "}
-                <Link href="/settings/funnel" className="underline">
-                  edit
-                </Link>
-              </>
-            )}
           </p>
         </div>
-        <div className="flex gap-1 rounded-lg bg-muted/40 p-0.5">
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <a
+              href="/link/editor"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <Pencil className="h-3 w-3" />
+              Editor
+            </a>
+          )}
+          <div className="flex gap-1 rounded-lg bg-muted/40 p-0.5">
           {([7, 30, 90] as Period[]).map((p) => (
             <Link
               key={p}
@@ -79,6 +84,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
               {p} days
             </Link>
           ))}
+        </div>
         </div>
       </div>
 

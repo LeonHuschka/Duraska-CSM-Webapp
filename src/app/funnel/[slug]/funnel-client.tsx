@@ -26,6 +26,7 @@ export function FunnelClient({
   ageGate,
   breakout,
   openUrl,
+  preview = false,
 }: {
   base: string;
   label: string;
@@ -36,6 +37,8 @@ export function FunnelClient({
   breakout: boolean;
   /** The real page's own address — what the app is asked to open outside. */
   openUrl: string;
+  /** In the editor: drawn, but never fetches the link or leaves. */
+  preview?: boolean;
 }) {
   const [target, setTarget] = useState<string | null>(null);
   const [env, setEnv] = useState<Env>("browser");
@@ -63,6 +66,7 @@ export function FunnelClient({
   };
 
   useEffect(() => {
+    if (preview) return;
     const e = environment();
     setEnv(e);
     fetch(`${base}/config`, { credentials: "same-origin", cache: "no-store" })
@@ -82,7 +86,7 @@ export function FunnelClient({
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, breakout, ageGate, openUrl]);
+  }, [base, breakout, ageGate, openUrl, preview]);
 
   const leave = () => {
     if (!target) return;

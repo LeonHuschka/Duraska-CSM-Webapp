@@ -1,24 +1,36 @@
-import { pictureUrl, type FunnelPage } from "@/lib/funnel";
+/** The fields of a page the head shows. */
+export type ShellPage = {
+  display_name: string;
+  verified: boolean;
+  handle: string | null;
+  instagram_url: string | null;
+  show_followers: boolean;
+  bio_line: string;
+};
 
 /**
  * What both pages share: the cover fading into black, the name with its
  * badge, the handle, the Instagram icon, the follower total and the line.
  * The page's own part — a gate button, or the card — goes underneath.
+ * Nothing in here touches the server, so the editor can draw it live.
  */
 export function FunnelShell({
   page,
   base,
   followers,
   lang,
-  cover,
+  coverSrc,
+  fill = "100dvh",
   children,
 }: {
-  page: FunnelPage;
+  page: ShellPage;
   base: string;
   followers: number | null;
   lang: string;
-  /** Which header picture: page 1's, or page 2's own when it has one. */
-  cover: "cover" | "open-cover";
+  /** The header picture's address, or none. */
+  coverSrc: string | null;
+  /** The page's minimum height — the viewport, or the editor's phone frame. */
+  fill?: string;
   children: React.ReactNode;
 }) {
   const nf = new Intl.NumberFormat("en-US");
@@ -26,7 +38,7 @@ export function FunnelShell({
     <main
       lang={lang}
       style={{
-        minHeight: "100dvh",
+        minHeight: fill,
         background: "#000",
         color: "#fff",
         display: "flex",
@@ -34,11 +46,11 @@ export function FunnelShell({
         fontFamily: "Inter, ui-sans-serif, -apple-system, system-ui, Segoe UI, Roboto, sans-serif",
       }}
     >
-      <div style={{ width: "100%", maxWidth: 480, minHeight: "100dvh", background: "#000", position: "relative" }}>
+      <div style={{ width: "100%", maxWidth: 480, minHeight: fill, background: "#000", position: "relative" }}>
         <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#111" }}>
-          {(page.cover_path || page.open_cover_path) && (
+          {coverSrc && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={pictureUrl(base, cover, cover === "cover" ? page.cover_path : page.open_cover_path)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <img src={coverSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           )}
           <div
             style={{

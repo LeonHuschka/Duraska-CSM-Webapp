@@ -86,7 +86,8 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
     : supabase.from("funnel_pages").insert(row).select("id").single();
   const { data, error } = await q;
   if (error) return { error: error.message, id: null };
-  revalidatePath("/settings/funnel");
+  revalidatePath("/link/editor");
+  revalidatePath("/");
   return { error: null, id: data.id };
 }
 
@@ -113,6 +114,6 @@ export async function setFunnelCover(id: string, path: string | null, slot: Pict
     .eq("id", id)
     .eq("persona_id", personaId);
   if (error) return { error: error.message };
-  revalidatePath("/settings/funnel");
+  revalidatePath("/link/editor");
   return { error: null };
 }

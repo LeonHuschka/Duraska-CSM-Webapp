@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findPage, logEvent, pictureUrl, readVisitor } from "@/lib/funnel";
+import { findPage, logEvent, readVisitor } from "@/lib/funnel";
+import { pictureUrl } from "@/lib/funnel-pictures";
 import { totalFollowers } from "@/lib/funnel-dashboard";
 import { gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "../shell";
@@ -42,7 +43,13 @@ export default async function OpenPage({
       base={base}
       followers={followers}
       lang={gateLang(h.get("accept-language"))}
-      cover={page.open_cover_path ? "open-cover" : "cover"}
+      coverSrc={
+        page.open_cover_path
+          ? pictureUrl(base, "open-cover", page.open_cover_path)
+          : page.cover_path
+            ? pictureUrl(base, "cover", page.cover_path)
+            : null
+      }
     >
       <FunnelClient
         base={base}

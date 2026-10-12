@@ -12,7 +12,18 @@ import type { GateCopy } from "@/lib/funnel-i18n";
  * button is a plain link to the real page, so the app's own menu offers
  * "Open Link" and the preview shows nothing but our page.
  */
-export function GateClient({ openUrl, copy, breakout }: { openUrl: string; copy: GateCopy; breakout: boolean }) {
+export function GateClient({
+  openUrl,
+  copy,
+  breakout,
+  preview = false,
+}: {
+  openUrl: string;
+  copy: GateCopy;
+  breakout: boolean;
+  /** In the editor: drawn, but never asks the app or leaves. */
+  preview?: boolean;
+}) {
   const outside = (t: string): string => {
     const ua = navigator.userAgent;
     if (/Android/i.test(ua)) {
@@ -25,15 +36,16 @@ export function GateClient({ openUrl, copy, breakout }: { openUrl: string; copy:
   };
 
   useEffect(() => {
-    if (breakout) location.replace(outside(openUrl));
+    if (breakout && !preview) location.replace(outside(openUrl));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openUrl, breakout]);
+  }, [openUrl, breakout, preview]);
 
   return (
     <div style={{ marginTop: 18 }}>
       <a
         href={openUrl}
         onClick={(e) => {
+          if (preview) return e.preventDefault();
           if (!breakout) return;
           e.preventDefault();
           location.replace(outside(openUrl));

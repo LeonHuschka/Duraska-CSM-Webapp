@@ -100,16 +100,6 @@ export function checkTicket(req: Request, ticket: string | null): boolean {
   return false;
 }
 
-/**
- * A picture's address, with a tag taken from its stored path. Every upload
- * stores under a new path, so a new picture gets a new address and no
- * cache — the browser's or the CDN's — can keep showing the old one.
- */
-export function pictureUrl(base: string, slot: "cover" | "open-cover" | "button", path: string | null) {
-  const tag = (path ?? "").split("/").pop()?.replace(/\.[a-z0-9]+$/i, "").split("-").pop() ?? "0";
-  return `${base}/${slot}?v=${tag}`;
-}
-
 export async function findPage(host: string, slug: string | null) {
   const supabase = createAdminClient();
   const domain = host.toLowerCase().replace(/^www\./, "").split(":")[0];
