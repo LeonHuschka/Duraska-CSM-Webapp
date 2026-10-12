@@ -49,13 +49,31 @@ export function FunnelClient({
       .catch(() => {});
   }, [base, breakout]);
 
+  const leave = () => {
+    if (!href) return;
+    const target = new URL(href, location.href).toString();
+    // In Instagram's browser on iPhone there is no API that opens Safari;
+    // the x-safari scheme works on some versions and is ignored on others.
+    // Try it, and if the page is still showing a moment later, go straight
+    // to the destination inside the app — a tap must never do nothing.
+    if (inApp === "ios") {
+      const t0 = Date.now();
+      location.href = `x-safari-${target}`;
+      setTimeout(() => {
+        if (document.visibilityState === "visible" && Date.now() - t0 < 2500) location.href = target;
+      }, 900);
+      return;
+    }
+    location.href = target;
+  };
+
   const go = () => {
     if (!href) return;
     if (ageGate && !gate) {
       setGate(true);
       return;
     }
-    location.href = href;
+    leave();
   };
 
   const card = (
@@ -115,7 +133,7 @@ export function FunnelClient({
         <p style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>This page is for adults only. Are you 18 or older?</p>
         <button
           type="button"
-          onClick={() => href && (location.href = href)}
+          onClick={leave}
           style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 700, background: "#fff", color: "#000" }}
         >
           Yes, I am 18+
@@ -132,28 +150,12 @@ export function FunnelClient({
   }
 
   if (inApp === "ios") {
-    const here = typeof location !== "undefined" ? location.href : "";
     return (
-      <div style={{ marginTop: 14 }}>
-        <a
-          href={`x-safari-${here}`}
-          style={{
-            display: "block",
-            borderRadius: 14,
-            padding: "14px 18px",
-            fontSize: 15,
-            fontWeight: 700,
-            background: "#fff",
-            color: "#000",
-            textDecoration: "none",
-          }}
-        >
-          Open in Safari to continue
-        </a>
-        <p style={{ margin: "8px 0 0", fontSize: 12, color: "rgba(255,255,255,.7)" }}>
-          or tap <b>···</b> at the top right and choose <b>Open in browser</b>
-        </p>
+      <div>
         {card}
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
+          Best in Safari: tap <b>···</b> top right, then <b>Open in browser</b>
+        </p>
       </div>
     );
   }
