@@ -24,12 +24,15 @@ export function FunnelClient({
   image,
   ageGate,
   breakout,
+  openUrl,
 }: {
   base: string;
   label: string;
   image: string | null;
   ageGate: boolean;
   breakout: boolean;
+  /** The real page's own address — what the app is asked to open outside. */
+  openUrl: string;
 }) {
   const [target, setTarget] = useState<string | null>(null);
   const [env, setEnv] = useState<Env>("browser");
@@ -68,7 +71,7 @@ export function FunnelClient({
         // Ask once, on load. Nothing happening after a moment means the fan
         // said no, or this app ignores the scheme; the card then explains.
         if (breakout && e !== "browser" && !ageGate) {
-          location.replace(outside(t));
+          location.replace(outside(openUrl));
           setTimeout(() => {
             if (document.visibilityState === "visible") setAsked(true);
           }, 1500);
@@ -76,7 +79,7 @@ export function FunnelClient({
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, breakout, ageGate]);
+  }, [base, breakout, ageGate, openUrl]);
 
   const leave = () => {
     if (!target) return;
@@ -85,7 +88,7 @@ export function FunnelClient({
       return;
     }
     // Inside the app: ask again, never open the destination here.
-    location.replace(outside(target));
+    location.replace(outside(openUrl));
     setTimeout(() => {
       if (document.visibilityState === "visible") setAsked(true);
     }, 1200);
@@ -105,8 +108,7 @@ export function FunnelClient({
   // app's link preview follows redirects and would show Meta the
   // destination. "Open Link" then opens this page in Safari, where the
   // card goes straight through. In a real browser the link is the redirect.
-  const hrefForLink =
-    env === "browser" ? (target ?? "#") : typeof location !== "undefined" ? location.href : "#";
+  const hrefForLink = env === "browser" ? (target ?? "#") : openUrl;
   const card = (
     <a
       href={hrefForLink}

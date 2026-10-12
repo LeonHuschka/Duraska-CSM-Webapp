@@ -50,6 +50,10 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
             <a href={url} target="_blank" rel="noreferrer" className="font-mono text-primary">
               {url}
             </a>
+            <span className="text-muted-foreground"> → </span>
+            <a href={`${url}/open`} target="_blank" rel="noreferrer" className="font-mono text-primary">
+              {url}/open
+            </a>
             {!page.destination_url && <span className="ml-2 text-amber-400">· no destination set yet</span>}
             {!page.enabled && <span className="ml-2 text-rose-400">· page disabled</span>}
             {canEdit && (
@@ -79,8 +83,9 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
       </div>
 
       {/* KPIs against the period before */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Kpi label="Page views" value={nf.format(d.views)} delta={change(d.views, d.prev.views)} />
+        <Kpi label="Made it to the real page" value={nf.format(d.opened)} delta={change(d.opened, d.prev.opened)} />
         <Kpi label="Link clicks" value={nf.format(d.clicks)} delta={change(d.clicks, d.prev.clicks)} />
         <Kpi label="Click rate" value={d.ctr == null ? "—" : `${(d.ctr * 100).toFixed(1)}%`} delta={change(d.ctr, d.prev.ctr)} />
         <Kpi

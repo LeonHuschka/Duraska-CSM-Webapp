@@ -22,11 +22,14 @@ type Ev = {
 
 export type FunnelDashboard = {
   days: Period;
+  /** Visits to the gate (page 1) — every fan's first touch. */
   views: number;
+  /** Visits to the real page (page 2), in a real browser. */
+  opened: number;
   clicks: number;
   ctr: number | null;
   inApp: number;
-  prev: { views: number; clicks: number; ctr: number | null };
+  prev: { views: number; clicks: number; ctr: number | null; opened: number };
   bots: number;
   canary: number;
   blockedCountry: number;
@@ -63,7 +66,12 @@ export async function funnelDashboard(
   const cur = rows.filter((e) => t(e) >= start);
   const prev = rows.filter((e) => t(e) < start);
   const people = cur.filter((e) => !e.bot);
-  const count = (list: Ev[], kind: string) => list.filter((e) => !e.bot && e.kind === kind).length;
+  // A view is page 1 (reason "gate") or, before the gate existed, unmarked;
+  // "open" is page 2, which the same fan reaches a moment later.
+  const isGateView = (e: Ev) => e.kind === "view" && e.reason !== "open";
+  const count = (list: Ev[], kind: string) =>
+    list.filter((e) => !e.bot && (kind === "view" ? isGateView(e) : e.kind === kind)).length;
+  const countOpened = (list: Ev[]) => list.filter((e) => !e.bot && e.kind === "view" && e.reason === "open").length;
   const ctr = (v: number, c: number) => (v > 0 ? c / v : null);
 
   const views = count(cur, "view");
@@ -78,20 +86,20 @@ export async function funnelDashboard(
   for (const e of people) {
     const b = daily.get(dayStart(t(e)));
     if (!b) continue;
-    if (e.kind === "view") b[0]++;
+    if (isGateView(e)) b[0]++;
     else if (e.kind === "click") b[1]++;
   }
   const hourly: [number, number][] = Array.from({ length: 24 }, () => [0, 0]);
   for (const e of people) {
     const h = new Date(e.created_at).getUTCHours();
-    if (e.kind === "view") hourly[h][0]++;
+    if (isGateView(e)) hourly[h][0]++;
     else if (e.kind === "click") hourly[h][1]++;
   }
   const countries: Record<string, { views: number; clicks: number }> = {};
   for (const e of people) {
     if (!e.country) continue;
     const c = (countries[e.country] ??= { views: 0, clicks: 0 });
-    if (e.kind === "view") c.views++;
+    if (isGateView(e)) c.views++;
     else if (e.kind === "click") c.clicks++;
   }
   const tally = (f: (e: Ev) => string | null, list = people) => {
@@ -104,7 +112,7 @@ export async function funnelDashboard(
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
   };
   const sourceOf = (e: Ev) => {
-    if (e.kind !== "view") return null;
+    if (!isGateView(e)) return null;
     if (e.in_app) return "Instagram app";
     if (!e.referrer) return "Direct / typed";
     try {
@@ -122,10 +130,11 @@ export async function funnelDashboard(
   return {
     days,
     views,
+    opened: countOpened(cur),
     clicks,
     ctr: ctr(views, clicks),
-    inApp: people.filter((e) => e.kind === "view" && e.in_app).length,
-    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc) },
+    inApp: people.filter((e) => isGateView(e) && e.in_app).length,
+    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc), opened: countOpened(prev) },
     bots: cur.filter((e) => e.bot).length,
     canary: cur.filter((e) => e.kind === "canary").length,
     blockedCountry: cur.filter((e) => e.kind === "blocked" && !e.bot).length,
@@ -134,7 +143,7 @@ export async function funnelDashboard(
     hourly,
     countries,
     sources: tally(sourceOf).slice(0, 8),
-    platforms: tally((e) => (e.kind === "view" ? e.platform ?? "other" : null)),
+    platforms: tally((e) => (isGateView(e) ? e.platform ?? "other" : null)),
     last: cur.slice(0, 12).map((e) => ({ kind: e.kind, bot: e.bot, country: e.country, platform: e.platform, in_app: e.in_app, at: e.created_at, reason: e.reason })),
   };
 }

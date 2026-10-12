@@ -102,16 +102,26 @@ export function FunnelSettings({
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div className="space-y-6">
         <section className="rounded-xl border border-border/40 bg-card p-5">
-          <h2 className="text-sm font-semibold">Link in bio</h2>
+          <h2 className="text-sm font-semibold">Link in bio — two pages</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            A page on your own domain with a picture, a name and one button. The destination is never in the
-            page&apos;s HTML — it is resolved on the click, after the visitor has been checked for being a
-            person. Put the page link in the Instagram bio or on a story sticker; never the destination itself.
+            <b>Page 1</b> is the address for Instagram. It carries the picture, the name and one button that
+            opens page 2 in the phone&apos;s real browser — in the phone&apos;s language, with the same words
+            the press-and-hold menu uses. Nothing about the destination is on it. <b>Page 2</b> is the real
+            page with the card; its address is never put on Instagram. A visitor who is already in a real
+            browser sees page 2 right away. The destination is resolved only on the click, after the visitor
+            has been checked for being a person.
           </p>
           {link && (
-            <p className="mt-3 rounded-lg bg-muted/40 px-3 py-2 text-xs">
-              Your link: <a href={link} target="_blank" rel="noreferrer" className="font-mono text-primary">{link}</a>
-            </p>
+            <div className="mt-3 space-y-1 rounded-lg bg-muted/40 px-3 py-2 text-xs">
+              <p>
+                Page 1 — put this on Instagram:{" "}
+                <a href={link} target="_blank" rel="noreferrer" className="font-mono text-primary">{link}</a>
+              </p>
+              <p>
+                Page 2 — the real page:{" "}
+                <a href={`${link}/open`} target="_blank" rel="noreferrer" className="font-mono text-primary">{link}/open</a>
+              </p>
+            </div>
           )}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -122,11 +132,11 @@ export function FunnelSettings({
             <Field label="Instagram link (icon under the name)" value={f.instagram_url} onChange={(v) => set("instagram_url", v)} placeholder="https://instagram.com/…" />
             <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the green dot. Leave empty to hide." />
             <Field label="Text line" value={f.bio_line} onChange={(v) => set("bio_line", v)} />
-            <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} />
+            <Field label="Card text (page 2)" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Page 1's button is fixed: “Press and hold to open”, in the phone's language." />
           </div>
           <div className="mt-3">
             <Field
-              label="Destination (the real link — OnlyFans, Fansly…)"
+              label="Destination (page 2's card — OnlyFans, Fansly…)"
               value={f.destination_url}
               onChange={(v) => set("destination_url", v)}
               placeholder="https://onlyfans.com/…"
@@ -188,7 +198,7 @@ export function FunnelSettings({
               <Button type="button" variant="outline" size="sm" disabled={uploading || !page} onClick={() => buttonFileRef.current?.click()}>
                 {uploading ? "Uploading…" : "Upload button picture"}
               </Button>
-              <p className="mt-1 text-[11px] text-muted-foreground">Landscape, roughly 4:3. The picture on the card that is the button.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Landscape, roughly 4:3. The picture on page 2&apos;s card.</p>
             </div>
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
