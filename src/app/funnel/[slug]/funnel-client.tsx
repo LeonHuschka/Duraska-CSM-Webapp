@@ -260,17 +260,22 @@ export function FunnelClient({
   );
 }
 
-/** The OnlyFans mark: the ring and the fan at its shoulder, in its blue. */
+/** The OnlyFans mark: the ring, and the fan leaning on its shoulder. */
 function OnlyFansGlyph() {
   return (
-    <svg width="26" height="18" viewBox="0 0 52 36" aria-hidden="true">
+    <svg width="28" height="20" viewBox="0 0 56 40" aria-hidden="true">
       <path
         fill="#00AFF0"
-        d="M18 0C8.06 0 0 8.06 0 18s8.06 18 18 18 18-8.06 18-18S27.94 0 18 0zm0 23.4a5.4 5.4 0 1 1 0-10.8 5.4 5.4 0 0 1 0 10.8z"
+        fillRule="evenodd"
+        d="M20 0c11.05 0 20 8.95 20 20s-8.95 20-20 20S0 31.05 0 20 8.95 0 20 0zm0 14a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"
+      />
+      <path
+        fill="#8ED8F8"
+        d="M38.5 0H56c-2.3 9.2-9.6 14.1-19.4 14.1C36.6 7.7 32.6 1 38.5 0z"
       />
       <path
         fill="#00AFF0"
-        d="M36.2 0c-1.4 7.2-5.3 10.8-12.1 10.8 0-6 4.9-10.8 10.9-10.8h1.2zM30.6 25.2C40.7 25.2 48.4 20 52 10.8H40.5c-2.6 4-5.3 7-9.9 7v7.4z"
+        d="M56 17c-2.4 9.6-10 15.6-20.4 15.6h-3.4c-.2-1-.3-2.1-.3-3.2 0-1.2.1-2.3.3-3.4h3.4C43.6 26 49.6 22.6 52 17h4z"
       />
     </svg>
   );
