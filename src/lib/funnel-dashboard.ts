@@ -80,7 +80,10 @@ export async function funnelDashboard(
   const count = (list: Ev[], kind: string) =>
     list.filter((e) => !e.bot && (kind === "view" ? isGateView(e) : e.kind === kind)).length;
   const countOpened = (list: Ev[]) => list.filter((e) => !e.bot && e.kind === "view" && e.reason === "open").length;
-  const ctr = (v: number, c: number) => (v > 0 ? c / v : null);
+  // Clicks against the people who saw a page. Until the gate existed, a
+  // real browser went straight to the real page and never counted as a
+  // gate view, so the larger of the two is the honest denominator.
+  const ctr = (v: number, c: number, o = 0) => (Math.max(v, o) > 0 ? c / Math.max(v, o) : null);
 
   const views = count(cur, "view");
   const clicks = count(cur, "click");
@@ -151,9 +154,9 @@ export async function funnelDashboard(
     views,
     opened: countOpened(cur),
     clicks,
-    ctr: ctr(views, clicks),
+    ctr: ctr(views, clicks, countOpened(cur)),
     inApp: people.filter((e) => isGateView(e) && e.in_app).length,
-    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc), opened: countOpened(prev) },
+    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc, countOpened(prev)), opened: countOpened(prev) },
     bots: cur.filter((e) => e.bot).length,
     canary: cur.filter((e) => e.kind === "canary").length,
     blockedCountry: cur.filter((e) => e.kind === "blocked" && !e.bot).length,

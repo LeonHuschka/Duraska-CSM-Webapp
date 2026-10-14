@@ -298,7 +298,9 @@
       "Bash(grep -o 'aspect-ratio:4 / 3[^>]\\\\{0,40\\\\}' /tmp/open.html)",
       "Bash(sed -i '' 's/  fileRef: React.RefObject<HTMLInputElement | null>;/  fileRef: React.RefObject<HTMLInputElement>;/' src/components/settings/funnel-settings.tsx)",
       "Bash(sed -i '' 's/hint=\"With the green dot. Leave empty to hide.\"/hint=\"The pill with the pulsing green dot on page 2\\\\x27s card. Leave empty to hide.\"/' src/components/settings/funnel-settings.tsx)",
-      "Bash(sed -i '' 's/hint=\"Page 1\\\\x27s button is fixed: “Press and hold to open”, in the phone\\\\x27s language.\"/hint=\"The OnlyFans button on the card. Page 1\\\\x27s button is fixed: “Press and hold to open”, in the phone\\\\x27s language.\"/' src/components/settings/funnel-settings.tsx)"
+      "Bash(sed -i '' 's/hint=\"Page 1\\\\x27s button is fixed: “Press and hold to open”, in the phone\\\\x27s language.\"/hint=\"The OnlyFans button on the card. Page 1\\\\x27s button is fixed: “Press and hold to open”, in the phone\\\\x27s language.\"/' src/components/settings/funnel-settings.tsx)",
+      "Bash(python3 /private/tmp/claude-501/-Users-leon-Desktop-DURASKA-STUDIOS-fansly-CSM/44aae5be-9e43-4575-aa4d-51f6b5fd5f3e/scratchpad/restructure2.py)",
+      "Bash(npx --yes tsx /private/tmp/claude-501/-Users-leon-Desktop-DURASKA-STUDIOS-fansly-CSM/44aae5be-9e43-4575-aa4d-51f6b5fd5f3e/scratchpad/iptest.ts)"
     ]
   }
 }
