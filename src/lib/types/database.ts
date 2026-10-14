@@ -841,6 +841,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      funnel_links: {
+        Row: {
+          id: string;
+          page_id: string;
+          slug: string;
+          label: string;
+          enabled: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          page_id: string;
+          slug: string;
+          label?: string;
+          enabled?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          page_id?: string;
+          slug?: string;
+          label?: string;
+          enabled?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       funnel_events: {
         Row: {
           id: number;
@@ -853,6 +880,7 @@ export type Database = {
           referrer: string | null;
           in_app: boolean;
           platform: string | null;
+          slug: string | null;
           created_at: string;
         };
         Insert: {
@@ -866,6 +894,7 @@ export type Database = {
           referrer?: string | null;
           in_app?: boolean;
           platform?: string | null;
+          slug?: string | null;
           created_at?: string;
         };
         Update: {
@@ -879,6 +908,7 @@ export type Database = {
           referrer?: string | null;
           in_app?: boolean;
           platform?: string | null;
+          slug?: string | null;
           created_at?: string;
         };
         Relationships: [];

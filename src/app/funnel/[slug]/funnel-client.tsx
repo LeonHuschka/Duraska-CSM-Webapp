@@ -20,6 +20,7 @@ type Env = "ios-app" | "android-app" | "browser";
 
 export function FunnelClient({
   base,
+  slug,
   k,
   label,
   status,
@@ -30,6 +31,8 @@ export function FunnelClient({
   preview = false,
 }: {
   base: string;
+  /** The address this page was reached through. */
+  slug: string;
   /** The key the page was opened with; the config wants it, or the pass cookie. */
   k: string | null;
   label: string;
@@ -72,7 +75,9 @@ export function FunnelClient({
     if (preview) return;
     const e = environment();
     setEnv(e);
-    fetch(`${base}/config${k ? `?k=${encodeURIComponent(k)}` : ""}`, { credentials: "same-origin", cache: "no-store" })
+    const q = new URLSearchParams({ s: slug });
+    if (k) q.set("k", k);
+    fetch(`${base}/config?${q}`, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!j || typeof j.href !== "string") return;
@@ -89,7 +94,7 @@ export function FunnelClient({
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, k, breakout, ageGate, openUrl, preview]);
+  }, [base, slug, k, breakout, ageGate, openUrl, preview]);
 
   const leave = () => {
     if (!target) return;

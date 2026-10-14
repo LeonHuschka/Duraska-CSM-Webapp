@@ -21,6 +21,7 @@ export function FunnelShell({
   lang,
   coverSrc,
   fill = "100dvh",
+  link = null,
   children,
 }: {
   page: ShellPage;
@@ -31,6 +32,8 @@ export function FunnelShell({
   coverSrc: string | null;
   /** The page's minimum height — the viewport, or the editor's phone frame. */
   fill?: string;
+  /** Which of the page's addresses this is, for the canary. */
+  link?: string | null;
   children: React.ReactNode;
 }) {
   const nf = new Intl.NumberFormat("en-US");
@@ -114,7 +117,7 @@ export function FunnelShell({
 
           {/* Nothing a person can see or tap; only a crawler follows it. */}
           <a
-            href={`${base}/c`}
+            href={link ? `${base}/c?s=${encodeURIComponent(link)}` : `${base}/c`}
             aria-hidden="true"
             tabIndex={-1}
             rel="nofollow"

@@ -25,11 +25,14 @@ const IN_APP = /\bInstagram\b|\bFBAN\b|\bFBAV\b|\bFB_IAB\b|\bThreads\b|\bBarcelo
 
 export function GateClient({
   base,
+  slug,
   copy,
   breakout,
   preview = false,
 }: {
   base: string;
+  /** The address this gate was reached through. */
+  slug: string;
   copy: GateCopy;
   breakout: boolean;
   /** In the editor: drawn, but never asks for a key or leaves. */
@@ -41,7 +44,7 @@ export function GateClient({
 
   const fetchKey = (): Promise<string | null> => {
     if (preview) return Promise.resolve(null);
-    key.current ??= fetch(`${base}/key`, { credentials: "same-origin", cache: "no-store" })
+    key.current ??= fetch(`${base}/key?s=${encodeURIComponent(slug)}`, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok && r.status === 200 ? r.json() : null))
       .then((j) => (j && typeof j.u === "string" ? j.u : null))
       .catch(() => null);

@@ -17,6 +17,7 @@ type Ev = {
   referrer: string | null;
   in_app: boolean;
   platform: string | null;
+  slug: string | null;
   created_at: string;
 };
 
@@ -42,6 +43,8 @@ export type FunnelDashboard = {
   countries: Record<string, { views: number; clicks: number }>;
   sources: [string, number][];
   platforms: [string, number][];
+  /** Each of the page's addresses: what it brought, and when it last saw anyone. */
+  links: { slug: string; views: number; opened: number; clicks: number; last: string | null }[];
   last: { kind: string; bot: boolean; country: string | null; platform: string | null; in_app: boolean; at: string; reason: string | null }[];
 };
 
@@ -50,7 +53,9 @@ export async function funnelDashboard(
   pageId: string,
   days: Period,
   /** Countries left out entirely — where the team tests from. */
-  ignored: string[] = []
+  ignored: string[] = [],
+  /** The page's own slug: events from before links existed belong to it. */
+  primarySlug = ""
 ): Promise<FunnelDashboard> {
   const DAY = 86_400_000;
   const now = Date.now();
@@ -58,7 +63,7 @@ export async function funnelDashboard(
   const prevStart = start - days * DAY;
   const { data } = await supabase
     .from("funnel_events")
-    .select("kind, bot, reason, country, referrer, in_app, platform, created_at")
+    .select("kind, bot, reason, country, referrer, in_app, platform, slug, created_at")
     .eq("page_id", pageId)
     .gte("created_at", new Date(prevStart).toISOString())
     .order("created_at", { ascending: false })
@@ -130,6 +135,17 @@ export async function funnelDashboard(
     }
   };
 
+  const links = new Map<string, FunnelDashboard["links"][number]>();
+  for (const e of people) {
+    const slug = e.slug ?? primarySlug;
+    const l = links.get(slug) ?? { slug, views: 0, opened: 0, clicks: 0, last: null };
+    if (isGateView(e)) l.views++;
+    else if (e.kind === "view" && e.reason === "open") l.opened++;
+    else if (e.kind === "click") l.clicks++;
+    if (e.kind === "view" || e.kind === "click") l.last = l.last ?? e.created_at; // rows come newest first
+    links.set(slug, l);
+  }
+
   return {
     days,
     views,
@@ -147,6 +163,7 @@ export async function funnelDashboard(
     countries,
     sources: tally(sourceOf).slice(0, 8),
     platforms: tally((e) => (isGateView(e) ? e.platform ?? "other" : null)),
+    links: Array.from(links.values()).sort((a, b) => b.views - a.views),
     last: cur.slice(0, 12).map((e) => ({ kind: e.kind, bot: e.bot, country: e.country, platform: e.platform, in_app: e.in_app, at: e.created_at, reason: e.reason })),
   };
 }

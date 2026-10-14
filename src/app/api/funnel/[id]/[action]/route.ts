@@ -8,6 +8,7 @@ import {
   issueKey,
   issuePass,
   issueTicket,
+  linkSlug,
   logEvent,
   readCookie,
   readVisitor,
@@ -40,6 +41,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { data: page } = await supabase.from("funnel_pages").select("*").eq("id", id).maybeSingle();
   if (!page || !page.enabled) return new NextResponse("not found", { status: 404 });
   const v = readVisitor(req);
+  // Which of the page's addresses this came through; the page's own if unsure.
+  const link = (await linkSlug(page, new URL(req.url).searchParams.get("s"))) ?? page.slug;
+  const live = { ...page, link };
 
   const noStore = { "cache-control": "no-store" };
 
@@ -47,11 +51,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     case "key": {
       // Nothing for a crawler — not even an empty answer worth reading.
       if (v.bot || (await tripped(page, v))) {
-        await logEvent(page, v, "blocked", `key: ${v.bot ?? "tripped the canary"}`);
+        await logEvent(live, v, "blocked", `key: ${v.bot ?? "tripped the canary"}`);
         return new NextResponse(null, { status: 204, headers: noStore });
       }
       return NextResponse.json(
-        { u: `https://${page.domain}/${page.slug}/open?k=${issueKey(req)}` },
+        { u: `https://${page.domain}/${link}/open?k=${issueKey(req)}` },
         { headers: noStore }
       );
     }
@@ -63,7 +67,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       if (v.bot || (await tripped(page, v)) || !(checkKey(req, k) || checkPass(req, page.id, pass))) {
         return NextResponse.json({ href: null }, { headers: noStore });
       }
-      const res = NextResponse.json({ href: `/api/funnel/${page.id}/go?t=${issueTicket(req)}` }, { headers: noStore });
+      const res = NextResponse.json(
+        { href: `/api/funnel/${page.id}/go?t=${issueTicket(req)}&s=${encodeURIComponent(link)}` },
+        { headers: noStore }
+      );
       res.cookies.set("fp", issuePass(req, page.id), {
         httpOnly: true,
         secure: true,
@@ -77,25 +84,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     case "go": {
       if (!page.destination_url) return new NextResponse("not set up yet", { status: 404 });
       if (v.bot) {
-        await logEvent(page, v, "blocked", v.bot);
+        await logEvent(live, v, "blocked", v.bot);
         // The same page, so a bot following the link learns nothing.
-        return NextResponse.redirect(new URL(`/${page.slug}`, req.url), 302);
+        return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (!checkTicket(req, new URL(req.url).searchParams.get("t"))) {
         // A redirect address fetched from somewhere else, later, by
         // someone else. Nothing to see.
-        await logEvent(page, v, "blocked", "no ticket for this address");
-        return NextResponse.redirect(new URL(`/${page.slug}`, req.url), 302);
+        await logEvent(live, v, "blocked", "no ticket for this address");
+        return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (await tripped(page, v)) {
-        await logEvent(page, v, "blocked", "tripped the canary");
-        return NextResponse.redirect(new URL(`/${page.slug}`, req.url), 302);
+        await logEvent(live, v, "blocked", "tripped the canary");
+        return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (blockedByCountry(page, v)) {
-        await logEvent(page, v, "blocked", `country ${v.country}`);
+        await logEvent(live, v, "blocked", `country ${v.country}`);
         return new NextResponse("not available in your region", { status: 451 });
       }
-      await logEvent(page, v, "click");
+      await logEvent(live, v, "click");
       return NextResponse.redirect(page.destination_url, {
         status: 302,
         headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
@@ -103,7 +110,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     case "c": {
-      await logEvent(page, v, "canary", "followed the hidden link");
+      await logEvent(live, v, "canary", "followed the hidden link");
       return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
     }
 

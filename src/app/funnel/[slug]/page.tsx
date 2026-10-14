@@ -42,8 +42,9 @@ export default async function GatePage({ params }: { params: Promise<{ slug: str
       followers={followers}
       lang={lang}
       coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
+      link={page.link}
     >
-      <GateClient base={base} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
+      <GateClient base={base} slug={page.link} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
     </FunnelShell>
   );
 }

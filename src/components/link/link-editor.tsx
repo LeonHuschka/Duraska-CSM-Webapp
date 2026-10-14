@@ -3,12 +3,19 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ExternalLink, Save, Smartphone } from "lucide-react";
+import { ExternalLink, Plus, Save, Smartphone, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
-import { saveFunnelPage, setFunnelCover, type FunnelForm, type PictureSlot } from "@/app/(editor)/link/editor/actions";
+import {
+  addFunnelLink,
+  removeFunnelLink,
+  saveFunnelPage,
+  setFunnelCover,
+  type FunnelForm,
+  type PictureSlot,
+} from "@/app/(editor)/link/editor/actions";
 import type { Database } from "@/lib/types/database";
 import { gateCopy } from "@/lib/funnel-i18n";
 import { FunnelShell } from "@/app/funnel/[slug]/shell";
@@ -16,6 +23,7 @@ import { GateClient } from "@/app/funnel/[slug]/gate-client";
 import { FunnelClient } from "@/app/funnel/[slug]/funnel-client";
 
 type Page = Database["public"]["Tables"]["funnel_pages"]["Row"];
+type SiblingLink = { id: string; slug: string; label: string; enabled: boolean };
 type Pictures = Record<PictureSlot, string | null>;
 
 const LANGS: [string, string][] = [
@@ -40,17 +48,21 @@ export function LinkEditor({
   page,
   pictures,
   followers,
+  links,
 }: {
   personaId: string;
   personaName: string;
   page: Page | null;
   pictures: Pictures;
   followers: number | null;
+  links: SiblingLink[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [uploading, setUploading] = useState<PictureSlot | null>(null);
   const [shown, setShown] = useState<1 | 2>(1);
+  const [newLink, setNewLink] = useState({ slug: "", label: "" });
+  const [linkBusy, setLinkBusy] = useState(false);
   const [lang, setLang] = useState("de");
   const [pics, setPics] = useState<Pictures>(pictures);
   const [f, setF] = useState<FunnelForm>({
@@ -131,6 +143,25 @@ export function LinkEditor({
     }
   }
 
+  async function addLink() {
+    if (!page) return;
+    setLinkBusy(true);
+    const res = await addFunnelLink(page.id, newLink.slug, newLink.label);
+    setLinkBusy(false);
+    if (res.error) return toast.error(res.error);
+    setNewLink({ slug: "", label: "" });
+    toast.success("Link added — it works right away");
+    router.refresh();
+  }
+
+  async function removeLink(l: SiblingLink) {
+    if (!confirm(`Remove ${l.slug}? Whoever has it in a bio gets a dead link.`)) return;
+    const res = await removeFunnelLink(l.id);
+    if (res.error) return toast.error(res.error);
+    toast.success("Link removed");
+    router.refresh();
+  }
+
   const domain = f.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const link = domain ? `https://${domain}/${f.slug || "ig"}` : null;
   const base = page ? `/api/funnel/${page.id}` : "/api/funnel/none";
@@ -186,11 +217,46 @@ export function LinkEditor({
 
       <div className="grid flex-1 gap-6 p-4 lg:grid-cols-[minmax(0,1fr)_440px] lg:p-6">
         <div className="space-y-5">
-          <Section title="Addresses" lead="The domain and the path. Page 1 is the path itself, page 2 is the path plus /open.">
+          <Section title="Addresses" lead="The domain and the main path. Page 1 is the path itself, page 2 is the path plus /open.">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Domain" value={f.domain} onChange={(v) => set("domain", v)} placeholder="sarahprice.link" />
-              <Field label="Path" value={f.slug} onChange={(v) => set("slug", v)} placeholder="ig" />
+              <Field label="Main path" value={f.slug} onChange={(v) => set("slug", v)} placeholder="ig" />
             </div>
+          </Section>
+
+          <Section
+            title="Links — one per account"
+            lead="The same page under more addresses, one per account. A flag on Instagram hits one address, not all, and the Link tab shows what each account brings. Links work the moment they are added."
+          >
+            {links.length > 0 && (
+              <ul className="mb-3 divide-y divide-border/40 rounded-lg border border-border/40">
+                {links.map((l) => (
+                  <li key={l.id} className="flex items-center gap-3 px-3 py-2 text-xs">
+                    <span className="font-mono text-primary">
+                      {domain || "…"}/{l.slug}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">{l.label || "—"}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeLink(l)}
+                      className="rounded-md p-1 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400"
+                      aria-label={`Remove ${l.slug}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <Field label="Path" value={newLink.slug} onChange={(v) => setNewLink((s) => ({ ...s, slug: v }))} placeholder="sp3" />
+              <Field label="Whose" value={newLink.label} onChange={(v) => setNewLink((s) => ({ ...s, label: v }))} placeholder="Lyza · @sarahpricexo" />
+              <Button type="button" variant="outline" size="sm" className="h-9" disabled={!page || linkBusy || !newLink.slug.trim()} onClick={addLink}>
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {linkBusy ? "Adding…" : "Add link"}
+              </Button>
+            </div>
+            {!page && <p className="mt-2 text-[11px] text-muted-foreground">Create the page first, then add links.</p>}
           </Section>
 
           <Section title="Head — on both pages" lead="The picture fades into black, the name sits on it, the handle and the Instagram icon under it.">
@@ -329,12 +395,13 @@ export function LinkEditor({
             <div className="h-[720px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
               {shown === 1 ? (
                 <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.cover} fill="100%">
-                  <GateClient base={base} copy={gateCopy(lang)} breakout={f.breakout} preview />
+                  <GateClient base={base} slug={f.slug || "ig"} copy={gateCopy(lang)} breakout={f.breakout} preview />
                 </FunnelShell>
               ) : (
                 <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.open_cover ?? pics.cover} fill="100%">
                   <FunnelClient
                     base={base}
+                    slug={f.slug || "ig"}
                     k={null}
                     label={f.button_label}
                     status={f.status_text}

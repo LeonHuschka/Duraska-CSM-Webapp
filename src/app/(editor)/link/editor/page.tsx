@@ -40,11 +40,14 @@ export default async function LinkEditorPage() {
     const { data } = await supabase.storage.from("content-assets").createSignedUrl(path, 3600);
     return data?.signedUrl ?? null;
   };
-  const [coverUrl, openCoverUrl, buttonUrl, followers] = await Promise.all([
+  const [coverUrl, openCoverUrl, buttonUrl, followers, { data: links }] = await Promise.all([
     sign(page?.cover_path ?? null),
     sign(page?.open_cover_path ?? null),
     sign(page?.button_image_path ?? null),
     totalFollowers(supabase, personaId),
+    page
+      ? supabase.from("funnel_links").select("id, slug, label, enabled").eq("page_id", page.id).order("created_at")
+      : Promise.resolve({ data: [] as { id: string; slug: string; label: string; enabled: boolean }[] }),
   ]);
 
   return (
@@ -54,6 +57,7 @@ export default async function LinkEditorPage() {
       page={page}
       pictures={{ cover: coverUrl, open_cover: openCoverUrl, button: buttonUrl }}
       followers={followers}
+      links={links ?? []}
     />
   );
 }

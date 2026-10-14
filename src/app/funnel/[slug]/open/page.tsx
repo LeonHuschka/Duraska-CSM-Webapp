@@ -56,8 +56,9 @@ export default async function OpenPage({
         followers={followers}
         lang={lang}
         coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
+        link={page.link}
       >
-        <GateClient base={base} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
+        <GateClient base={base} slug={page.link} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
       </FunnelShell>
     );
   }
@@ -75,9 +76,11 @@ export default async function OpenPage({
             ? pictureUrl(base, "cover", page.cover_path)
             : null
       }
+      link={page.link}
     >
       <FunnelClient
         base={base}
+        slug={page.link}
         k={k}
         label={page.button_label}
         status={page.status_text}
@@ -90,7 +93,7 @@ export default async function OpenPage({
         }
         ageGate={page.age_gate}
         breakout={page.breakout}
-        openUrl={`https://${host}/${page.slug}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
+        openUrl={`https://${host}/${page.link}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
       />
     </FunnelShell>
   );

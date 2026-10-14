@@ -128,17 +128,46 @@ export function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-export async function findPage(host: string, slug: string | null) {
+/** A page as it was reached: through its own slug or one of its sibling links. */
+export type LivePage = FunnelPage & { link: string };
+
+/**
+ * One domain, one page, many addresses: the page's own slug and the
+ * sibling links — one per account, so a flag on one shows as that one
+ * going quiet. Any of them opens the same page.
+ */
+export async function findPage(host: string, slug: string | null): Promise<LivePage | null> {
   const supabase = createAdminClient();
   const domain = host.toLowerCase().replace(/^www\./, "").split(":")[0];
-  let q = supabase.from("funnel_pages").select("*").eq("domain", domain).eq("enabled", true);
-  q = slug ? q.eq("slug", slug) : q.order("created_at", { ascending: true });
-  const { data } = await q.limit(1).maybeSingle();
-  return data;
+  const { data: page } = await supabase
+    .from("funnel_pages")
+    .select("*")
+    .eq("domain", domain)
+    .eq("enabled", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!page) return null;
+  const link = await linkSlug(page, slug);
+  return link ? { ...page, link } : null;
+}
+
+/** The slug if it is one of the page's addresses, else null; none given means the page's own. */
+export async function linkSlug(page: FunnelPage, slug: string | null): Promise<string | null> {
+  if (!slug || slug === page.slug) return page.slug;
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("funnel_links")
+    .select("slug")
+    .eq("page_id", page.id)
+    .eq("slug", slug)
+    .eq("enabled", true)
+    .maybeSingle();
+  return data?.slug ?? null;
 }
 
 export async function logEvent(
-  page: FunnelPage,
+  page: FunnelPage & { link?: string },
   v: Visitor,
   kind: "view" | "click" | "canary" | "blocked",
   reason?: string | null
@@ -154,6 +183,7 @@ export async function logEvent(
     referrer: v.referrer,
     in_app: v.inApp,
     platform: v.platform,
+    slug: page.link ?? page.slug,
   });
 }
 

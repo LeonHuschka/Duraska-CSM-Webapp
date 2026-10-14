@@ -35,7 +35,21 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
     );
   }
 
-  const d = await funnelDashboard(supabase, page.id, days, page.ignored_countries ?? []);
+  const [d, { data: siblings }] = await Promise.all([
+    funnelDashboard(supabase, page.id, days, page.ignored_countries ?? [], page.slug),
+    supabase.from("funnel_links").select("slug, label, enabled").eq("page_id", page.id).order("created_at"),
+  ]);
+  // Every address the page has, with what it did — a link nobody has
+  // visited for two days while others are busy is the one to look at.
+  const addresses = [
+    { slug: page.slug, label: "main", enabled: true },
+    ...(siblings ?? []).map((l) => ({ slug: l.slug, label: l.label || "—", enabled: l.enabled })),
+  ].map((a) => {
+    const s = d.links.find((l) => l.slug === a.slug);
+    const lastMs = s?.last ? new Date(s.last).getTime() : null;
+    const quietDays = lastMs ? Math.floor((Date.now() - lastMs) / 86_400_000) : null;
+    return { ...a, views: s?.views ?? 0, opened: s?.opened ?? 0, clicks: s?.clicks ?? 0, last: s?.last ?? null, quietDays };
+  });
   const url = `https://${page.domain}/${page.slug}`;
   const top = Object.entries(d.countries)
     .sort((a, b) => b[1].views - a[1].views)
@@ -83,6 +97,50 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
           ))}
         </div>
         </div>
+      </div>
+
+      {/* Each address: one per account */}
+      <div className="rounded-2xl border border-border/50 bg-card p-5">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-medium">Links — one per account</h3>
+          <p className="text-[11px] text-muted-foreground">same page, own address each · a flag hits one, not all</p>
+        </div>
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <tr className="text-left">
+              <th className="pb-2 font-medium">Address</th>
+              <th className="pb-2 font-medium">Whose</th>
+              <th className="pb-2 text-right font-medium">Views</th>
+              <th className="pb-2 text-right font-medium">Real page</th>
+              <th className="pb-2 text-right font-medium">Clicks</th>
+              <th className="pb-2 text-right font-medium">Last visit</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/40">
+            {addresses.map((a) => (
+              <tr key={a.slug} className={a.enabled ? "" : "opacity-50"}>
+                <td className="py-2">
+                  <a href={`https://${page.domain}/${a.slug}`} target="_blank" rel="noreferrer" className="font-mono text-primary">
+                    {page.domain}/{a.slug}
+                  </a>
+                </td>
+                <td className="py-2 text-muted-foreground">{a.label}</td>
+                <td className="py-2 text-right tabular-nums">{nf.format(a.views)}</td>
+                <td className="py-2 text-right tabular-nums">{nf.format(a.opened)}</td>
+                <td className="py-2 text-right tabular-nums">{nf.format(a.clicks)}</td>
+                <td className="py-2 text-right tabular-nums">
+                  {a.last == null ? (
+                    <span className="text-muted-foreground">no visits yet</span>
+                  ) : a.quietDays != null && a.quietDays >= 2 ? (
+                    <span className="text-amber-400">quiet for {a.quietDays} days</span>
+                  ) : (
+                    new Date(a.last).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {/* KPIs against the period before */}

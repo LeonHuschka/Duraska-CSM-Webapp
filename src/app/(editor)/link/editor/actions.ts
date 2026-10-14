@@ -117,3 +117,34 @@ export async function setFunnelCover(id: string, path: string | null, slot: Pict
   revalidatePath("/link/editor");
   return { error: null };
 }
+
+/** A sibling address for one account; the page is the same. */
+export async function addFunnelLink(pageId: string, slug: string, label: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  const s = slug.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+  if (!/^[a-z0-9-]{1,40}$/.test(s)) return { error: "The path may only contain letters, digits and dashes" };
+  if (["open", "api", "funnel", "_"].includes(s)) return { error: "That path is taken by the site itself" };
+  const { data: page } = await supabase.from("funnel_pages").select("slug").eq("id", pageId).eq("persona_id", personaId).maybeSingle();
+  if (!page) return { error: "No such page" };
+  if (page.slug === s) return { error: "That is the page's own path already" };
+  const { error } = await supabase.from("funnel_links").insert({ page_id: pageId, slug: s, label: label.trim().slice(0, 80) });
+  if (error) return { error: error.code === "23505" ? "That path exists already" : error.message };
+  revalidatePath("/link/editor");
+  revalidatePath("/");
+  return { error: null };
+}
+
+export async function removeFunnelLink(id: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  const { error } = await supabase.from("funnel_links").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/link/editor");
+  revalidatePath("/");
+  return { error: null };
+}
