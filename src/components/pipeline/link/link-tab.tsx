@@ -51,10 +51,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
             <a href={url} target="_blank" rel="noreferrer" className="font-mono text-primary">
               {url}
             </a>
-            <span className="text-muted-foreground"> → </span>
-            <a href={`${url}/open`} target="_blank" rel="noreferrer" className="font-mono text-primary">
-              {url}/open
-            </a>
+            <span className="text-muted-foreground"> · the real page opens only through the gate</span>
             {!page.destination_url && <span className="ml-2 text-amber-400">· no destination set yet</span>}
             {!page.enabled && <span className="ml-2 text-rose-400">· page disabled</span>}
           </p>

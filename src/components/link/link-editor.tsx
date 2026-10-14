@@ -156,10 +156,8 @@ export function LinkEditor({
                   {link}
                 </a>
                 <span> for Instagram · </span>
-                <a href={`${link}/open`} target="_blank" rel="noreferrer" className="font-mono text-primary">
-                  {link}/open
-                </a>
-                <span> is the real page</span>
+                <span className="font-mono">{link}/open</span>
+                <span> is the real page — it opens only through the gate&apos;s button, never from the address alone</span>
               </>
             ) : (
               "Set a domain to get the links"
@@ -171,13 +169,13 @@ export function LinkEditor({
         </span>
         {link && page && (
           <a
-            href={shown === 1 ? link : `${link}/open`}
+            href={link}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/50 px-3 text-xs hover:bg-muted/40"
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            Open page {shown}
+            Open the page
           </a>
         )}
         <Button size="sm" onClick={save} disabled={pending || (!dirty && !!page)}>
@@ -216,7 +214,7 @@ export function LinkEditor({
 
           <Section
             title="Page 1 — what Instagram sees"
-            lead="Meta's crawler and the in-app browser get this page: the head and one button, in the phone's language. Nothing about the destination is on it."
+            lead="Everyone gets this page — Meta's crawler, a reviewer, the in-app browser, a fan: the head and one button, in the phone's language. Nothing about the destination is on it, and the real page's address is not in it either."
           >
             <Picture
               label="Header picture"
@@ -229,7 +227,7 @@ export function LinkEditor({
             />
           </Section>
 
-          <Section title="Page 2 — the real page" lead="Only ever seen in the phone's own browser. The card is the button.">
+          <Section title="Page 2 — the real page" lead="Opens only through the gate's button, in the phone's own browser; its address alone shows the gate again. The card is the button.">
             <Picture
               label="Header picture"
               url={pics.open_cover}
@@ -331,12 +329,13 @@ export function LinkEditor({
             <div className="h-[720px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
               {shown === 1 ? (
                 <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.cover} fill="100%">
-                  <GateClient openUrl={link ? `${link}/open` : "#"} copy={gateCopy(lang)} breakout={f.breakout} preview />
+                  <GateClient base={base} copy={gateCopy(lang)} breakout={f.breakout} preview />
                 </FunnelShell>
               ) : (
                 <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.open_cover ?? pics.cover} fill="100%">
                   <FunnelClient
                     base={base}
+                    k={null}
                     label={f.button_label}
                     status={f.status_text}
                     image={cardImage}

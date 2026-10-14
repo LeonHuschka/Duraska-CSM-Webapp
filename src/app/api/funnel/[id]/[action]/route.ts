@@ -1,12 +1,28 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { blockedByCountry, checkTicket, issueTicket, logEvent, readVisitor, tripped } from "@/lib/funnel";
+import {
+  blockedByCountry,
+  checkKey,
+  checkPass,
+  checkTicket,
+  issueKey,
+  issuePass,
+  issueTicket,
+  logEvent,
+  readCookie,
+  readVisitor,
+  tripped,
+} from "@/lib/funnel";
 
 /**
- * The landing page's back end, one route with four jobs:
+ * The landing page's back end, one route with these jobs:
  *
+ *   key      the real page's address, with a key bound to the visitor's
+ *            network address — handed out by the gate's script, and only
+ *            to what looks like a person; a crawler gets nothing (204)
  *   config   the button's address — this site's own /go with a ticket
- *            bound to the visitor's address; never the target
+ *            bound to the visitor's address; never the target. Takes the
+ *            key or the pass, and sets the pass as a cookie
  *   go       the redirect, after the visitor and the ticket have been checked
  *   c        the canary: whoever lands here is a crawler, remembered a day
  *   cover    the cover picture, streamed from private storage
@@ -25,16 +41,37 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!page || !page.enabled) return new NextResponse("not found", { status: 404 });
   const v = readVisitor(req);
 
+  const noStore = { "cache-control": "no-store" };
+
   switch (action) {
-    case "config": {
-      // A crawler asking for the config gets an empty answer: no button.
+    case "key": {
+      // Nothing for a crawler — not even an empty answer worth reading.
       if (v.bot || (await tripped(page, v))) {
-        return NextResponse.json({ href: null }, { headers: { "cache-control": "no-store" } });
+        await logEvent(page, v, "blocked", `key: ${v.bot ?? "tripped the canary"}`);
+        return new NextResponse(null, { status: 204, headers: noStore });
       }
       return NextResponse.json(
-        { href: `/api/funnel/${page.id}/go?t=${issueTicket(req)}` },
-        { headers: { "cache-control": "no-store" } }
+        { u: `https://${page.domain}/${page.slug}/open?k=${issueKey(req)}` },
+        { headers: noStore }
       );
+    }
+
+    case "config": {
+      const k = new URL(req.url).searchParams.get("k");
+      const pass = readCookie(req.headers.get("cookie"), "fp");
+      // A crawler, or anyone without the key or the pass, gets no button.
+      if (v.bot || (await tripped(page, v)) || !(checkKey(req, k) || checkPass(req, page.id, pass))) {
+        return NextResponse.json({ href: null }, { headers: noStore });
+      }
+      const res = NextResponse.json({ href: `/api/funnel/${page.id}/go?t=${issueTicket(req)}` }, { headers: noStore });
+      res.cookies.set("fp", issuePass(req, page.id), {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 4 * 3600,
+      });
+      return res;
     }
 
     case "go": {

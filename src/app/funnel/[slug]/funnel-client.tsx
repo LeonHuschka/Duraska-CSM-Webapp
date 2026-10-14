@@ -20,6 +20,7 @@ type Env = "ios-app" | "android-app" | "browser";
 
 export function FunnelClient({
   base,
+  k,
   label,
   status,
   image,
@@ -29,6 +30,8 @@ export function FunnelClient({
   preview = false,
 }: {
   base: string;
+  /** The key the page was opened with; the config wants it, or the pass cookie. */
+  k: string | null;
   label: string;
   /** The line in the green-dot pill — "Available now"; empty hides it. */
   status: string;
@@ -69,7 +72,7 @@ export function FunnelClient({
     if (preview) return;
     const e = environment();
     setEnv(e);
-    fetch(`${base}/config`, { credentials: "same-origin", cache: "no-store" })
+    fetch(`${base}/config${k ? `?k=${encodeURIComponent(k)}` : ""}`, { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!j || typeof j.href !== "string") return;
@@ -86,7 +89,7 @@ export function FunnelClient({
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, breakout, ageGate, openUrl, preview]);
+  }, [base, k, breakout, ageGate, openUrl, preview]);
 
   const leave = () => {
     if (!target) return;

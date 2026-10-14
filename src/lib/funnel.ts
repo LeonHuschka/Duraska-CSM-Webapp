@@ -3,6 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isMetaNetwork } from "@/lib/ip-ranges";
 
 /**
  * The link-in-bio page: who is asking, and should they get the link.
@@ -55,6 +56,8 @@ export function readVisitor(req: Request): Visitor {
   let bot: string | null = null;
   if (!ua) bot = "no user agent";
   else if (BOT_UA.test(ua) && !IN_APP_UA.test(ua)) bot = `ua: ${ua.match(BOT_UA)?.[0] ?? "crawler"}`;
+  // Whatever it calls itself, a request from Meta's own network is Meta looking.
+  else if (isMetaNetwork(ip)) bot = "Meta network";
   // A browser sends these; a script that only sets a user agent does not.
   else if (!h.get("accept-language")) bot = "no accept-language";
   else if (!(h.get("accept") ?? "").includes("text/html") && !h.get("sec-fetch-mode")) bot = "no browser accept";
@@ -63,14 +66,20 @@ export function readVisitor(req: Request): Visitor {
 }
 
 /**
- * The redirect takes a ticket. It is issued with the button's address and
- * bound to the visitor's network address and the quarter hour, so a link
- * that was logged somewhere and fetched later — by a crawler, from another
- * network — is refused. The user agent is left out on purpose: the fan
- * leaves Instagram's browser for Safari between getting the ticket and
- * using it, and the two do not call themselves the same thing.
+ * Three stamps, all signed with the server's secret and bound to the
+ * visitor's network address and a window of time, so a value that was
+ * logged somewhere and used later — by a crawler, from another network —
+ * is refused. The user agent is left out on purpose: the fan leaves
+ * Instagram's browser for Safari between getting a stamp and using it,
+ * and the two do not call themselves the same thing.
+ *
+ *   key     the gate hands it out; it opens the real page   (10 min)
+ *   pass    the real page sets it as a cookie; it keeps the
+ *           real page open on a later visit                  (2 h)
+ *   ticket  the card's address carries it; it takes the
+ *           visitor through the redirect                     (15 min)
  */
-const TICKET_WINDOW_MS = 15 * 60_000;
+const WINDOWS = { key: 10 * 60_000, pass: 2 * 3600_000, ticket: 15 * 60_000 } as const;
 
 function ipKey(req: Request): string {
   const h = req.headers;
@@ -81,23 +90,42 @@ function ipKey(req: Request): string {
   return ip;
 }
 
-function ticketFor(req: Request, window: number): string {
+function stamp(purpose: keyof typeof WINDOWS, req: Request, window: number, scope = ""): string {
   const secret = process.env.CRON_SECRET ?? "funnel";
-  return createHmac("sha256", secret).update(`${ipKey(req)}|${window}`).digest("base64url").slice(0, 24);
+  return createHmac("sha256", secret)
+    .update(`${purpose}|${scope}|${ipKey(req)}|${window}`)
+    .digest("base64url")
+    .slice(0, 24);
 }
 
-export function issueTicket(req: Request): string {
-  return ticketFor(req, Math.floor(Date.now() / TICKET_WINDOW_MS));
+function issue(purpose: keyof typeof WINDOWS, req: Request, scope = ""): string {
+  return stamp(purpose, req, Math.floor(Date.now() / WINDOWS[purpose]), scope);
 }
 
-export function checkTicket(req: Request, ticket: string | null): boolean {
-  if (!ticket) return false;
-  const now = Math.floor(Date.now() / TICKET_WINDOW_MS);
+/** This window and the one before, so a stamp lives one to two windows. */
+function check(purpose: keyof typeof WINDOWS, req: Request, value: string | null, scope = ""): boolean {
+  if (!value) return false;
+  const now = Math.floor(Date.now() / WINDOWS[purpose]);
   for (const w of [now, now - 1]) {
-    const want = ticketFor(req, w);
-    if (want.length === ticket.length && timingSafeEqual(Buffer.from(want), Buffer.from(ticket))) return true;
+    const want = stamp(purpose, req, w, scope);
+    if (want.length === value.length && timingSafeEqual(Buffer.from(want), Buffer.from(value))) return true;
   }
   return false;
+}
+
+export const issueTicket = (req: Request) => issue("ticket", req);
+export const checkTicket = (req: Request, t: string | null) => check("ticket", req, t);
+export const issueKey = (req: Request) => issue("key", req);
+export const checkKey = (req: Request, k: string | null) => check("key", req, k);
+export const issuePass = (req: Request, pageId: string) => issue("pass", req, pageId);
+export const checkPass = (req: Request, pageId: string, p: string | null) => check("pass", req, p, pageId);
+
+export function readCookie(header: string | null, name: string): string | null {
+  for (const part of (header ?? "").split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
 }
 
 export async function findPage(host: string, slug: string | null) {

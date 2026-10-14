@@ -1,27 +1,37 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findPage, logEvent, readVisitor } from "@/lib/funnel";
+import { checkKey, checkPass, findPage, logEvent, readCookie, readVisitor } from "@/lib/funnel";
 import { pictureUrl } from "@/lib/funnel-pictures";
 import { totalFollowers } from "@/lib/funnel-dashboard";
-import { gateLang } from "@/lib/funnel-i18n";
+import { gateCopy, gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "../shell";
 import { FunnelClient } from "../funnel-client";
+import { GateClient } from "../gate-client";
 
 /**
  * Page 2: the real page, the one the gate opens in Safari or Chrome. The
- * same head, and under it the picture card that is the button. The card's
- * address is fetched after load and only ever points at this site; the
- * destination never leaves the server.
+ * same head, and under it the picture card that is the button.
+ *
+ * It opens only with a key in the address — the one the gate fetched for
+ * this visitor's network address minutes ago — or with the pass the card's
+ * config set as a cookie on an earlier visit. Without either, or for
+ * anything that looks like a crawler, this address shows exactly what
+ * page 1 shows: the gate. So the address alone, typed in or fetched from a
+ * log, gives nothing away. The card's link is fetched after load and only
+ * ever points at this site; the destination never leaves the server.
  */
 export const dynamic = "force-dynamic";
 
 export default async function OpenPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ k?: string }>;
 }) {
   const { slug } = await params;
+  const { k = null } = await searchParams;
   const h = await headers();
   const host = h.get("host") ?? "";
   const page = await findPage(host, slug);
@@ -30,19 +40,34 @@ export default async function OpenPage({
   const req = new Request(`https://${host}/${slug}/open`, { headers: h });
   const visitor = readVisitor(req);
   const base = `/api/funnel/${page.id}`;
+  const lang = gateLang(h.get("accept-language"));
+  const admitted = !visitor.bot && (checkKey(req, k) || checkPass(req, page.id, readCookie(h.get("cookie"), "fp")));
+
   const [followers] = await Promise.all([
-    page.show_followers
-      ? totalFollowers(createAdminClient(), page.persona_id)
-      : Promise.resolve(null),
-    logEvent(page, visitor, "view", "open"),
+    page.show_followers ? totalFollowers(createAdminClient(), page.persona_id) : Promise.resolve(null),
+    logEvent(page, visitor, "view", admitted ? "open" : "open-refused"),
   ]);
+
+  if (!admitted) {
+    return (
+      <FunnelShell
+        page={page}
+        base={base}
+        followers={followers}
+        lang={lang}
+        coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
+      >
+        <GateClient base={base} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
+      </FunnelShell>
+    );
+  }
 
   return (
     <FunnelShell
       page={page}
       base={base}
       followers={followers}
-      lang={gateLang(h.get("accept-language"))}
+      lang={lang}
       coverSrc={
         page.open_cover_path
           ? pictureUrl(base, "open-cover", page.open_cover_path)
@@ -53,6 +78,7 @@ export default async function OpenPage({
     >
       <FunnelClient
         base={base}
+        k={k}
         label={page.button_label}
         status={page.status_text}
         image={
@@ -64,7 +90,7 @@ export default async function OpenPage({
         }
         ageGate={page.age_gate}
         breakout={page.breakout}
-        openUrl={`https://${host}/${page.slug}/open`}
+        openUrl={`https://${host}/${page.slug}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
       />
     </FunnelShell>
   );
