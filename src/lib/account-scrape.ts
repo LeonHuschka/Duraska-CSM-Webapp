@@ -565,9 +565,9 @@ export type ScrapeSummary = {
 export async function scrapeAccounts(
   supabase: Sb,
   personaId: string,
-  opts: { full?: boolean; deadline?: number } = {}
+  opts: { full?: boolean; deadline?: number; igPerAccount?: number } = {}
 ): Promise<ScrapeSummary> {
-  const perAccount = opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT;
+  const perAccount = opts.igPerAccount ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT);
   const perPage = opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE;
   const { data: rows } = await supabase
     .from("accounts")

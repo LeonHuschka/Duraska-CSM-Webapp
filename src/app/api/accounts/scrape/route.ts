@@ -69,7 +69,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, covers });
   }
   const full = params.get("full") === "1";
-  const summary = await scrapeAccounts(admin, personaId, { full, deadline: t0 + 250_000 });
+  // ?ig=40 reads that many reels per Instagram account and Facebook as
+  // usual — to bring every Instagram reel up to date without paying for a
+  // full read of the Facebook feeds.
+  const ig = Number(params.get("ig"));
+  const summary = await scrapeAccounts(admin, personaId, {
+    full,
+    deadline: t0 + 250_000,
+    igPerAccount: Number.isFinite(ig) && ig > 0 ? Math.min(100, Math.round(ig)) : undefined,
+  });
   const winners = await announceWinners(admin, personaId);
   return NextResponse.json({ ok: true, summary, winners });
 }
