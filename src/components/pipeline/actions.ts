@@ -234,3 +234,24 @@ export async function setAccountLink(accountId: string, otherId: string | null) 
   revalidatePath("/");
   return { error: null };
 }
+
+/**
+ * An account the platform has disabled. "dead" is the status every part of
+ * the app already leaves out — the scrape, the stock and runway figures,
+ * the vault — so one switch takes it out of all of them. Undone with
+ * "graduated", the status of an account that is posting.
+ */
+export async function setAccountDisabled(accountId: string, disabled: boolean) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  const { error } = await supabase
+    .from("accounts")
+    .update({ status: disabled ? "dead" : "graduated", updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { error: null };
+}

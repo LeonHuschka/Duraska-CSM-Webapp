@@ -19,10 +19,17 @@ import {
   Repeat2,
   TrendingUp,
 } from "lucide-react";
-import { AccountAvatar, PlatformLogo } from "@/components/pipeline/account-avatar";
+import {
+  AccountAvatar,
+  PlatformLogo,
+} from "@/components/pipeline/account-avatar";
 import { AccountControls } from "@/components/pipeline/account-controls";
 import { AddAccountDialog } from "@/components/pipeline/accounts-actions-bar";
-import { setAccountLink, setAccountOrder } from "@/components/pipeline/actions";
+import {
+  setAccountDisabled,
+  setAccountLink,
+  setAccountOrder,
+} from "@/components/pipeline/actions";
 import { useWidth } from "@/components/pipeline/analytics/use-width";
 
 export type ReelTileData = {
@@ -66,6 +73,8 @@ export type AccountTileData = {
   lastSeen: string | null;
   /** Not read for two days while the others were. */
   stale: boolean;
+  /** Disabled by the platform: kept for its history, out of everything else. */
+  disabled: boolean;
   linkedId: string | null;
   sortOrder: number | null;
   profileUrl: string | null;
@@ -84,14 +93,24 @@ const SORTS: { key: SortKey; label: string }[] = [
 
 const nf = new Intl.NumberFormat("de-DE");
 const short = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : nf.format(n);
+  n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+    : n >= 10_000
+      ? `${Math.round(n / 1000)}k`
+      : nf.format(n);
 
 /**
  * The accounts as tiles: who they are, who runs them, how they are doing.
  * Click a tile and its reels open underneath, the full width of the grid,
  * like a card in the vault. Tiles can be put in any order and dragged.
  */
-export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[]; canEdit: boolean }) {
+export function AccountBoard({
+  accounts,
+  canEdit,
+}: {
+  accounts: AccountTileData[];
+  canEdit: boolean;
+}) {
   const router = useRouter();
   const [sort, setSort] = useState<SortKey>("custom");
   const [order, setOrder] = useState<string[]>(() => defaultOrder(accounts));
@@ -116,7 +135,9 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
       if (!m) return;
       setOpen(m[1]);
       requestAnimationFrame(() =>
-        document.getElementById(`account-${m[1]}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+        document
+          .getElementById(`account-${m[1]}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
       );
     };
     go();
@@ -124,44 +145,71 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
     return () => window.removeEventListener("hashchange", go);
   }, []);
 
-  const byId = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+  const byId = useMemo(
+    () => new Map(accounts.map((a) => [a.id, a])),
+    [accounts],
+  );
   const sorted = useMemo(() => {
-    const list = order.map((id) => byId.get(id)).filter((a): a is AccountTileData => !!a);
-    const va = (a: AccountTileData) => (a.managerName ?? a.manager ?? "").toLowerCase();
-    // Accounts without a VA go last; the rest by the VA's name.
-    const byVa = (a: AccountTileData, b: AccountTileData) => {
-      const x = va(a);
-      const y = va(b);
-      if (!x !== !y) return x ? -1 : 1;
-      return x.localeCompare(y);
-    };
-    switch (sort) {
-      case "views":
-        return [...list].sort((a, b) => b.views - a.views);
-      case "followers":
-        return [...list].sort((a, b) => (b.followers ?? -1) - (a.followers ?? -1));
-      case "hits":
-        return [...list].sort((a, b) => b.hitsWeek * 10 + b.goodWeek - (a.hitsWeek * 10 + a.goodWeek));
-      case "va":
-        return [...list].sort((a, b) => byVa(a, b) || a.platform.localeCompare(b.platform));
-      case "meta": {
-        // Pairs side by side, Facebook first, grouped by who runs them.
-        const out: AccountTileData[] = [];
-        const done = new Set<string>();
-        const bySetup = [...list].sort((a, b) => byVa(a, b) || a.platform.localeCompare(b.platform));
-        for (const a of bySetup) {
-          if (done.has(a.id)) continue;
-          const partner = a.linkedId ? byId.get(a.linkedId) : undefined;
-          const pair = partner && !done.has(partner.id) ? [a, partner].sort((x, y) => x.platform.localeCompare(y.platform)) : [a];
-          pair.forEach((p) => {
-            out.push(p);
-            done.add(p.id);
-          });
+    const live = sortLive();
+    return [
+      ...live.filter((a) => !a.disabled),
+      ...live.filter((a) => a.disabled),
+    ];
+    function sortLive(): AccountTileData[] {
+      const list = order
+        .map((id) => byId.get(id))
+        .filter((a): a is AccountTileData => !!a);
+      const va = (a: AccountTileData) =>
+        (a.managerName ?? a.manager ?? "").toLowerCase();
+      // Accounts without a VA go last; the rest by the VA's name.
+      const byVa = (a: AccountTileData, b: AccountTileData) => {
+        const x = va(a);
+        const y = va(b);
+        if (!x !== !y) return x ? -1 : 1;
+        return x.localeCompare(y);
+      };
+      switch (sort) {
+        case "views":
+          return [...list].sort((a, b) => b.views - a.views);
+        case "followers":
+          return [...list].sort(
+            (a, b) => (b.followers ?? -1) - (a.followers ?? -1),
+          );
+        case "hits":
+          return [...list].sort(
+            (a, b) =>
+              b.hitsWeek * 10 + b.goodWeek - (a.hitsWeek * 10 + a.goodWeek),
+          );
+        case "va":
+          return [...list].sort(
+            (a, b) => byVa(a, b) || a.platform.localeCompare(b.platform),
+          );
+        case "meta": {
+          // Pairs side by side, Facebook first, grouped by who runs them.
+          const out: AccountTileData[] = [];
+          const done = new Set<string>();
+          const bySetup = [...list].sort(
+            (a, b) => byVa(a, b) || a.platform.localeCompare(b.platform),
+          );
+          for (const a of bySetup) {
+            if (done.has(a.id)) continue;
+            const partner = a.linkedId ? byId.get(a.linkedId) : undefined;
+            const pair =
+              partner && !done.has(partner.id)
+                ? [a, partner].sort((x, y) =>
+                    x.platform.localeCompare(y.platform),
+                  )
+                : [a];
+            pair.forEach((p) => {
+              out.push(p);
+              done.add(p.id);
+            });
+          }
+          return out;
         }
-        return out;
+        default:
+          return list;
       }
-      default:
-        return list;
     }
   }, [order, byId, sort]);
 
@@ -170,7 +218,13 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
   const cols = Math.max(1, Math.floor((width + GAP) / (MIN + GAP)));
   const openIdx = sorted.findIndex((a) => a.id === open);
   // The open tile's reels go under the row it sits in.
-  const panelAfter = openIdx < 0 ? -1 : Math.min(sorted.length - 1, Math.floor(openIdx / cols) * cols + cols - 1);
+  const panelAfter =
+    openIdx < 0
+      ? -1
+      : Math.min(
+          sorted.length - 1,
+          Math.floor(openIdx / cols) * cols + cols - 1,
+        );
 
   const draggable = canEdit && sort === "custom";
   const drop = (targetId: string) => {
@@ -191,7 +245,8 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
         <div>
           <h3 className="text-sm font-medium">Per account</h3>
           <p className="text-[11px] text-muted-foreground">
-            Click a tile for its reels{draggable ? " · drag tiles to reorder" : ""}
+            Click a tile for its reels
+            {draggable ? " · drag tiles to reorder" : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-1 rounded-lg bg-muted/40 p-0.5">
@@ -206,7 +261,9 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
                 } catch {}
               }}
               className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
-                sort === s.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                sort === s.key
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {s.label}
@@ -215,21 +272,31 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
         </div>
       </div>
 
-      <div ref={ref} className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+      <div
+        ref={ref}
+        className="grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+      >
         {sorted.map((a, i) => (
           <FragmentWithPanel
             key={a.id}
             tile={
               <AccountTile
                 a={a}
-                partner={a.linkedId ? byId.get(a.linkedId) ?? null : null}
+                partner={a.linkedId ? (byId.get(a.linkedId) ?? null) : null}
                 open={open === a.id}
                 draggable={draggable}
                 dragging={dragId === a.id}
                 onToggle={() => {
                   const next = open === a.id ? null : a.id;
                   setOpen(next);
-                  history.replaceState(null, "", next ? `#account-${next}` : location.pathname + location.search);
+                  history.replaceState(
+                    null,
+                    "",
+                    next
+                      ? `#account-${next}`
+                      : location.pathname + location.search,
+                  );
                 }}
                 onDragStart={() => setDragId(a.id)}
                 onDragEnd={() => setDragId(null)}
@@ -266,7 +333,13 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
   );
 }
 
-function FragmentWithPanel({ tile, panel }: { tile: React.ReactNode; panel: React.ReactNode }) {
+function FragmentWithPanel({
+  tile,
+  panel,
+}: {
+  tile: React.ReactNode;
+  panel: React.ReactNode;
+}) {
   return (
     <>
       {tile}
@@ -278,7 +351,8 @@ function FragmentWithPanel({ tile, panel }: { tile: React.ReactNode; panel: Reac
 function defaultOrder(accounts: AccountTileData[]): string[] {
   return [...accounts]
     .sort((a, b) => {
-      if (a.sortOrder != null && b.sortOrder != null) return a.sortOrder - b.sortOrder;
+      if (a.sortOrder != null && b.sortOrder != null)
+        return a.sortOrder - b.sortOrder;
       if (a.sortOrder != null) return -1;
       if (b.sortOrder != null) return 1;
       return b.views - a.views;
@@ -289,7 +363,8 @@ function defaultOrder(accounts: AccountTileData[]): string[] {
 const PLATFORM_BG: Record<string, string> = {
   instagram:
     "linear-gradient(135deg, rgba(254,218,117,0.14) 0%, rgba(250,126,30,0.12) 25%, rgba(214,41,118,0.16) 55%, rgba(150,47,191,0.14) 80%, rgba(79,91,213,0.12) 100%)",
-  facebook: "linear-gradient(135deg, rgba(24,119,242,0.22) 0%, rgba(24,119,242,0.08) 100%)",
+  facebook:
+    "linear-gradient(135deg, rgba(24,119,242,0.22) 0%, rgba(24,119,242,0.08) 100%)",
 };
 
 function ago(iso: string | null): string {
@@ -322,14 +397,16 @@ function AccountTile({
   onDrop: () => void;
 }) {
   const [over, setOver] = useState(false);
-  const parked = a.perDay === 0;
+  const parked = a.perDay === 0 && !a.disabled;
   return (
     <div
       id={`account-${a.id}`}
       role="button"
       tabIndex={0}
       onClick={onToggle}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onToggle())}
+      onKeyDown={(e) =>
+        (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onToggle())
+      }
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -348,21 +425,40 @@ function AccountTile({
         onDrop();
       }}
       className={`group relative scroll-mt-4 cursor-pointer select-none overflow-hidden rounded-2xl border p-4 text-left transition-all ${
-        open ? "border-primary/70 ring-2 ring-primary/40" : "border-border/50 hover:border-border"
-      } ${dragging ? "opacity-40" : ""} ${over ? "ring-2 ring-primary/60" : ""} ${parked ? "opacity-70" : ""}`}
-      style={{ background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card))` }}
+        open
+          ? "border-primary/70 ring-2 ring-primary/40"
+          : "border-border/50 hover:border-border"
+      } ${dragging ? "opacity-40" : ""} ${over ? "ring-2 ring-primary/60" : ""} ${parked ? "opacity-70" : ""} ${
+        a.disabled ? "opacity-50 grayscale" : ""
+      }`}
+      style={{
+        background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card))`,
+      }}
     >
       <div className="flex items-start gap-3">
-        <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={48} color={a.color} badge={false} />
+        <AccountAvatar
+          src={a.avatar}
+          platform={a.platform}
+          label={a.label}
+          size={48}
+          color={a.color}
+          badge={false}
+        />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{a.label}</p>
           <p className="truncate text-[11px] text-muted-foreground">
             {a.managerName ?? (a.manager ? `@${a.manager}` : "no VA yet")}
           </p>
           {partner && (
-            <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground" title="Linked in one Meta setup">
+            <p
+              className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground"
+              title="Linked in one Meta setup"
+            >
               <Link2 className="h-3 w-3 shrink-0" />
-              <PlatformLogo platform={partner.platform} className="h-3 w-3 shrink-0" />
+              <PlatformLogo
+                platform={partner.platform}
+                className="h-3 w-3 shrink-0"
+              />
               <span className="truncate">{partner.label}</span>
             </p>
           )}
@@ -386,7 +482,11 @@ function AccountTile({
         <Stat
           label="followers"
           value={a.followers == null ? "—" : nf.format(a.followers)}
-          delta={a.followerDelta ? `${a.followerDelta > 0 ? "▲" : "▼"}${Math.abs(a.followerDelta)}` : null}
+          delta={
+            a.followerDelta
+              ? `${a.followerDelta > 0 ? "▲" : "▼"}${Math.abs(a.followerDelta)}`
+              : null
+          }
           down={(a.followerDelta ?? 0) < 0}
         />
       </div>
@@ -394,22 +494,45 @@ function AccountTile({
       <div className="mt-3 flex items-center gap-2">
         <HitBadge kind="hit" week={a.hitsWeek} total={a.hitsTotal} />
         <HitBadge kind="good" week={a.goodWeek} total={a.goodTotal} />
-        <span className="ml-auto text-[10px] text-muted-foreground">7 days (total)</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          7 days (total)
+        </span>
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
-        {a.stale ? (
+        {a.disabled ? (
+          <span className="flex items-center gap-1 font-medium text-rose-400">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            disabled by{" "}
+            {a.platform === "facebook"
+              ? "Facebook"
+              : a.platform === "instagram"
+                ? "Instagram"
+                : "the platform"}
+          </span>
+        ) : a.stale ? (
           <span className="flex min-w-0 items-center gap-1 text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span className="truncate">
               not readable since{" "}
-              {a.lastSeen ? new Date(a.lastSeen).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : "—"}
+              {a.lastSeen
+                ? new Date(a.lastSeen).toLocaleDateString("de-DE", {
+                    day: "2-digit",
+                    month: "2-digit",
+                  })
+                : "—"}
             </span>
           </span>
         ) : (
-          <span>{parked ? "parked · 0 reels a day" : `${a.perDay} a day · ${ago(a.lastSeen)}`}</span>
+          <span>
+            {parked
+              ? "parked · 0 reels a day"
+              : `${a.perDay} a day · ${ago(a.lastSeen)}`}
+          </span>
         )}
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </div>
     </div>
   );
@@ -432,21 +555,41 @@ function Stat({
     <div title={title}>
       <p className="flex items-baseline gap-1 text-base font-semibold tabular-nums leading-tight">
         {value}
-        {delta && <span className={`text-[10px] font-medium ${down ? "text-rose-400" : "text-emerald-400"}`}>{delta}</span>}
+        {delta && (
+          <span
+            className={`text-[10px] font-medium ${down ? "text-rose-400" : "text-emerald-400"}`}
+          >
+            {delta}
+          </span>
+        )}
       </p>
       <p className="text-[10px] text-muted-foreground">{label}</p>
     </div>
   );
 }
 
-function HitBadge({ kind, week, total }: { kind: "hit" | "good"; week: number; total: number }) {
+function HitBadge({
+  kind,
+  week,
+  total,
+}: {
+  kind: "hit" | "good";
+  week: number;
+  total: number;
+}) {
   const hit = kind === "hit";
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
-        hit ? "border-amber-400/80 bg-amber-400/10 text-amber-300" : "border-emerald-400/80 bg-emerald-400/10 text-emerald-300"
+        hit
+          ? "border-amber-400/80 bg-amber-400/10 text-amber-300"
+          : "border-emerald-400/80 bg-emerald-400/10 text-emerald-300"
       } ${week === 0 && total === 0 ? "opacity-40" : ""}`}
-      title={hit ? "Hits — 5× the account's median or more" : "Doing well — 2× to 5× the account's median"}
+      title={
+        hit
+          ? "Hits — 5× the account's median or more"
+          : "Doing well — 2× to 5× the account's median"
+      }
     >
       {hit ? <Flame className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
       {week}
@@ -467,12 +610,18 @@ function AccountPanel({
   onChanged: () => void;
 }) {
   const [linking, startLink] = useTransition();
+  const [switching, startSwitch] = useTransition();
   const candidates = others.filter((o) => o.platform !== a.platform);
   return (
     <div className="col-span-full animate-in fade-in slide-in-from-top-1 rounded-2xl border border-border/60 bg-card/70 p-4 duration-200">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={28} />
+          <AccountAvatar
+            src={a.avatar}
+            platform={a.platform}
+            label={a.label}
+            size={28}
+          />
           <p className="truncate text-sm font-semibold">{a.label}</p>
           {a.profileUrl && (
             <a
@@ -486,36 +635,77 @@ function AccountPanel({
           )}
         </div>
         {canEdit && (
-          <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Link2 className="h-3.5 w-3.5" />
-            Meta setup with
-            <select
-              value={a.linkedId ?? ""}
-              disabled={linking}
-              onChange={(e) =>
-                startLink(async () => {
-                  const res = await setAccountLink(a.id, e.target.value || null);
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={switching}
+              onClick={() => {
+                if (
+                  !a.disabled &&
+                  !confirm(
+                    `Mark ${a.label} as disabled? It stops being scraped and counted, and stays here with its history.`,
+                  )
+                )
+                  return;
+                startSwitch(async () => {
+                  const res = await setAccountDisabled(a.id, !a.disabled);
                   if (res.error) toast.error(res.error);
                   else onChanged();
-                })
-              }
-              className="h-7 rounded-md border border-border/50 bg-card px-2 text-[11px] text-foreground"
+                });
+              }}
+              className={`h-7 rounded-md border px-2.5 text-[11px] transition-colors ${
+                a.disabled
+                  ? "border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10"
+                  : "border-rose-500/40 text-rose-400 hover:bg-rose-500/10"
+              }`}
             >
-              <option value="">nothing linked</option>
-              {candidates.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.platform === "facebook" ? "FB" : "IG"} · {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              {switching
+                ? "…"
+                : a.disabled
+                  ? "Account is back — enable"
+                  : "Mark as disabled"}
+            </button>
+            <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <Link2 className="h-3.5 w-3.5" />
+              Meta setup with
+              <select
+                value={a.linkedId ?? ""}
+                disabled={linking}
+                onChange={(e) =>
+                  startLink(async () => {
+                    const res = await setAccountLink(
+                      a.id,
+                      e.target.value || null,
+                    );
+                    if (res.error) toast.error(res.error);
+                    else onChanged();
+                  })
+                }
+                className="h-7 rounded-md border border-border/50 bg-card px-2 text-[11px] text-foreground"
+              >
+                <option value="">nothing linked</option>
+                {candidates.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.platform === "facebook" ? "FB" : "IG"} · {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         )}
       </div>
-      <AccountControls accountId={a.id} handle={a.handle} perDay={a.perDay} manager={a.manager} editable={canEdit} />
+      <AccountControls
+        accountId={a.id}
+        handle={a.handle}
+        perDay={a.perDay}
+        manager={a.manager}
+        editable={canEdit}
+      />
 
       {a.reels.length === 0 ? (
         <p className="mt-4 text-xs text-muted-foreground">
-          Nothing read from this account yet — the daily scrape fills this row. A private account shows followers only.
+          Nothing read from this account yet — the daily scrape fills this row.
+          A private account shows followers only.
         </p>
       ) : (
         <div className="-mx-1 mt-4 flex gap-3 overflow-x-auto px-1 pb-2">
@@ -542,16 +732,30 @@ function ReelTile({ r }: { r: ReelTileData }) {
     <div className="w-40 shrink-0">
       <div
         className={`relative aspect-[9/16] overflow-hidden rounded-xl bg-muted/40 ${
-          hit ? "ring-2 ring-amber-400" : good ? "ring-2 ring-emerald-400" : "ring-1 ring-border/40"
+          hit
+            ? "ring-2 ring-amber-400"
+            : good
+              ? "ring-2 ring-emerald-400"
+              : "ring-1 ring-border/40"
         }`}
       >
         {playing && r.video ? (
-          <video src={r.video} autoPlay controls playsInline className="h-full w-full bg-black object-cover" />
+          <video
+            src={r.video}
+            autoPlay
+            controls
+            playsInline
+            className="h-full w-full bg-black object-cover"
+          />
         ) : (
           <button
             type="button"
             className="group/cover block h-full w-full"
-            onClick={() => (r.video ? setPlaying(true) : r.postUrl && window.open(r.postUrl, "_blank", "noreferrer"))}
+            onClick={() =>
+              r.video
+                ? setPlaying(true)
+                : r.postUrl && window.open(r.postUrl, "_blank", "noreferrer")
+            }
             title={r.video ? "Play our cut" : "Open the post"}
           >
             {r.cover && !broken ? (
@@ -585,7 +789,11 @@ function ReelTile({ r }: { r: ReelTileData }) {
             }`}
             title={`${r.lift!.toFixed(1)}× this account's median views`}
           >
-            {hit ? <Flame className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+            {hit ? (
+              <Flame className="h-3 w-3" />
+            ) : (
+              <TrendingUp className="h-3 w-3" />
+            )}
             {r.lift!.toFixed(1)}×
           </span>
         )}
@@ -608,8 +816,13 @@ function ReelTile({ r }: { r: ReelTileData }) {
         )}
       </div>
 
-      <p className="mt-2 line-clamp-2 min-h-[2rem] text-[11px] leading-4 text-muted-foreground" title={r.caption ?? undefined}>
-        {r.caption?.trim() || <span className="italic opacity-60">no caption</span>}
+      <p
+        className="mt-2 line-clamp-2 min-h-[2rem] text-[11px] leading-4 text-muted-foreground"
+        title={r.caption ?? undefined}
+      >
+        {r.caption?.trim() || (
+          <span className="italic opacity-60">no caption</span>
+        )}
       </p>
 
       <div className="mt-1.5 flex items-baseline justify-between">
@@ -617,14 +830,21 @@ function ReelTile({ r }: { r: ReelTileData }) {
           <Eye className="h-3.5 w-3.5 self-center text-muted-foreground" />
           {r.views != null ? nf.format(r.views) : "—"}
           {r.viewsDelta != null && r.viewsDelta !== 0 && (
-            <span className={`text-[10px] font-medium ${r.viewsDelta > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            <span
+              className={`text-[10px] font-medium ${r.viewsDelta > 0 ? "text-emerald-400" : "text-rose-400"}`}
+            >
               {r.viewsDelta > 0 ? "+" : ""}
               {nf.format(r.viewsDelta)}
             </span>
           )}
         </span>
         <span className="text-[10px] tabular-nums text-muted-foreground">
-          {r.postedAt ? new Date(r.postedAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : ""}
+          {r.postedAt
+            ? new Date(r.postedAt).toLocaleDateString("de-DE", {
+                day: "2-digit",
+                month: "2-digit",
+              })
+            : ""}
         </span>
       </div>
       <div className="mt-1 flex items-center gap-2.5 text-[10px] tabular-nums text-muted-foreground">

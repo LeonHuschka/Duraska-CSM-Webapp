@@ -258,8 +258,11 @@ export async function AccountsTab({
 
   // The summary is about the accounts being worked. One that posts nothing
   // would otherwise be the whole chart: every other line a floor under it.
-  const posting = rows.filter((r) => Number(r.a.posts_per_day ?? 0) > 0);
-  const parked = rows.filter((r) => Number(r.a.posts_per_day ?? 0) === 0);
+  // Disabled accounts keep their tile and history, and leave the charts.
+  const dead = (r: (typeof rows)[number]) => r.a.status === "dead";
+  const posting = rows.filter((r) => !dead(r) && Number(r.a.posts_per_day ?? 0) > 0);
+  const parked = rows.filter((r) => !dead(r) && Number(r.a.posts_per_day ?? 0) === 0);
+  const disabled = rows.filter(dead);
 
   const analytics = computeAnalytics(
     posting.map((r) => ({ id: r.a.id, handle: r.a.handle, platform: r.a.platform, avatar: sign(r.a.avatar_path) })),
@@ -295,7 +298,8 @@ export async function AccountsTab({
       goodWeek: r.goodWeek,
       goodTotal: r.goodTotal,
       lastSeen: r.lastSeen,
-      stale: Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
+      stale: !dead(r) && Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
+      disabled: dead(r),
       linkedId: r.a.linked_account_id,
       sortOrder: r.a.sort_order,
       profileUrl: r.profileUrl,
@@ -330,6 +334,12 @@ export async function AccountsTab({
               <>
                 {" · "}
                 {parked.map((r) => displayHandle(r.a.handle)).join(", ")} parked (0 reels a day), left out of the charts
+              </>
+            )}
+            {disabled.length > 0 && (
+              <>
+                {" · "}
+                {disabled.map((r) => displayHandle(r.a.handle)).join(", ")} disabled, kept at the end of the tiles
               </>
             )}
           </p>
