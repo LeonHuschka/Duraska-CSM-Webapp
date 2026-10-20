@@ -78,8 +78,12 @@ export async function GET(req: Request) {
   // what the tab asks for the moment an account is added.
   const one = params.get("account");
   if (one) {
+    // &codes=A,B reads these reels by URL too — the ones Instagram keeps
+    // from logged-out readers and no list returns.
+    const codes = (params.get("codes") ?? "").split(",").map((c) => c.trim()).filter((c) => /^[A-Za-z0-9_-]{5,}$/.test(c));
     const summary = await scrapeAccounts(admin, personaId, {
       accountIds: [one],
+      extraCodes: codes.length ? { [one]: codes } : undefined,
       igPerAccount: 40,
       fbPerPage: 30,
       deadline: t0 + 250_000,

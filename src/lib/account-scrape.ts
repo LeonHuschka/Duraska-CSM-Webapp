@@ -54,6 +54,11 @@ const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
  * covers keep coming even on a bad day.
  */
 const IG_REELS_ACTOR = "data-slayer~instagram-profile-reels";
+
+/** The same maker's by-URL actor, for the reels the Reels tab leaves out. */
+const IG_POST_ACTOR = "data-slayer~instagram-post-details";
+/** A brake: at $0.0015 a reel, sixty is nine cents. */
+const HIDDEN_REELS_MAX = 60;
 const IG_POSTS_PER_ACCOUNT = 12;
 
 /**
@@ -220,6 +225,8 @@ type AccountReading = {
   note: string | null;
   /** The profile picture on the platform's CDN, as the scrape found it. */
   avatarUrl?: string | null;
+  /** Reels the profile lists as its newest — some the Reels tab leaves out. */
+  extraCodes?: string[];
   /** Read through the dear feed scraper rather than the cheap reels one. */
   viaFeed?: boolean;
 };
@@ -257,10 +264,12 @@ function reelFromProfileRow(r: Row): PostReading | null {
     postedAt,
     // Plays, the figure on the profile grid. play_count first: it is the
     // field the dashboard's history was built on.
-    views: num(pick(r, "play_count", "media.play_count", "ig_play_count", "media.ig_play_count", "video_play_count", "view_count")),
-    likes: num(pick(r, "like_count", "media.like_count", "likes")),
-    comments: num(pick(r, "comment_count", "media.comment_count", "comments")),
-    shares: num(pick(r, "share_count", "reshare_count", "media.share_count")),
+    views: num(
+      pick(r, "play_count", "metrics.play_count", "media.play_count", "ig_play_count", "metrics.ig_play_count", "video_play_count", "view_count")
+    ),
+    likes: num(pick(r, "like_count", "metrics.like_count", "media.like_count", "likes")),
+    comments: num(pick(r, "comment_count", "metrics.comment_count", "media.comment_count", "comments")),
+    shares: num(pick(r, "share_count", "metrics.share_count", "reshare_count", "media.share_count")),
     caption: str(pick(r, "caption.text", "caption_text", "caption", "media.caption.text")),
     thumbnailUrl: str(
       pick(r, "image_versions2.candidates.0.url", "media.image_versions2.candidates.0.url", "thumbnail_url", "display_url", "image_url")
@@ -377,6 +386,10 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
     reading.follows = num(r.followsCount);
     reading.postsCount = num(r.postsCount);
     reading.avatarUrl = str(r.profilePicUrlHD) ?? str(r.profilePicUrl);
+    reading.extraCodes = (Array.isArray(r.latestPosts) ? (r.latestPosts as Row[]) : [])
+      .filter((p) => p.type === "Video" || p.productType === "clips")
+      .map((p) => str(p.shortCode))
+      .filter((c): c is string => !!c);
     if (r.private === true) reading.note = "private — posts not visible";
     else if (reading.followers == null && str(r.id)) hidden.add(a.id);
   }
@@ -612,11 +625,69 @@ export type ScrapeSummary = {
   notes: string[];
 };
 
+/**
+ * Reels the Reels tab leaves out. Instagram keeps some reels from anyone
+ * not logged in — on 2026-10-20 five of sarahelenaprice's sixteen, among
+ * them the two biggest at 212k and 94k — and the Reels-tab actor never
+ * lists them. Read one by one through the by-URL actor they come back
+ * whole, plays included. Which reels to ask about: the newest the profile
+ * lists, and every reel this account has had in the last sixty days,
+ * minus the ones the Reels tab already answered for.
+ */
+async function fillHiddenReels(supabase: Sb, readings: AccountReading[]) {
+  const ig = readings.filter((r) => r.account.platform === "instagram");
+  if (ig.length === 0) return;
+  const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const { data: known } = await supabase
+    .from("reel_metrics")
+    .select("account_id, shortcode")
+    .in("account_id", ig.map((r) => r.account.id))
+    .eq("source", "scrape")
+    .not("shortcode", "is", null)
+    .gte("posted_at", since)
+    .limit(5000);
+  const wanted = new Map<string, AccountReading>();
+  for (const r of ig) {
+    const have = new Set(r.posts.filter((p) => p.views != null).map((p) => p.shortcode));
+    const codes = new Set([
+      ...(r.extraCodes ?? []),
+      ...(known ?? []).filter((k) => k.account_id === r.account.id).map((k) => k.shortcode!),
+    ]);
+    codes.forEach((c) => {
+      if (!have.has(c)) wanted.set(c, r);
+    });
+  }
+  if (wanted.size === 0) return;
+  const codes = Array.from(wanted.keys()).slice(0, HIDDEN_REELS_MAX);
+  const run = await runActor(
+    IG_POST_ACTOR,
+    { postUrls: codes.map((c) => `https://www.instagram.com/reel/${c}/`) },
+    { memoryMb: 512, retry: true }
+  );
+  if (run.error) console.error("[scrape] instagram hidden reels:", run.error);
+  for (const row of run.rows) {
+    if (row.success === false) continue;
+    const post = reelFromProfileRow(row);
+    if (!post || post.views == null) continue;
+    const reading = wanted.get(post.shortcode);
+    if (!reading) continue;
+    reading.posts = [...reading.posts.filter((p) => p.shortcode !== post.shortcode), post];
+  }
+}
+
 /** One persona's accounts, read and written. `full` reads every reel, not just the newest. */
 export async function scrapeAccounts(
   supabase: Sb,
   personaId: string,
-  opts: { full?: boolean; deadline?: number; igPerAccount?: number; fbPerPage?: number; accountIds?: string[] } = {}
+  opts: {
+    full?: boolean;
+    deadline?: number;
+    igPerAccount?: number;
+    fbPerPage?: number;
+    accountIds?: string[];
+    /** Reel codes to read by URL as well, per account — a one-off backfill. */
+    extraCodes?: Record<string, string[]>;
+  } = {}
 ): Promise<ScrapeSummary> {
   const perAccount = opts.igPerAccount ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT);
   const perPage = opts.fbPerPage ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE);
@@ -637,6 +708,11 @@ export async function scrapeAccounts(
     readFacebook(fb, perPage),
   ]);
   const readings = [...igReadings, ...fbReadings];
+  for (const r of readings) {
+    const extra = opts.extraCodes?.[r.account.id];
+    if (extra?.length) r.extraCodes = [...(r.extraCodes ?? []), ...extra];
+  }
+  await fillHiddenReels(supabase, readings);
   const matches = await matchToCuts(supabase, personaId, readings);
 
   const now = new Date().toISOString();
