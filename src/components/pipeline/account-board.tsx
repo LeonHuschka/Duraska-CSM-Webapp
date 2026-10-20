@@ -81,14 +81,14 @@ export type AccountTileData = {
   reels: ReelTileData[];
 };
 
-type SortKey = "custom" | "meta" | "views" | "followers" | "hits" | "va";
+type SortKey = "all" | "va" | "meta" | "views" | "followers" | "inactive";
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "custom", label: "My order" },
-  { key: "meta", label: "Meta setup" },
+  { key: "all", label: "All" },
+  { key: "va", label: "VA" },
+  { key: "meta", label: "Meta" },
   { key: "views", label: "Views" },
   { key: "followers", label: "Followers" },
-  { key: "hits", label: "Hits this week" },
-  { key: "va", label: "VA" },
+  { key: "inactive", label: "Inactive" },
 ];
 
 const nf = new Intl.NumberFormat("de-DE");
@@ -99,10 +99,27 @@ const short = (n: number) =>
       ? `${Math.round(n / 1000)}k`
       : nf.format(n);
 
+/** Not posting: disabled by the platform, or parked at 0 reels a day. */
+const inactive = (a: AccountTileData) => a.disabled || a.perDay === 0;
+
+type Group = {
+  key: string;
+  title: string | null;
+  note?: string;
+  tiles: AccountTileData[];
+};
+
 /**
  * The accounts as tiles: who they are, who runs them, how they are doing.
- * Click a tile and its reels open underneath, the full width of the grid,
- * like a card in the vault. Tiles can be put in any order and dragged.
+ * Click a tile and its reels open underneath, the full width of its row,
+ * like a card in the vault.
+ *
+ *   All        every account, in the order dragged into; inactive ones last
+ *   VA         one row per VA, with the accounts that VA runs
+ *   Meta       one row per Meta setup, the Facebook page and its Instagram
+ *   Views      active accounts by views
+ *   Followers  active accounts by followers
+ *   Inactive   disabled and parked accounts, kept for their history
  */
 export function AccountBoard({
   accounts,
@@ -112,7 +129,7 @@ export function AccountBoard({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [sort, setSort] = useState<SortKey>("custom");
+  const [sort, setSort] = useState<SortKey>("all");
   const [order, setOrder] = useState<string[]>(() => defaultOrder(accounts));
   const [open, setOpen] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -123,17 +140,26 @@ export function AccountBoard({
   useEffect(() => setOrder(defaultOrder(accounts)), [accounts]);
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("accounts-sort") as SortKey | null;
+      const saved = localStorage.getItem("accounts-view") as SortKey | null;
       if (saved && SORTS.some((s) => s.key === saved)) setSort(saved);
     } catch {}
   }, []);
 
-  // The charts above link here with #account-<id>: open that tile.
+  const byId = useMemo(
+    () => new Map(accounts.map((a) => [a.id, a])),
+    [accounts],
+  );
+
+  // The charts above link here with #account-<id>: open that tile, in a
+  // view that has it.
   useEffect(() => {
     const go = () => {
       const m = location.hash.match(/^#account-(.+)$/);
       if (!m) return;
       setOpen(m[1]);
+      const a = byId.get(m[1]);
+      if (a && inactive(a))
+        setSort((s) => (s === "all" || s === "inactive" ? s : "all"));
       requestAnimationFrame(() =>
         document
           .getElementById(`account-${m[1]}`)
@@ -143,90 +169,114 @@ export function AccountBoard({
     go();
     window.addEventListener("hashchange", go);
     return () => window.removeEventListener("hashchange", go);
-  }, []);
+  }, [byId]);
 
-  const byId = useMemo(
-    () => new Map(accounts.map((a) => [a.id, a])),
-    [accounts],
-  );
-  const sorted = useMemo(() => {
-    const live = sortLive();
-    return [
-      ...live.filter((a) => !a.disabled),
-      ...live.filter((a) => a.disabled),
-    ];
-    function sortLive(): AccountTileData[] {
-      const list = order
-        .map((id) => byId.get(id))
-        .filter((a): a is AccountTileData => !!a);
-      const va = (a: AccountTileData) =>
-        (a.managerName ?? a.manager ?? "").toLowerCase();
-      // Accounts without a VA go last; the rest by the VA's name.
-      const byVa = (a: AccountTileData, b: AccountTileData) => {
-        const x = va(a);
-        const y = va(b);
-        if (!x !== !y) return x ? -1 : 1;
-        return x.localeCompare(y);
-      };
-      switch (sort) {
-        case "views":
-          return [...list].sort((a, b) => b.views - a.views);
-        case "followers":
-          return [...list].sort(
-            (a, b) => (b.followers ?? -1) - (a.followers ?? -1),
-          );
-        case "hits":
-          return [...list].sort(
-            (a, b) =>
-              b.hitsWeek * 10 + b.goodWeek - (a.hitsWeek * 10 + a.goodWeek),
-          );
-        case "va":
-          return [...list].sort(
-            (a, b) => byVa(a, b) || a.platform.localeCompare(b.platform),
-          );
-        case "meta": {
-          // Pairs side by side, Facebook first, grouped by who runs them.
-          const out: AccountTileData[] = [];
-          const done = new Set<string>();
-          const bySetup = [...list].sort(
-            (a, b) => byVa(a, b) || a.platform.localeCompare(b.platform),
-          );
-          for (const a of bySetup) {
-            if (done.has(a.id)) continue;
-            const partner = a.linkedId ? byId.get(a.linkedId) : undefined;
-            const pair =
-              partner && !done.has(partner.id)
-                ? [a, partner].sort((x, y) =>
-                    x.platform.localeCompare(y.platform),
-                  )
-                : [a];
-            pair.forEach((p) => {
-              out.push(p);
-              done.add(p.id);
-            });
-          }
-          return out;
+  const groups: Group[] = useMemo(() => {
+    const ordered = order
+      .map((id) => byId.get(id))
+      .filter((a): a is AccountTileData => !!a);
+    const active = ordered.filter((a) => !inactive(a));
+    const vaName = (a: AccountTileData) =>
+      a.managerName ?? (a.manager ? `@${a.manager}` : null);
+    // Facebook before Instagram inside a row, so a pair always reads the same way.
+    const byPlatform = (x: AccountTileData, y: AccountTileData) =>
+      x.platform.localeCompare(y.platform);
+
+    switch (sort) {
+      case "views":
+        return [
+          {
+            key: "views",
+            title: null,
+            tiles: [...active].sort((a, b) => b.views - a.views),
+          },
+        ];
+      case "followers":
+        return [
+          {
+            key: "followers",
+            title: null,
+            tiles: [...active].sort(
+              (a, b) => (b.followers ?? -1) - (a.followers ?? -1),
+            ),
+          },
+        ];
+      case "inactive":
+        return [
+          {
+            key: "inactive",
+            title: null,
+            tiles: ordered
+              .filter(inactive)
+              .sort((a, b) => Number(b.disabled) - Number(a.disabled)),
+          },
+        ];
+      case "va": {
+        const rows = new Map<string, AccountTileData[]>();
+        for (const a of active) {
+          const k = vaName(a) ?? "";
+          rows.set(k, [...(rows.get(k) ?? []), a]);
         }
-        default:
-          return list;
+        return Array.from(rows.entries())
+          .sort(([x], [y]) => (!x !== !y ? (x ? -1 : 1) : x.localeCompare(y)))
+          .map(([name, tiles]) => ({
+            key: `va-${name}`,
+            title: name || "No VA yet",
+            note: `${tiles.length} account${tiles.length === 1 ? "" : "s"}`,
+            tiles: [...tiles].sort(byPlatform),
+          }));
       }
+      case "meta": {
+        const done = new Set<string>();
+        const pairs: Group[] = [];
+        const singles: AccountTileData[] = [];
+        for (const a of active) {
+          if (done.has(a.id)) continue;
+          const partner = a.linkedId ? byId.get(a.linkedId) : undefined;
+          if (partner && !inactive(partner)) {
+            done.add(a.id);
+            done.add(partner.id);
+            const tiles = [a, partner].sort(byPlatform);
+            pairs.push({
+              key: `meta-${tiles[0].id}`,
+              title: tiles.map((t) => t.label).join(" + "),
+              note: vaName(a) ?? vaName(partner) ?? "no VA yet",
+              tiles,
+            });
+          } else {
+            done.add(a.id);
+            singles.push(a);
+          }
+        }
+        pairs.sort((x, y) => (x.note ?? "").localeCompare(y.note ?? ""));
+        return singles.length
+          ? [
+              ...pairs,
+              {
+                key: "meta-none",
+                title: "Not in a Meta setup",
+                note: "link them in the open tile",
+                tiles: singles,
+              },
+            ]
+          : pairs;
+      }
+      default:
+        return [
+          {
+            key: "all",
+            title: null,
+            tiles: [...active, ...ordered.filter(inactive)],
+          },
+        ];
     }
   }, [order, byId, sort]);
 
   const GAP = 12;
   const MIN = 270;
   const cols = Math.max(1, Math.floor((width + GAP) / (MIN + GAP)));
-  const openIdx = sorted.findIndex((a) => a.id === open);
-  // The open tile's reels go under the row it sits in.
-  const panelAfter =
-    openIdx < 0
-      ? -1
-      : Math.min(
-          sorted.length - 1,
-          Math.floor(openIdx / cols) * cols + cols - 1,
-        );
 
-  const draggable = canEdit && sort === "custom";
+  const draggable = canEdit && sort === "all";
   const drop = (targetId: string) => {
     if (!dragId || dragId === targetId) return;
     const next = order.filter((id) => id !== dragId);
@@ -238,6 +288,28 @@ export function AccountBoard({
       if (res.error) toast.error(res.error);
     });
   };
+  const toggle = (id: string) => {
+    const next = open === id ? null : id;
+    setOpen(next);
+    history.replaceState(
+      null,
+      "",
+      next ? `#account-${next}` : location.pathname + location.search,
+    );
+  };
+  const plusTile = canEdit && sort !== "inactive" && (
+    <button
+      type="button"
+      onClick={() => setAdding(true)}
+      className="flex min-h-[172px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/50 text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/50">
+        <Plus className="h-5 w-5" />
+      </span>
+      <span className="text-xs font-medium">Add account</span>
+    </button>
+  );
+  const grouped = groups.some((g) => g.title);
 
   return (
     <div>
@@ -257,7 +329,7 @@ export function AccountBoard({
               onClick={() => {
                 setSort(s.key);
                 try {
-                  localStorage.setItem("accounts-sort", s.key);
+                  localStorage.setItem("accounts-view", s.key);
                 } catch {}
               }}
               className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
@@ -267,65 +339,97 @@ export function AccountBoard({
               }`}
             >
               {s.label}
+              {s.key === "inactive" && accounts.some(inactive) && (
+                <span className="ml-1 tabular-nums opacity-60">
+                  {accounts.filter(inactive).length}
+                </span>
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      <div
-        ref={ref}
-        className="grid gap-3"
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-      >
-        {sorted.map((a, i) => (
-          <FragmentWithPanel
-            key={a.id}
-            tile={
-              <AccountTile
-                a={a}
-                partner={a.linkedId ? (byId.get(a.linkedId) ?? null) : null}
-                open={open === a.id}
-                draggable={draggable}
-                dragging={dragId === a.id}
-                onToggle={() => {
-                  const next = open === a.id ? null : a.id;
-                  setOpen(next);
-                  history.replaceState(
-                    null,
-                    "",
-                    next
-                      ? `#account-${next}`
-                      : location.pathname + location.search,
-                  );
+      <div ref={ref} className={grouped ? "space-y-5" : ""}>
+        {groups.map((g, gi) => {
+          const last = gi === groups.length - 1;
+          const openIdx = g.tiles.findIndex((a) => a.id === open);
+          // The open tile's reels go under the row it sits in.
+          const panelAfter =
+            openIdx < 0
+              ? -1
+              : Math.min(
+                  g.tiles.length - 1,
+                  Math.floor(openIdx / cols) * cols + cols - 1,
+                );
+          return (
+            <section key={g.key}>
+              {g.title && (
+                <div className="mb-2 flex items-baseline gap-2 border-b border-border/40 pb-1.5">
+                  <h4 className="text-xs font-semibold">{g.title}</h4>
+                  {g.note && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {g.note}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div
+                className="grid gap-3"
+                style={{
+                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
                 }}
-                onDragStart={() => setDragId(a.id)}
-                onDragEnd={() => setDragId(null)}
-                onDrop={() => drop(a.id)}
-              />
-            }
-            panel={
-              i === panelAfter && openIdx >= 0 ? (
-                <AccountPanel
-                  a={sorted[openIdx]}
-                  others={accounts.filter((o) => o.id !== sorted[openIdx].id)}
-                  canEdit={canEdit}
-                  onChanged={() => router.refresh()}
-                />
-              ) : null
-            }
-          />
-        ))}
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="flex min-h-[172px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/50 text-muted-foreground transition-colors hover:border-primary/60 hover:text-primary"
+              >
+                {g.tiles.map((a, i) => (
+                  <FragmentWithPanel
+                    key={a.id}
+                    tile={
+                      <AccountTile
+                        a={a}
+                        partner={
+                          a.linkedId ? (byId.get(a.linkedId) ?? null) : null
+                        }
+                        open={open === a.id}
+                        draggable={draggable}
+                        dragging={dragId === a.id}
+                        onToggle={() => toggle(a.id)}
+                        onDragStart={() => setDragId(a.id)}
+                        onDragEnd={() => setDragId(null)}
+                        onDrop={() => drop(a.id)}
+                      />
+                    }
+                    panel={
+                      i === panelAfter ? (
+                        <AccountPanel
+                          a={g.tiles[openIdx]}
+                          others={accounts.filter(
+                            (o) => o.id !== g.tiles[openIdx].id,
+                          )}
+                          canEdit={canEdit}
+                          onChanged={() => router.refresh()}
+                        />
+                      ) : null
+                    }
+                  />
+                ))}
+                {!grouped && last && plusTile}
+                {g.tiles.length === 0 && (
+                  <p className="col-span-full py-6 text-center text-xs text-muted-foreground">
+                    {sort === "inactive"
+                      ? "No disabled or parked accounts."
+                      : "No accounts here."}
+                  </p>
+                )}
+              </div>
+            </section>
+          );
+        })}
+        {grouped && plusTile && (
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-muted/50">
-              <Plus className="h-5 w-5" />
-            </span>
-            <span className="text-xs font-medium">Add account</span>
-          </button>
+            {plusTile}
+          </div>
         )}
       </div>
       {canEdit && <AddAccountDialog open={adding} setOpen={setAdding} />}
