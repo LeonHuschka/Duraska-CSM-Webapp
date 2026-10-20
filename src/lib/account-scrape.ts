@@ -124,13 +124,31 @@ const num = (v: unknown) => {
 
 async function runActor(
   actor: string,
-  input: unknown
+  input: unknown,
+  opts: { memoryMb?: number; retry?: boolean } = {}
+): Promise<{ rows: Row[]; error: string | null }> {
+  const first = await runActorOnce(actor, input, opts.memoryMb);
+  // The plan has a memory ceiling shared by every run at once; a start it
+  // cannot fit is refused rather than queued. Once more, a little later.
+  if (opts.retry && first.error && /http (402|429|503)/.test(first.error)) {
+    await new Promise((r) => setTimeout(r, 8_000));
+    return runActorOnce(actor, input, opts.memoryMb);
+  }
+  return first;
+}
+
+async function runActorOnce(
+  actor: string,
+  input: unknown,
+  memoryMb?: number
 ): Promise<{ rows: Row[]; error: string | null }> {
   const token = process.env.APIFY_TOKEN;
   if (!token) return { rows: [], error: "APIFY_TOKEN is not set" };
   try {
     const res = await fetch(
-      `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`,
+      `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}${
+        memoryMb ? `&memory=${memoryMb}` : ""
+      }`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -251,16 +269,25 @@ async function readInstagramReels(
   perAccount: number
 ): Promise<Map<string, { posts: PostReading[]; error: string | null }>> {
   const out = new Map<string, { posts: PostReading[]; error: string | null }>();
-  await Promise.all(
-    accounts.map(async (a) => {
-      const run = await runActor(IG_REELS_ACTOR, { username: igUsername(a.handle), maxResults: perAccount });
+  // Two at a time and small: five at once with the Facebook runs beside
+  // them went over the plan's memory and two starts were refused.
+  const queue = [...accounts];
+  const lane = async () => {
+    while (queue.length) {
+      const a = queue.shift()!;
+      const run = await runActor(
+        IG_REELS_ACTOR,
+        { username: igUsername(a.handle), maxResults: perAccount },
+        { memoryMb: 512, retry: true }
+      );
       const posts = run.rows
         .filter((r) => r.success !== false)
         .map(reelFromProfileRow)
         .filter((p): p is PostReading => !!p);
       out.set(a.id, { posts, error: run.error ?? (posts.length === 0 && run.rows.length > 0 ? "no reels in the answer" : null) });
-    })
-  );
+    }
+  };
+  await Promise.all([lane(), lane()]);
   return out;
 }
 
@@ -285,7 +312,7 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
   const usernames = Array.from(byName.keys());
 
   const [profiles, reelsTab] = await Promise.all([
-    runActor(IG_PROFILE_ACTOR, { usernames }),
+    runActor(IG_PROFILE_ACTOR, { usernames }, { retry: true }),
     readInstagramReels(accounts, perAccount),
   ]);
   // The cheap feed actor only for accounts the Reels tab gave nothing for.
@@ -376,8 +403,8 @@ async function readFacebook(accounts: Account[], perPage: number): Promise<Accou
   const urls = accounts.map((a) => fbPageUrl(a.handle));
 
   const [pages, reels] = await Promise.all([
-    runActor(FB_PAGES_ACTOR, { startUrls: urls.map((url) => ({ url })) }),
-    runActor(FB_REELS_ACTOR, { startUrls: urls, resultsLimit: perPage }),
+    runActor(FB_PAGES_ACTOR, { startUrls: urls.map((url) => ({ url })) }, { retry: true }),
+    runActor(FB_REELS_ACTOR, { startUrls: urls, resultsLimit: perPage }, { retry: true }),
   ]);
   if (pages.error) console.error("[scrape] facebook pages:", pages.error);
   if (reels.error) console.error("[scrape] facebook reels:", reels.error);
