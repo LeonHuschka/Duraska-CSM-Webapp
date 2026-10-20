@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
+import { storeCovers, storeImage } from "@/lib/stored-images";
 
 /**
  * Read each posting account off its platform once a day.
@@ -160,7 +161,7 @@ function fbKey(url: string | null): string {
     .replace(/\/+$/, "");
 }
 
-type Account = { id: string; handle: string; platform: string };
+type Account = { id: string; handle: string; platform: string; avatar_updated_at?: string | null };
 
 /** What one post looked like today. */
 type PostReading = {
@@ -183,6 +184,8 @@ type AccountReading = {
   postsCount: number | null;
   posts: PostReading[];
   note: string | null;
+  /** The profile picture on the platform's CDN, as the scrape found it. */
+  avatarUrl?: string | null;
   /** Read through the dear feed scraper rather than the cheap reels one. */
   viaFeed?: boolean;
 };
@@ -222,6 +225,7 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
     reading.followers = num(r.followersCount);
     reading.follows = num(r.followsCount);
     reading.postsCount = num(r.postsCount);
+    reading.avatarUrl = str(r.profilePicUrlHD) ?? str(r.profilePicUrl);
     if (r.private === true) reading.note = "private — posts not visible";
     else if (reading.followers == null && str(r.id)) hidden.add(a.id);
   }
@@ -294,6 +298,8 @@ async function readFacebook(accounts: Account[], perPage: number): Promise<Accou
     const a = find(r);
     if (!a) continue;
     out.get(a.id)!.followers = num(r.followers) ?? num(r.likes);
+    out.get(a.id)!.avatarUrl =
+      usable(str(r.profilePictureUrl)) ?? usable(str(r.profilePhoto)) ?? usable(str(r.profilePicture));
   }
   for (const r of reels.rows) {
     const a = find(r);
@@ -452,13 +458,13 @@ export type ScrapeSummary = {
 export async function scrapeAccounts(
   supabase: Sb,
   personaId: string,
-  opts: { full?: boolean } = {}
+  opts: { full?: boolean; deadline?: number } = {}
 ): Promise<ScrapeSummary> {
   const perAccount = opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT;
   const perPage = opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE;
   const { data: rows } = await supabase
     .from("accounts")
-    .select("id, handle, platform, status")
+    .select("id, handle, platform, status, avatar_updated_at")
     .eq("persona_id", personaId)
     .not("status", "in", '("dead","paused")')
     .order("platform")
@@ -556,6 +562,28 @@ export async function scrapeAccounts(
     if (error) notes.push(`@${r.account.handle}: posts not stored — ${error.message}`);
     else posts += r.posts.length;
   }
+
+  // Profile pictures, at most once a week per account — they rarely change.
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  for (const r of readings) {
+    if (!r.avatarUrl) continue;
+    const last = r.account.avatar_updated_at ? new Date(r.account.avatar_updated_at).getTime() : 0;
+    if (last > weekAgo) continue;
+    const path = await storeImage(
+      supabase,
+      r.avatarUrl,
+      `personas/${personaId}/accounts/${r.account.id}/avatar-${today}.jpg`
+    );
+    if (path) {
+      await supabase
+        .from("accounts")
+        .update({ avatar_path: path, avatar_updated_at: now })
+        .eq("id", r.account.id);
+    }
+  }
+  // Covers into storage while the CDN addresses from this run are fresh.
+  const covers = await storeCovers(supabase, personaId, (opts.deadline ?? Date.now() + 60_000));
+  if (covers.pending > 0) notes.push(`${covers.pending} covers left for the next run`);
 
   const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =

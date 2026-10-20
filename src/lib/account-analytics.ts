@@ -47,19 +47,25 @@ export type AccountInput = {
   id: string;
   handle: string;
   platform: string;
+  /** Signed address of the stored profile picture, if there is one. */
+  avatar?: string | null;
 };
 
-/** One colour per account, stable across every chart on the page. */
-export const ACCOUNT_PALETTE = [
-  "#a78bfa", // violet
-  "#34d399", // emerald
-  "#fbbf24", // amber
-  "#60a5fa", // blue
-  "#fb7185", // rose
-  "#22d3ee", // cyan
-  "#f97316", // orange
-  "#c084fc", // purple
-];
+/**
+ * One colour per account, stable across every chart on the page, and the
+ * platform readable from the colour alone: Instagram accounts in reds,
+ * Facebook pages in blues, the biggest account the lightest shade. Ranked
+ * by all-time views, so switching the period does not repaint anything.
+ */
+export const PLATFORM_SHADES: Record<string, string[]> = {
+  instagram: ["#fda4af", "#fb7185", "#f43f5e", "#e11d48", "#be123c", "#9f1239", "#881337"],
+  facebook: ["#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8", "#1e40af", "#1e3a8a"],
+  other: ["#d4d4d8", "#a1a1aa", "#71717a", "#52525b"],
+};
+export function shadeFor(platform: string, rank: number): string {
+  const list = PLATFORM_SHADES[platform] ?? PLATFORM_SHADES.other;
+  return list[Math.min(rank, list.length - 1)];
+}
 export const PLATFORM_COLOR: Record<string, string> = {
   instagram: "#e1306c",
   facebook: "#1877f2",
@@ -71,6 +77,7 @@ export type AccountStats = {
   label: string;
   platform: string;
   color: string;
+  avatar: string | null;
   /** Latest follower reading, and the reading at the start of the period. */
   followers: number | null;
   followersPrev: number | null;
@@ -122,6 +129,11 @@ export type Analytics = {
     byAccount: Record<string, number[]>;
     /** Indices after which the line changes source and must not be joined. */
     seams: number[];
+    /** Per account: the last screenshot-era index (-1 if none), and the
+     *  first and last index with a reading of its own. */
+    seamByAccount: Record<string, number>;
+    firstByAccount: Record<string, number>;
+    lastByAccount: Record<string, number>;
   };
 };
 
@@ -245,10 +257,23 @@ export function computeAnalytics(
   // Points up to and including these indices were read off screenshots;
   // the next point is the scrape, counted on a different basis.
   const seams = new Set<number>();
-  firstScrape.forEach((t) => {
+  const seamByAccount: Record<string, number> = {};
+  firstScrape.forEach((t, id) => {
     const i = dayEnds.findIndex((d) => d >= t);
     if (i > 0) seams.add(i - 1);
+    seamByAccount[id] = i - 1;
   });
+  // Where each account's own readings start and stop. A line is drawn
+  // between these only, so an account nobody can read any more ends where
+  // its last reading was instead of running flat to today.
+  const firstByAccount: Record<string, number> = {};
+  const lastByAccount: Record<string, number> = {};
+  for (const r of good) {
+    const i = dayList.indexOf(dayKey(r.captured_at));
+    const id = r.account_id!;
+    if (firstByAccount[id] === undefined || i < firstByAccount[id]) firstByAccount[id] = i;
+    if (lastByAccount[id] === undefined || i > lastByAccount[id]) lastByAccount[id] = i;
+  }
 
   // ── Latest reading per reel, for counts and engagement ──
   const latestReel = new Map<
@@ -287,7 +312,18 @@ export function computeAnalytics(
     return v;
   };
 
-  const stats: AccountStats[] = accounts.map((a, i) => {
+  // Shade rank per platform, by all-time views.
+  const rankOf = new Map<string, number>();
+  const byPlat = new Map<string, { id: string; v: number }[]>();
+  for (const a of accounts) {
+    const v = at(dayEnds, byAccount[a.id], end) ?? 0;
+    const list = byPlat.get(a.platform) ?? [];
+    list.push({ id: a.id, v });
+    byPlat.set(a.platform, list);
+  }
+  byPlat.forEach((list) => list.sort((x, y) => y.v - x.v).forEach((x, i) => rankOf.set(x.id, i)));
+
+  const stats: AccountStats[] = accounts.map((a) => {
     const line = byAccount[a.id];
     const switchAt = firstScrape.get(a.id);
     const vEnd = at(dayEnds, line, end) ?? 0;
@@ -320,7 +356,8 @@ export function computeAnalytics(
       id: a.id,
       label: accountLabel(a.handle),
       platform: a.platform,
-      color: ACCOUNT_PALETTE[i % ACCOUNT_PALETTE.length],
+      color: shadeFor(a.platform, rankOf.get(a.id) ?? 0),
+      avatar: a.avatar ?? null,
       followers,
       followersPrev,
       viewsTotal: vEnd,
@@ -442,7 +479,16 @@ export function computeAnalytics(
     scrapeSince,
     accounts: stats.sort((a, b) => b.views - a.views),
     kpis,
-    series: { days: dayEnds, total, byPlatform, byAccount, seams: Array.from(seams).sort((a, b) => a - b) },
+    series: {
+      days: dayEnds,
+      total,
+      byPlatform,
+      byAccount,
+      seams: Array.from(seams).sort((a, b) => a - b),
+      seamByAccount,
+      firstByAccount,
+      lastByAccount,
+    },
   };
 }
 

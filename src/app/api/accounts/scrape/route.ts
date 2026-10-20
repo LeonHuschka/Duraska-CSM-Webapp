@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePersonaId } from "@/lib/persona";
 import { scrapeAccounts } from "@/lib/account-scrape";
+import { storeCovers } from "@/lib/stored-images";
 import { announceWinners } from "@/lib/winners";
 
 /**
@@ -56,8 +57,15 @@ export async function GET(req: Request) {
     });
     return NextResponse.json({ ok: true, winners });
   }
+  const t0 = Date.now();
+  // ?covers=1 copies covers into storage from the latest readings and
+  // scrapes nothing — to finish what a run left for later.
+  if (params.get("covers") === "1") {
+    const covers = await storeCovers(admin, personaId, t0 + 250_000);
+    return NextResponse.json({ ok: true, covers });
+  }
   const full = params.get("full") === "1";
-  const summary = await scrapeAccounts(admin, personaId, { full });
+  const summary = await scrapeAccounts(admin, personaId, { full, deadline: t0 + 250_000 });
   const winners = await announceWinners(admin, personaId);
   return NextResponse.json({ ok: true, summary, winners });
 }

@@ -55,7 +55,8 @@ export function MomentumChart({ accounts }: { accounts: AccountStats[] }) {
   const medX = Math.pow(10, median(fx));
   const medY = median(fy);
   const maxViews = Math.max(1, ...shown.map((a) => a.views));
-  const radius = (v: number) => 6 + Math.sqrt(Math.max(0, v) / maxViews) * Math.min(26, W / 24);
+  // Faces need room to be recognised: never smaller than 12px across.
+  const radius = (v: number) => 12 + Math.sqrt(Math.max(0, v) / maxViews) * Math.min(22, W / 26);
 
   const xTicks: number[] = [];
   for (let e = Math.ceil(minX); e <= Math.floor(maxX); e++) xTicks.push(Math.pow(10, e));
@@ -139,11 +140,42 @@ export function MomentumChart({ accounts }: { accounts: AccountStats[] }) {
                 className="cursor-pointer"
                 onMouseEnter={() => setHover(a.id)}
                 onClick={() => {
-                  const el = document.getElementById(`account-${a.id}`);
-                  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  location.hash = `account-${a.id}`;
                 }}
               >
-                <circle cx={cx} cy={cy} r={r} fill={a.color} fillOpacity={dim ? 0.12 : 0.28} stroke={a.color} strokeOpacity={dim ? 0.3 : 0.9} strokeWidth="1.5" />
+                <defs>
+                  <clipPath id={`mom-${a.id}`}>
+                    <circle cx={cx} cy={cy} r={r} />
+                  </clipPath>
+                </defs>
+                <g opacity={dim ? 0.3 : 1}>
+                  {a.avatar ? (
+                    <image
+                      href={a.avatar}
+                      x={cx - r}
+                      y={cy - r}
+                      width={r * 2}
+                      height={r * 2}
+                      preserveAspectRatio="xMidYMid slice"
+                      clipPath={`url(#mom-${a.id})`}
+                    />
+                  ) : (
+                    <>
+                      <circle cx={cx} cy={cy} r={r} fill={a.color} />
+                      <text x={cx} y={cy + r * 0.35} textAnchor="middle" fontSize={r} fontWeight="600" fill="#fff">
+                        {a.label.replace(/^@/, "").slice(0, 1).toUpperCase()}
+                      </text>
+                    </>
+                  )}
+                  <circle cx={cx} cy={cy} r={r} fill="none" stroke={a.color} strokeWidth="2.5" />
+                  <image
+                    href={`/brand/${a.platform === "facebook" ? "facebook" : "instagram"}.svg`}
+                    x={cx + r * 0.7 - 7}
+                    y={cy + r * 0.7 - 7}
+                    width="14"
+                    height="14"
+                  />
+                </g>
                 <text
                   x={cx}
                   y={cy - r - 5}
@@ -167,7 +199,7 @@ export function MomentumChart({ accounts }: { accounts: AccountStats[] }) {
           }}
         >
           <div className="mb-1 flex items-center gap-1.5 font-semibold">
-            <span className="h-2 w-2 rounded-sm" style={{ background: active.color }} />
+            <span className="h-2 w-2 rounded-full" style={{ background: active.color }} />
             {active.label}
             <span className="font-normal text-muted-foreground">· {quadrant(active)}</span>
           </div>
@@ -194,7 +226,7 @@ export function MomentumChart({ accounts }: { accounts: AccountStats[] }) {
         </div>
       )}
       <p className="mt-1 text-[10px] text-muted-foreground/70">
-        Bubble area = views gained in the period · lines at the medians of the accounts shown · click a bubble to jump to its card
+        Size = views gained in the period · lines at the medians of the accounts shown · click a face to open its tile
       </p>
     </div>
   );

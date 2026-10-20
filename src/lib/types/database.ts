@@ -449,6 +449,10 @@ export type Database = {
           telegram_thread_id: number | null;
           posts_per_day: number;
           manager_username: string | null;
+          avatar_path: string | null;
+          avatar_updated_at: string | null;
+          sort_order: number | null;
+          linked_account_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -467,6 +471,10 @@ export type Database = {
           telegram_thread_id?: number | null;
           posts_per_day?: number;
           manager_username?: string | null;
+          avatar_path?: string | null;
+          avatar_updated_at?: string | null;
+          sort_order?: number | null;
+          linked_account_id?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -485,6 +493,10 @@ export type Database = {
           telegram_thread_id?: number | null;
           posts_per_day?: number;
           manager_username?: string | null;
+          avatar_path?: string | null;
+          avatar_updated_at?: string | null;
+          sort_order?: number | null;
+          linked_account_id?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -519,6 +531,7 @@ export type Database = {
           posted_at: string | null;
           source: string;
           created_at: string;
+          cover_path: string | null;
         };
         Insert: {
           id?: string;
@@ -547,6 +560,7 @@ export type Database = {
           posted_at?: string | null;
           source?: string;
           created_at?: string;
+          cover_path?: string | null;
         };
         Update: {
           id?: string;
@@ -574,6 +588,7 @@ export type Database = {
           posted_at?: string | null;
           source?: string;
           created_at?: string;
+          cover_path?: string | null;
         };
         Relationships: [];
       };

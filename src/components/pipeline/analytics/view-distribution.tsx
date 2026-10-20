@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { compact } from "@/lib/account-analytics";
+import { AccountAvatar } from "@/components/pipeline/account-avatar";
 
-type Slice = { id: string; label: string; value: number; color: string };
+type Slice = { id: string; label: string; value: number; color: string; platform: string; avatar: string | null };
 
 /** Who the reach belongs to. Size, not momentum — that is the other chart. */
 export function ViewDistribution({ slices }: { slices: Slice[] }) {
@@ -78,6 +79,7 @@ export function ViewDistribution({ slices }: { slices: Slice[] }) {
             title={`${a.label}: ${nf.format(a.value)} views · ${(a.frac * 100).toFixed(1)}%`}
           >
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: a.color }} />
+            <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={20} />
             <span className="min-w-0 flex-1 truncate text-muted-foreground">{a.label}</span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{compact(a.value)}</span>
             <span className="w-12 shrink-0 text-right font-medium tabular-nums">

@@ -185,3 +185,52 @@ export async function setAccountHandle(accountId: string, handle: string) {
   revalidatePath("/vault");
   return { error: null };
 }
+
+/** The order a manager dragged the account tiles into. */
+export async function setAccountOrder(ids: string[]) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  const results = await Promise.all(
+    ids.map((id, i) =>
+      supabase.from("accounts").update({ sort_order: i + 1 }).eq("id", id).eq("persona_id", personaId)
+    )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return { error: failed.error.message };
+  revalidatePath("/");
+  return { error: null };
+}
+
+/**
+ * The other half of a Meta setup. Linked both ways, and whatever either
+ * account was linked to before is let go, so a pair is always a pair.
+ */
+export async function setAccountLink(accountId: string, otherId: string | null) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  if (otherId === accountId) return { error: "An account cannot be linked to itself" };
+
+  const ids = [accountId, ...(otherId ? [otherId] : [])];
+  const { data: rows } = await supabase
+    .from("accounts")
+    .select("id, linked_account_id")
+    .eq("persona_id", personaId)
+    .in("id", ids);
+  if ((rows ?? []).length !== ids.length) return { error: "No such account" };
+
+  // Let go of the old partners.
+  const old = (rows ?? []).map((r) => r.linked_account_id).filter((x): x is string => !!x);
+  if (old.length) {
+    await supabase.from("accounts").update({ linked_account_id: null }).eq("persona_id", personaId).in("id", old);
+  }
+  await supabase.from("accounts").update({ linked_account_id: otherId }).eq("id", accountId).eq("persona_id", personaId);
+  if (otherId) {
+    await supabase.from("accounts").update({ linked_account_id: accountId }).eq("id", otherId).eq("persona_id", personaId);
+  }
+  revalidatePath("/");
+  return { error: null };
+}

@@ -7,7 +7,7 @@ import {
   type Kpi,
   type PeriodKey,
 } from "@/lib/account-analytics";
-import { PlatformGlyph, PLATFORM_STYLE } from "@/components/dashboard/pipeline-donut";
+import { AccountAvatar } from "@/components/pipeline/account-avatar";
 
 const nf = new Intl.NumberFormat("de-DE");
 
@@ -108,13 +108,7 @@ export function PerformanceList({ accounts, hasPeriod }: { accounts: AccountStat
               className="group flex items-center gap-3 text-xs"
             >
               <span className="w-4 shrink-0 text-right tabular-nums text-muted-foreground">{i + 1}</span>
-              <span
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
-                  PLATFORM_STYLE[a.platform]?.bg ?? "bg-muted"
-                }`}
-              >
-                <PlatformGlyph platform={a.platform} className="h-3 w-3 fill-white" />
-              </span>
+              <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={28} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-medium group-hover:underline">{a.label}</span>
@@ -156,7 +150,7 @@ export function EngagementSection({ accounts, hasPeriod }: { accounts: AccountSt
       <ul className="space-y-2.5">
         {known.map((a) => (
           <li key={a.id} className="flex items-center gap-3 text-xs">
-            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: a.color }} />
+            <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={24} />
             <span className="w-32 shrink-0 truncate font-medium">{a.label}</span>
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
               <span

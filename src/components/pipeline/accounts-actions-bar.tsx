@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,17 +32,12 @@ const PLATFORMS = [
 ];
 
 /**
- * The two things a manager does with the accounts list: add one, and get
- * today's numbers without waiting for the morning run.
+ * Today's numbers without waiting for the morning run. Adding an account
+ * is the last tile in the grid.
  */
 export function AccountsActionsBar() {
   const router = useRouter();
   const [scraping, startScrape] = useTransition();
-  const [open, setOpen] = useState(false);
-  const [platform, setPlatform] = useState("instagram");
-  const [handle, setHandle] = useState("");
-  const [manager, setManager] = useState("");
-  const [saving, startSave] = useTransition();
 
   function scrapeNow() {
     startScrape(async () => {
@@ -59,6 +54,24 @@ export function AccountsActionsBar() {
       router.refresh();
     });
   }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button variant="outline" size="sm" className="gap-1.5" onClick={scrapeNow} disabled={scraping}>
+        {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        {scraping ? "Reading accounts…" : "Scrape now"}
+      </Button>
+    </div>
+  );
+}
+
+/** The form behind the plus tile. */
+export function AddAccountDialog({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => void }) {
+  const router = useRouter();
+  const [platform, setPlatform] = useState("instagram");
+  const [handle, setHandle] = useState("");
+  const [manager, setManager] = useState("");
+  const [saving, startSave] = useTransition();
 
   function save() {
     if (!handle.trim()) {
@@ -80,16 +93,7 @@ export function AccountsActionsBar() {
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <Button variant="outline" size="sm" className="gap-1.5" onClick={scrapeNow} disabled={scraping}>
-        {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-        {scraping ? "Reading accounts…" : "Scrape now"}
-      </Button>
-      <Button size="sm" className="gap-1.5" onClick={() => setOpen(true)}>
-        <Plus className="h-3.5 w-3.5" />
-        Add account
-      </Button>
-
+    <>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -152,6 +156,6 @@ export function AccountsActionsBar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

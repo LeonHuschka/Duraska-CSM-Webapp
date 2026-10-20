@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { change, type AccountStats } from "@/lib/account-analytics";
+import { AccountAvatar } from "@/components/pipeline/account-avatar";
 
 type Col = {
   key: string;
@@ -18,7 +19,6 @@ const pct = (v: number | null) => (v == null ? "—" : `${v > 0 ? "+" : ""}${(v 
 export function AccountTable({ accounts, showPeriod }: { accounts: AccountStats[]; showPeriod: boolean }) {
   const cols: Col[] = [
     { key: "label", label: "Account", get: () => null, render: (a) => a.label, align: "left" },
-    { key: "platform", label: "Platform", get: () => null, render: (a) => a.platform, align: "left" },
     { key: "views", label: showPeriod ? "Views (period)" : "Views", get: (a) => a.views, render: (a) => nf.format(Math.round(a.views)) },
     ...(showPeriod
       ? [{ key: "change", label: "Change", get: (a: AccountStats) => change(a.views, a.viewsPrev), render: (a: AccountStats) => pct(change(a.views, a.viewsPrev)) }]
@@ -33,7 +33,7 @@ export function AccountTable({ accounts, showPeriod }: { accounts: AccountStats[
   const col = cols.find((c) => c.key === sort.key);
   const rows = [...accounts].sort((a, b) => {
     if (!col) return 0;
-    if (col.key === "label" || col.key === "platform") {
+    if (col.key === "label") {
       return sort.dir * col.render(a).localeCompare(col.render(b));
     }
     const va = col.get(a);
@@ -70,9 +70,9 @@ export function AccountTable({ accounts, showPeriod }: { accounts: AccountStats[
             <tr
               key={a.id}
               className="cursor-pointer border-t border-border/40 hover:bg-muted/40"
-              onClick={() =>
-                document.getElementById(`account-${a.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
+              onClick={() => {
+                location.hash = `account-${a.id}`;
+              }}
             >
               {cols.map((c) => (
                 <td
@@ -90,8 +90,8 @@ export function AccountTable({ accounts, showPeriod }: { accounts: AccountStats[
                   }`}
                 >
                   {c.key === "label" ? (
-                    <span className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: a.color }} />
+                    <span className="flex items-center gap-2.5">
+                      <AccountAvatar src={a.avatar} platform={a.platform} label={a.label} size={24} />
                       {a.label}
                     </span>
                   ) : (
