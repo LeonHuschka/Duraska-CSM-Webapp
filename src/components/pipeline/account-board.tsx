@@ -127,8 +127,14 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
   const byId = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const sorted = useMemo(() => {
     const list = order.map((id) => byId.get(id)).filter((a): a is AccountTileData => !!a);
-    // No VA sorts last, not first: "~" comes before letters in a locale compare.
-    const va = (a: AccountTileData) => (a.managerName ?? a.manager ?? "\uffff").toLowerCase();
+    const va = (a: AccountTileData) => (a.managerName ?? a.manager ?? "").toLowerCase();
+    // Accounts without a VA go last; the rest by the VA's name.
+    const byVa = (a: AccountTileData, b: AccountTileData) => {
+      const x = va(a);
+      const y = va(b);
+      if (!x !== !y) return x ? -1 : 1;
+      return x.localeCompare(y);
+    };
     switch (sort) {
       case "views":
         return [...list].sort((a, b) => b.views - a.views);
@@ -137,12 +143,12 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
       case "hits":
         return [...list].sort((a, b) => b.hitsWeek * 10 + b.goodWeek - (a.hitsWeek * 10 + a.goodWeek));
       case "va":
-        return [...list].sort((a, b) => va(a).localeCompare(va(b)) || a.platform.localeCompare(b.platform));
+        return [...list].sort((a, b) => byVa(a, b) || a.platform.localeCompare(b.platform));
       case "meta": {
         // Pairs side by side, Facebook first, grouped by who runs them.
         const out: AccountTileData[] = [];
         const done = new Set<string>();
-        const bySetup = [...list].sort((a, b) => va(a).localeCompare(va(b)) || a.platform.localeCompare(b.platform));
+        const bySetup = [...list].sort((a, b) => byVa(a, b) || a.platform.localeCompare(b.platform));
         for (const a of bySetup) {
           if (done.has(a.id)) continue;
           const partner = a.linkedId ? byId.get(a.linkedId) : undefined;
