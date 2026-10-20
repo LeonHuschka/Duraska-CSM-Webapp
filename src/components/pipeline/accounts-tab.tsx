@@ -51,7 +51,7 @@ export async function AccountsTab({
     supabase
       .from("accounts")
       .select(
-        "id, handle, platform, status, telegram_thread_id, posts_per_day, manager_username, avatar_path, sort_order, linked_account_id"
+        "id, handle, display_name, platform, status, telegram_thread_id, posts_per_day, manager_username, avatar_path, sort_order, linked_account_id"
       )
       .eq("persona_id", personaId)
       .order("platform")
@@ -265,7 +265,13 @@ export async function AccountsTab({
   const disabled = rows.filter(dead);
 
   const analytics = computeAnalytics(
-    posting.map((r) => ({ id: r.a.id, handle: r.a.handle, platform: r.a.platform, avatar: sign(r.a.avatar_path) })),
+    posting.map((r) => ({
+      id: r.a.id,
+      handle: r.a.handle,
+      platform: r.a.platform,
+      avatar: sign(r.a.avatar_path),
+      label: r.a.display_name,
+    })),
     reels ?? [],
     metrics ?? [],
     period
@@ -281,7 +287,8 @@ export async function AccountsTab({
     return {
       id: r.a.id,
       handle: r.a.handle,
-      label: displayHandle(r.a.handle),
+      label: r.a.display_name || displayHandle(r.a.handle),
+      displayName: r.a.display_name ?? "",
       platform: r.a.platform,
       avatar: sign(r.a.avatar_path),
       color: stat?.color ?? "#71717a",
@@ -298,7 +305,9 @@ export async function AccountsTab({
       goodWeek: r.goodWeek,
       goodTotal: r.goodTotal,
       lastSeen: r.lastSeen,
-      stale: !dead(r) && Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
+      // Read before, and not for two days while the others were. An account
+      // never read yet is not stuck — its first read is still to come.
+      stale: !dead(r) && last > 0 && Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
       disabled: dead(r),
       linkedId: r.a.linked_account_id,
       sortOrder: r.a.sort_order,
@@ -333,13 +342,13 @@ export async function AccountsTab({
             {parked.length > 0 && (
               <>
                 {" · "}
-                {parked.map((r) => displayHandle(r.a.handle)).join(", ")} parked (0 reels a day), left out of the charts
+                {parked.map((r) => r.a.display_name || displayHandle(r.a.handle)).join(", ")} parked (0 reels a day), left out of the charts
               </>
             )}
             {disabled.length > 0 && (
               <>
                 {" · "}
-                {disabled.map((r) => displayHandle(r.a.handle)).join(", ")} disabled, kept at the end of the tiles
+                {disabled.map((r) => r.a.display_name || displayHandle(r.a.handle)).join(", ")} disabled, kept at the end of the tiles
               </>
             )}
           </p>

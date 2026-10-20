@@ -68,6 +68,18 @@ export async function GET(req: Request) {
     const covers = await storeCovers(admin, personaId, t0 + 250_000);
     return NextResponse.json({ ok: true, covers });
   }
+  // ?account=<id> reads one account, every reel it has up to a limit —
+  // what the tab asks for the moment an account is added.
+  const one = params.get("account");
+  if (one) {
+    const summary = await scrapeAccounts(admin, personaId, {
+      accountIds: [one],
+      igPerAccount: 40,
+      fbPerPage: 30,
+      deadline: t0 + 250_000,
+    });
+    return NextResponse.json({ ok: true, summary });
+  }
   const full = params.get("full") === "1";
   // ?ig=40 reads that many reels per Instagram account and Facebook as
   // usual — to bring every Instagram reel up to date without paying for a

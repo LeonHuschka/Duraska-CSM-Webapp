@@ -84,11 +84,29 @@ export function AddAccountDialog({ open, setOpen }: { open: boolean; setOpen: (v
         toast.error(res.error);
         return;
       }
-      toast.success(`Added ${handle.trim()}`);
+      const name = handle.trim();
       setHandle("");
       setManager("");
       setOpen(false);
       router.refresh();
+      // Read it straight away, so the tile has followers, reels and a
+      // picture instead of waiting for tomorrow morning's run.
+      if (res.id) {
+        const id = toast.loading(`Added ${name} — reading it for the first time…`);
+        fetch(`/api/accounts/scrape?account=${res.id}`, { cache: "no-store" })
+          .then((r) => r.json())
+          .then((j) => {
+            const s = j?.summary;
+            if (!j?.ok || !s) throw new Error(j?.error ?? "the first read failed");
+            toast.success(`${name}: ${s.posts} reels read`, {
+              id,
+              description: s.notes?.length ? s.notes.join(" · ") : undefined,
+              duration: 8000,
+            });
+          })
+          .catch((e) => toast.error(`${name}: ${e instanceof Error ? e.message : "the first read failed"}`, { id }))
+          .finally(() => router.refresh());
+      }
     });
   }
 

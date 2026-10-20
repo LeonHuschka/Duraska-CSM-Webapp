@@ -144,25 +144,29 @@ export async function addPostingAccount(data: {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
   const who = await requireStaff(supabase, personaId);
-  if ("error" in who) return { error: who.error };
+  if ("error" in who) return { error: who.error, id: null };
 
   const handle = data.handle.trim().replace(/^@/, "");
-  if (!handle) return { error: "Handle is required" };
+  if (!handle) return { error: "Handle is required", id: null };
   const manager = (data.manager ?? "").trim().replace(/^@/, "");
 
-  const { error } = await supabase.from("accounts").insert({
-    persona_id: personaId,
-    platform: data.platform,
-    handle,
-    status: "graduated",
-    manager_username: manager === "" ? null : manager,
-    created_by: who.userId,
-  });
-  if (error) return { error: error.message };
+  const { data: row, error } = await supabase
+    .from("accounts")
+    .insert({
+      persona_id: personaId,
+      platform: data.platform,
+      handle,
+      status: "graduated",
+      manager_username: manager === "" ? null : manager,
+      created_by: who.userId,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message, id: null };
   revalidatePath("/");
   revalidatePath("/settings/accounts");
   revalidatePath("/vault");
-  return { error: null };
+  return { error: null, id: row.id };
 }
 
 /**
@@ -253,5 +257,43 @@ export async function setAccountDisabled(accountId: string, disabled: boolean) {
     .eq("persona_id", personaId);
   if (error) return { error: error.message };
   revalidatePath("/");
+  return { error: null };
+}
+
+/**
+ * Everything a person sets on an account, saved at once from the open
+ * tile: the name it goes by here, the handle the scrape reads it by, who
+ * runs it, and how many reels a day it posts.
+ */
+export async function updateAccountSettings(
+  accountId: string,
+  data: { displayName: string; handle: string; manager: string; perDay: number }
+) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+
+  const handle = data.handle.trim().replace(/^@/, "");
+  if (!handle) return { error: "A handle or page URL is required" };
+  if (!Number.isFinite(data.perDay) || data.perDay < 0 || data.perDay > 50) {
+    return { error: "Reels a day: a number between 0 and 50" };
+  }
+  const manager = data.manager.trim().replace(/^@/, "");
+  const name = data.displayName.trim().slice(0, 60);
+  const { error } = await supabase
+    .from("accounts")
+    .update({
+      display_name: name || null,
+      handle,
+      manager_username: manager || null,
+      posts_per_day: Math.round(data.perDay),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  revalidatePath("/vault");
   return { error: null };
 }

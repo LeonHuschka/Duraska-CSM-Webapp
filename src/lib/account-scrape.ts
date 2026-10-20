@@ -183,6 +183,11 @@ function fbPageUrl(handle: string): string {
 }
 /** Enough of a URL to tell two pages apart, and no more. */
 function fbKey(url: string | null): string {
+  // A page without a name is facebook.com/profile.php?id=… — there the id
+  // in the query is the whole address, and dropping it would make every
+  // such page the same page.
+  const id = (url ?? "").match(/profile\.php\?(?:.*&)?id=(\d+)/i)?.[1];
+  if (id) return `facebook.com/profile.php?id=${id}`;
   return (url ?? "")
     .toLowerCase()
     .replace(/^https?:\/\/(www\.|m\.|web\.)?/, "")
@@ -592,17 +597,18 @@ export type ScrapeSummary = {
 export async function scrapeAccounts(
   supabase: Sb,
   personaId: string,
-  opts: { full?: boolean; deadline?: number; igPerAccount?: number } = {}
+  opts: { full?: boolean; deadline?: number; igPerAccount?: number; fbPerPage?: number; accountIds?: string[] } = {}
 ): Promise<ScrapeSummary> {
   const perAccount = opts.igPerAccount ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT);
-  const perPage = opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE;
-  const { data: rows } = await supabase
+  const perPage = opts.fbPerPage ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE);
+  let query = supabase
     .from("accounts")
     .select("id, handle, platform, status, avatar_updated_at")
     .eq("persona_id", personaId)
-    .not("status", "in", '("dead","paused")')
-    .order("platform")
-    .limit(MAX_ACCOUNTS);
+    .not("status", "in", '("dead","paused")');
+  // A list of accounts reads only those — a freshly added one, say.
+  if (opts.accountIds?.length) query = query.in("id", opts.accountIds);
+  const { data: rows } = await query.order("platform").limit(MAX_ACCOUNTS);
   const accounts = (rows ?? []) as Account[];
   const ig = accounts.filter((a) => a.platform === "instagram");
   const fb = accounts.filter((a) => a.platform === "facebook");

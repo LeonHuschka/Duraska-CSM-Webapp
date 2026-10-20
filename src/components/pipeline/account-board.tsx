@@ -23,12 +23,21 @@ import {
   AccountAvatar,
   PlatformLogo,
 } from "@/components/pipeline/account-avatar";
-import { AccountControls } from "@/components/pipeline/account-controls";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AddAccountDialog } from "@/components/pipeline/accounts-actions-bar";
 import {
   setAccountDisabled,
   setAccountLink,
   setAccountOrder,
+  updateAccountSettings,
 } from "@/components/pipeline/actions";
 import { useWidth } from "@/components/pipeline/analytics/use-width";
 
@@ -55,6 +64,8 @@ export type AccountTileData = {
   id: string;
   handle: string;
   label: string;
+  /** The name set here; empty means the label comes from the handle. */
+  displayName: string;
   platform: string;
   avatar: string | null;
   color: string;
@@ -713,33 +724,171 @@ function AccountPanel({
   canEdit: boolean;
   onChanged: () => void;
 }) {
-  const [linking, startLink] = useTransition();
   const [switching, startSwitch] = useTransition();
-  const candidates = others.filter((o) => o.platform !== a.platform);
+  const [saving, startSave] = useTransition();
+  const initial = {
+    displayName: a.displayName,
+    handle: a.handle,
+    manager: a.manager ?? "",
+    perDay: String(a.perDay),
+    linkedId: a.linkedId ?? "none",
+  };
+  const [f, setF] = useState(initial);
+  useEffect(
+    () => setF(initial),
+    [a.id, a.displayName, a.handle, a.manager, a.perDay, a.linkedId],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = JSON.stringify(f) !== JSON.stringify(initial);
+  const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
+  // A Meta setup is a Facebook page and an Instagram account.
+  const candidates = others.filter(
+    (o) => o.platform !== a.platform && !o.disabled,
+  );
+  const partner = a.linkedId
+    ? others.find((o) => o.id === a.linkedId)
+    : undefined;
+
+  function save() {
+    startSave(async () => {
+      const res = await updateAccountSettings(a.id, {
+        displayName: f.displayName,
+        handle: f.handle,
+        manager: f.manager,
+        perDay: Number(f.perDay),
+      });
+      if (res.error) return void toast.error(res.error);
+      const link = f.linkedId === "none" ? null : f.linkedId;
+      if (link !== (a.linkedId ?? null)) {
+        const linked = await setAccountLink(a.id, link);
+        if (linked.error) return void toast.error(linked.error);
+      }
+      toast.success("Saved");
+      onChanged();
+    });
+  }
+
   return (
     <div className="col-span-full animate-in fade-in slide-in-from-top-1 rounded-2xl border border-border/60 bg-card/70 p-4 duration-200">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <AccountAvatar
-            src={a.avatar}
-            platform={a.platform}
-            label={a.label}
-            size={28}
-          />
+      <div className="flex flex-wrap items-center gap-3">
+        <AccountAvatar
+          src={a.avatar}
+          platform={a.platform}
+          label={a.label}
+          size={36}
+          color={a.color}
+        />
+        <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{a.label}</p>
-          {a.profileUrl && (
-            <a
-              href={a.profileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              open profile <ArrowUpRight className="h-3 w-3" />
-            </a>
-          )}
+          <p className="truncate text-[11px] text-muted-foreground">
+            {a.managerName ?? (a.manager ? `@${a.manager}` : "no VA yet")}
+            {partner ? ` · Meta setup with ${partner.label}` : ""}
+          </p>
         </div>
-        {canEdit && (
-          <div className="flex flex-wrap items-center gap-3">
+        {a.profileUrl && (
+          <a
+            href={a.profileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-border/50 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            Open on{" "}
+            {a.platform === "facebook"
+              ? "Facebook"
+              : a.platform === "instagram"
+                ? "Instagram"
+                : "the platform"}
+            <ArrowUpRight className="h-3 w-3" />
+          </a>
+        )}
+      </div>
+
+      {canEdit && (
+        <div className="mt-4 rounded-xl border border-border/40 bg-background/40 p-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.6fr_1fr_0.6fr_1.3fr]">
+            <Field label="Name" hint="shown on the tiles and charts">
+              <Input
+                value={f.displayName}
+                onChange={(e) => set("displayName", e.target.value)}
+                placeholder={a.label}
+                className="h-9 text-sm"
+              />
+            </Field>
+            <Field
+              label={a.platform === "facebook" ? "Page URL" : "Handle"}
+              hint="what the scrape reads"
+            >
+              <Input
+                value={f.handle}
+                onChange={(e) => set("handle", e.target.value)}
+                className="h-9 text-sm"
+              />
+            </Field>
+            <Field label="VA" hint="Telegram username">
+              <Input
+                value={f.manager}
+                onChange={(e) => set("manager", e.target.value)}
+                placeholder="nobody yet"
+                className="h-9 text-sm"
+              />
+            </Field>
+            <Field label="Reels a day">
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={f.perDay}
+                onChange={(e) => set("perDay", e.target.value)}
+                className="h-9 text-sm tabular-nums"
+              />
+            </Field>
+            <Field
+              label="Meta setup"
+              hint={
+                a.platform === "facebook"
+                  ? "its Instagram account"
+                  : "its Facebook page"
+              }
+            >
+              <Select
+                value={f.linkedId}
+                onValueChange={(v) => set("linkedId", v)}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Not linked</span>
+                  </SelectItem>
+                  {candidates.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      <span className="flex items-center gap-2">
+                        <PlatformLogo
+                          platform={o.platform}
+                          className="h-3.5 w-3.5"
+                        />
+                        {o.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={save} disabled={!dirty || saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+            {dirty && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setF(initial)}
+                disabled={saving}
+              >
+                Cancel
+              </Button>
+            )}
             <button
               type="button"
               disabled={switching}
@@ -757,7 +906,7 @@ function AccountPanel({
                   else onChanged();
                 });
               }}
-              className={`h-7 rounded-md border px-2.5 text-[11px] transition-colors ${
+              className={`ml-auto h-8 rounded-md border px-3 text-xs transition-colors ${
                 a.disabled
                   ? "border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10"
                   : "border-rose-500/40 text-rose-400 hover:bg-rose-500/10"
@@ -769,56 +918,50 @@ function AccountPanel({
                   ? "Account is back — enable"
                   : "Mark as disabled"}
             </button>
-            <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Link2 className="h-3.5 w-3.5" />
-              Meta setup with
-              <select
-                value={a.linkedId ?? ""}
-                disabled={linking}
-                onChange={(e) =>
-                  startLink(async () => {
-                    const res = await setAccountLink(
-                      a.id,
-                      e.target.value || null,
-                    );
-                    if (res.error) toast.error(res.error);
-                    else onChanged();
-                  })
-                }
-                className="h-7 rounded-md border border-border/50 bg-card px-2 text-[11px] text-foreground"
-              >
-                <option value="">nothing linked</option>
-                {candidates.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.platform === "facebook" ? "FB" : "IG"} · {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
-        )}
-      </div>
-      <AccountControls
-        accountId={a.id}
-        handle={a.handle}
-        perDay={a.perDay}
-        manager={a.manager}
-        editable={canEdit}
-      />
+        </div>
+      )}
 
+      <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Reels{" "}
+        {a.reels.length > 0 && (
+          <span className="tabular-nums">· {a.reels.length}</span>
+        )}
+      </p>
       {a.reels.length === 0 ? (
-        <p className="mt-4 text-xs text-muted-foreground">
-          Nothing read from this account yet — the daily scrape fills this row.
-          A private account shows followers only.
+        <p className="mt-2 text-xs text-muted-foreground">
+          {a.lastSeen
+            ? "No reels on this account yet. A private account shows followers only."
+            : "Not read yet — the first read runs right after an account is added, then every morning."}
         </p>
       ) : (
-        <div className="-mx-1 mt-4 flex gap-3 overflow-x-auto px-1 pb-2">
+        <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-2">
           {a.reels.map((r) => (
             <ReelTile key={r.key} r={r} />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block min-w-0 space-y-1">
+      <span className="flex items-baseline gap-1.5 text-[11px] font-medium text-muted-foreground">
+        {label}
+        {hint && <span className="font-normal opacity-60">{hint}</span>}
+      </span>
+      {children}
+    </label>
   );
 }
 

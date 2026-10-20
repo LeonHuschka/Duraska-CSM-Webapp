@@ -49,6 +49,8 @@ export type AccountInput = {
   platform: string;
   /** Signed address of the stored profile picture, if there is one. */
   avatar?: string | null;
+  /** The name set for the account here, instead of its handle. */
+  label?: string | null;
 };
 
 /**
@@ -142,6 +144,8 @@ const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
 
 export function accountLabel(handle: string): string {
   if (!/^https?:\/\//i.test(handle)) return `@${handle}`;
+  const id = handle.match(/profile\.php\?id=(\d+)/i)?.[1];
+  if (id) return `Facebook …${id.slice(-4)}`;
   return handle
     .replace(/^https?:\/\/(www\.|m\.)?/i, "")
     .replace(/\/+$/, "")
@@ -381,7 +385,7 @@ export function computeAnalytics(
 
     return {
       id: a.id,
-      label: accountLabel(a.handle),
+      label: a.label || accountLabel(a.handle),
       platform: a.platform,
       color: shadeFor(a.platform, rankOf.get(a.id) ?? 0),
       avatar: a.avatar ?? null,
