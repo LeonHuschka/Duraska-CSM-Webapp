@@ -631,8 +631,11 @@ export type ScrapeSummary = {
  * them the two biggest at 212k and 94k — and the Reels-tab actor never
  * lists them. Read one by one through the by-URL actor they come back
  * whole, plays included. Which reels to ask about: the newest the profile
- * lists, and every reel this account has had in the last sixty days,
- * minus the ones the Reels tab already answered for.
+ * lists, and the reels this account already had that were posted inside
+ * the window the Reels tab covered today but are missing from its answer.
+ * Older reels outside that window keep their last reading, like every
+ * other reel that has left the daily window — asking about all of them
+ * every day would cost more than the rest of the scrape together.
  */
 async function fillHiddenReels(supabase: Sb, readings: AccountReading[]) {
   const ig = readings.filter((r) => r.account.platform === "instagram");
@@ -640,18 +643,27 @@ async function fillHiddenReels(supabase: Sb, readings: AccountReading[]) {
   const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
   const { data: known } = await supabase
     .from("reel_metrics")
-    .select("account_id, shortcode")
+    .select("account_id, shortcode, posted_at")
     .in("account_id", ig.map((r) => r.account.id))
     .eq("source", "scrape")
     .not("shortcode", "is", null)
     .gte("posted_at", since)
+    .order("posted_at", { ascending: false })
     .limit(5000);
   const wanted = new Map<string, AccountReading>();
   for (const r of ig) {
-    const have = new Set(r.posts.filter((p) => p.views != null).map((p) => p.shortcode));
+    const answered = r.posts.filter((p) => p.views != null);
+    const have = new Set(answered.map((p) => p.shortcode));
+    // The oldest reel the Reels tab answered for marks today's window.
+    const from = answered.reduce<string | null>(
+      (min, p) => (p.postedAt && (!min || p.postedAt < min) ? p.postedAt : min),
+      null
+    );
     const codes = new Set([
       ...(r.extraCodes ?? []),
-      ...(known ?? []).filter((k) => k.account_id === r.account.id).map((k) => k.shortcode!),
+      ...(known ?? [])
+        .filter((k) => k.account_id === r.account.id && (!from || (k.posted_at && k.posted_at >= from)))
+        .map((k) => k.shortcode!),
     ]);
     codes.forEach((c) => {
       if (!have.has(c)) wanted.set(c, r);
