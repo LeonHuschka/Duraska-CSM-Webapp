@@ -127,7 +127,8 @@ export function AccountBoard({ accounts, canEdit }: { accounts: AccountTileData[
   const byId = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const sorted = useMemo(() => {
     const list = order.map((id) => byId.get(id)).filter((a): a is AccountTileData => !!a);
-    const va = (a: AccountTileData) => (a.managerName ?? a.manager ?? "~").toLowerCase();
+    // No VA sorts last, not first: "~" comes before letters in a locale compare.
+    const va = (a: AccountTileData) => (a.managerName ?? a.manager ?? "\uffff").toLowerCase();
     switch (sort) {
       case "views":
         return [...list].sort((a, b) => b.views - a.views);
