@@ -296,6 +296,25 @@ async function readInstagramReels(
   return out;
 }
 
+/** What the by-URL post actor says about a few posts — plays, or why not. */
+export async function probeInstagramPosts(codes: string[]) {
+  const run = await runActor(
+    "data-slayer~instagram-post-details",
+    { postUrls: codes.map((c) => `https://www.instagram.com/reel/${c}/`) },
+    { memoryMb: 512 }
+  );
+  return {
+    error: run.error,
+    rows: run.rows.map((r) => ({
+      code: str(pick(r, "code", "shortcode", "postCode")),
+      success: r.success ?? null,
+      error: r.error ?? null,
+      plays: num(pick(r, "play_count", "ig_play_count", "view_count")),
+      likes: num(pick(r, "like_count")),
+    })),
+  };
+}
+
 /** The first rows of one account's Reels-tab answer, for checking fields. */
 export async function probeInstagramReels(username: string, max = 3) {
   const run = await runActor(IG_REELS_ACTOR, { username, maxResults: max });
