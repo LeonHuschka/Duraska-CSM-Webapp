@@ -250,7 +250,7 @@ export function ViewsOverTime({
       </div>
       <p className="mt-1 text-[10px] text-muted-foreground/70">
         Cumulative views per account, latest reading per reel and day · axis top {compact(top)} · dashed: read off
-        screenshots before the scrape · a line ends at the account&apos;s last reading
+        screenshots before the scrape · days without a reading are bridged in a straight line · a line ends at the account&apos;s last reading
       </p>
     </div>
   );

@@ -226,7 +226,10 @@ export function computeAnalytics(
 
   // ── The cumulative views line, per account, one point per reading day ──
   const dayList = Array.from(new Set(good.map((r) => dayKey(r.captured_at)))).sort();
-  const dayEnds = dayList.map((d) => new Date(`${d}T23:59:59.999Z`).getTime());
+  // Each day's point sits at the day's end — or at now for today, so the
+  // headline numbers include this morning's reading instead of waiting for
+  // midnight.
+  const dayEnds = dayList.map((d) => Math.min(now, new Date(`${d}T23:59:59.999Z`).getTime()));
   const byAccount: Record<string, number[]> = {};
   for (const a of accounts) byAccount[a.id] = dayEnds.map(() => 0);
   const sorted = [...good].sort((x, y) => x.captured_at.localeCompare(y.captured_at));
@@ -245,6 +248,30 @@ export function computeAnalytics(
     latest.forEach((v) => {
       byAccount[v.account][di] += v.views;
     });
+  });
+  // Days inside an account's run of readings where it was not read — the
+  // scrape failed, or came back without views — would hold the last value
+  // flat and then jump. They are filled in a straight line between the
+  // readings either side, which is what the views did in between.
+  const readOn = new Map<string, Set<number>>();
+  for (const r of good) {
+    const i = dayList.indexOf(dayKey(r.captured_at));
+    const set = readOn.get(r.account_id!) ?? new Set<number>();
+    set.add(i);
+    readOn.set(r.account_id!, set);
+  }
+  readOn.forEach((set, id) => {
+    const line = byAccount[id];
+    if (!line) return;
+    const known = Array.from(set).sort((a, b) => a - b);
+    for (let k = 0; k < known.length - 1; k++) {
+      const a = known[k];
+      const b = known[k + 1];
+      for (let i = a + 1; i < b; i++) {
+        const f = (dayEnds[i] - dayEnds[a]) / Math.max(1, dayEnds[b] - dayEnds[a]);
+        line[i] = Math.round(line[a] + (line[b] - line[a]) * f);
+      }
+    }
   });
   const total = dayEnds.map((_, i) =>
     accounts.reduce((s, a) => s + (byAccount[a.id][i] ?? 0), 0)
