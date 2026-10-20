@@ -43,6 +43,17 @@ const IG_PROFILE_ACTOR = "apify~instagram-profile-scraper";
  * the same answer.
  */
 const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
+
+/**
+ * The reels with plays, since 2026-10-15. That morning the cheap actor
+ * above stopped carrying a play count — every reel came back with likes
+ * and comments and a null where the plays had been, and every Instagram
+ * line on the dashboard went flat. This one reads a profile's Reels tab
+ * and still has them: $0.0015 a reel, one run per account. The cheap actor
+ * stays as the fallback for an account this one cannot read, so likes and
+ * covers keep coming even on a bad day.
+ */
+const IG_REELS_ACTOR = "data-slayer~instagram-profile-reels";
 const IG_POSTS_PER_ACCOUNT = 12;
 
 /**
@@ -190,15 +201,104 @@ type AccountReading = {
   viaFeed?: boolean;
 };
 
+/** The number a field holds, at whichever of these paths it sits. */
+function pick(r: Row, ...paths: string[]): unknown {
+  for (const p of paths) {
+    let v: unknown = r;
+    for (const k of p.split(".")) {
+      if (v && typeof v === "object") v = (v as Row)[k];
+      else {
+        v = undefined;
+        break;
+      }
+    }
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return null;
+}
+
+/** One reel from the Reels-tab actor, in whatever shape it arrives. */
+function reelFromProfileRow(r: Row): PostReading | null {
+  const shortcode = str(pick(r, "code", "shortcode", "short_code", "media.code"));
+  if (!shortcode) return null;
+  const taken = pick(r, "taken_at", "media.taken_at", "posted_at", "timestamp");
+  const postedAt =
+    typeof taken === "number"
+      ? new Date(taken * (taken < 1e12 ? 1000 : 1)).toISOString()
+      : typeof taken === "string" && !Number.isNaN(Date.parse(taken))
+        ? new Date(taken).toISOString()
+        : null;
+  return {
+    shortcode,
+    url: str(pick(r, "post_url", "url")) ?? `https://www.instagram.com/reel/${shortcode}/`,
+    postedAt,
+    // Plays, the figure on the profile grid. play_count first: it is the
+    // field the dashboard's history was built on.
+    views: num(pick(r, "play_count", "media.play_count", "ig_play_count", "media.ig_play_count", "video_play_count", "view_count")),
+    likes: num(pick(r, "like_count", "media.like_count", "likes")),
+    comments: num(pick(r, "comment_count", "media.comment_count", "comments")),
+    shares: num(pick(r, "share_count", "reshare_count", "media.share_count")),
+    caption: str(pick(r, "caption.text", "caption_text", "caption", "media.caption.text")),
+    thumbnailUrl: str(
+      pick(r, "image_versions2.candidates.0.url", "media.image_versions2.candidates.0.url", "thumbnail_url", "display_url", "image_url")
+    ),
+  };
+}
+
+/** Each account's Reels tab, one run per account, side by side. */
+async function readInstagramReels(
+  accounts: Account[],
+  perAccount: number
+): Promise<Map<string, { posts: PostReading[]; error: string | null }>> {
+  const out = new Map<string, { posts: PostReading[]; error: string | null }>();
+  await Promise.all(
+    accounts.map(async (a) => {
+      const run = await runActor(IG_REELS_ACTOR, { username: igUsername(a.handle), maxResults: perAccount });
+      const posts = run.rows
+        .filter((r) => r.success !== false)
+        .map(reelFromProfileRow)
+        .filter((p): p is PostReading => !!p);
+      out.set(a.id, { posts, error: run.error ?? (posts.length === 0 && run.rows.length > 0 ? "no reels in the answer" : null) });
+    })
+  );
+  return out;
+}
+
+/** The first rows of one account's Reels-tab answer, for checking fields. */
+export async function probeInstagramReels(username: string, max = 3) {
+  const run = await runActor(IG_REELS_ACTOR, { username, maxResults: max });
+  return {
+    error: run.error,
+    rows: run.rows.slice(0, max).map((r) => ({
+      parsed: reelFromProfileRow(r),
+      counts: Object.fromEntries(
+        Object.entries(r).filter(([k, v]) => /count|plays|views/i.test(k) && (typeof v === "number" || v === null))
+      ),
+      keys: Object.keys(r).slice(0, 60),
+    })),
+  };
+}
+
 async function readInstagram(accounts: Account[], perAccount: number): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byName = new Map(accounts.map((a) => [igUsername(a.handle), a]));
   const usernames = Array.from(byName.keys());
 
-  const [profiles, posts] = await Promise.all([
+  const [profiles, reelsTab] = await Promise.all([
     runActor(IG_PROFILE_ACTOR, { usernames }),
-    runActor(IG_POSTS_ACTOR, { usernames, postsPerProfile: perAccount }),
+    readInstagramReels(accounts, perAccount),
   ]);
+  // The cheap feed actor only for accounts the Reels tab gave nothing for.
+  const missing = accounts.filter((a) => (reelsTab.get(a.id)?.posts.length ?? 0) === 0);
+  const posts = missing.length
+    ? await runActor(IG_POSTS_ACTOR, {
+        usernames: missing.map((a) => igUsername(a.handle)),
+        postsPerProfile: perAccount,
+      })
+    : { rows: [] as Row[], error: null };
+  for (const [id, r] of Array.from(reelsTab.entries())) {
+    if (r.error) console.error(`[scrape] instagram reels ${id}:`, r.error);
+  }
   if (profiles.error) console.error("[scrape] instagram profiles:", profiles.error);
   if (posts.error) console.error("[scrape] instagram posts:", posts.error);
 
@@ -253,7 +353,14 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
       thumbnailUrl: str(r.image_url),
     });
   }
+  reelsTab.forEach((r, id) => {
+    const reading = out.get(id);
+    if (reading && r.posts.length > 0) reading.posts = r.posts;
+  });
   out.forEach((reading) => {
+    if (reading.posts.length > 0 && reading.posts.every((p) => p.views == null) && !reading.note) {
+      reading.note = "reels read, but without plays — the views on this account are not moving until this is fixed";
+    }
     if (reading.followers == null && reading.posts.length === 0 && !reading.note) {
       reading.note = hidden.has(reading.account.id)
         ? "Instagram is showing this account to logged-in visitors only right now — the handle is right; readings resume when Instagram lifts it"
@@ -588,7 +695,7 @@ export async function scrapeAccounts(
   const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =
     ig.length * 0.0026 +
-    (ig.length ? 0.005 + ig.length * perAccount * 0.0003 : 0) +
+    ig.length * (0.002 + perAccount * 0.0015) +
     fb.length * 0.012 +
     (fb.length ? 0.0005 + (fb.length - viaFeed) * perPage * 0.0003 : 0) +
     (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);

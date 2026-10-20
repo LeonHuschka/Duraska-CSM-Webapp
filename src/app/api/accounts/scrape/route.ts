@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePersonaId } from "@/lib/persona";
-import { scrapeAccounts } from "@/lib/account-scrape";
+import { probeInstagramReels, scrapeAccounts } from "@/lib/account-scrape";
 import { storeCovers } from "@/lib/stored-images";
 import { announceWinners } from "@/lib/winners";
 
@@ -58,6 +58,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, winners });
   }
   const t0 = Date.now();
+  // ?probe=<username> shows the first reels of one Instagram account as the
+  // Reels-tab actor returns them — to check which field holds the plays.
+  const probe = params.get("probe");
+  if (probe) return NextResponse.json({ ok: true, probe: await probeInstagramReels(probe, 3) });
   // ?covers=1 copies covers into storage from the latest readings and
   // scrapes nothing — to finish what a run left for later.
   if (params.get("covers") === "1") {
