@@ -75,6 +75,14 @@ export async function AccountsTab({
       .eq("status", "posted"),
   ]);
 
+  // Reels already in Trial-Maxxing, so their tile links there.
+  const { data: trialRows } = await supabase
+    .from("trials")
+    .select("id, account_id, shortcode")
+    .eq("persona_id", personaId)
+    .neq("status", "archived");
+  const trialOf = new Map((trialRows ?? []).map((t) => [`${t.account_id}|${t.shortcode}`, t.id]));
+
   // Who runs each account, by name. Profiles are read with the service
   // key: a VA's own profile row is not visible to every other member.
   const managers = Array.from(
@@ -223,6 +231,8 @@ export async function AccountsTab({
           engagement:
             r.views && r.views > 0 ? ((r.likes ?? 0) + (r.comments ?? 0) + (r.shares ?? 0)) / r.views : null,
           lift,
+          shortcode: r.source === "scrape" ? r.shortcode : null,
+          trialId: r.shortcode ? trialOf.get(`${a.id}|${r.shortcode}`) ?? null : null,
           seenAt: r.captured_at,
         };
       });

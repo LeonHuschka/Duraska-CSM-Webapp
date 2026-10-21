@@ -1,0 +1,310 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { requireActivePersonaId } from "@/lib/persona";
+import { announceShoot } from "@/lib/shoot-notice";
+import { getNextReelTitle } from "@/app/(app)/vault/actions";
+import { DIMENSIONS, DIM_META, cellName, loadTrial, notifyTrial, rowOpen, winnersOf, roundBrief, type Dimension, type Phase } from "@/lib/trials";
+import { accountLabel } from "@/lib/account-analytics";
+
+type Sb = Awaited<ReturnType<typeof createClient>>;
+
+async function who(supabase: Sb, personaId: string) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const [{ data: profile }, { data: membership }] = await Promise.all([
+    supabase.from("user_profiles").select("global_role").eq("id", user.id).maybeSingle(),
+    supabase.from("persona_members").select("role").eq("persona_id", personaId).eq("user_id", user.id).maybeSingle(),
+  ]);
+  const staff = profile?.global_role === "owner" || membership?.role === "owner" || membership?.role === "manager";
+  return { userId: user.id, staff, member: staff || !!membership };
+}
+
+function touch(trialId: string) {
+  revalidatePath(`/trials/${trialId}`);
+  revalidatePath("/trials");
+  revalidatePath("/");
+}
+
+/**
+ * Start Trial-Maxxing on a reel: the trial with the outlier as it stands
+ * today, its eighteen empty cells, and a word to the model in Telegram.
+ * Starting it twice on the same reel opens the one that exists.
+ */
+export async function createTrial(input: { accountId: string; shortcode: string }) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers can start Trial-Maxxing", id: null };
+
+  const { data: existing } = await supabase
+    .from("trials")
+    .select("id")
+    .eq("account_id", input.accountId)
+    .eq("shortcode", input.shortcode)
+    .maybeSingle();
+  if (existing) return { error: null, id: existing.id };
+
+  // The outlier as the scrape last saw it, and what is usual on its account.
+  const [{ data: rows }, { data: all }] = await Promise.all([
+    supabase
+      .from("reel_metrics")
+      .select("views, post_url, caption, cover_path, tile_path, request_id, captured_at")
+      .eq("account_id", input.accountId)
+      .eq("shortcode", input.shortcode)
+      .order("captured_at", { ascending: false })
+      .limit(1),
+    supabase
+      .from("reel_metrics")
+      .select("shortcode, views, captured_at")
+      .eq("account_id", input.accountId)
+      .eq("source", "scrape")
+      .not("views", "is", null)
+      .order("captured_at", { ascending: false })
+      .limit(3000),
+  ]);
+  const r = rows?.[0];
+  if (!r) return { error: "That reel has not been read from the account yet", id: null };
+  const latest = new Map<string, number>();
+  for (const x of all ?? []) if (x.shortcode && !latest.has(x.shortcode)) latest.set(x.shortcode, Number(x.views));
+  const vals = Array.from(latest.values()).filter((v) => v > 0).sort((a, b) => a - b);
+  const median = vals.length ? (vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2) : 0;
+
+  const { data: trial, error } = await supabase
+    .from("trials")
+    .insert({
+      persona_id: personaId,
+      account_id: input.accountId,
+      shortcode: input.shortcode,
+      post_url: r.post_url,
+      caption: r.caption,
+      cover_path: r.cover_path,
+      views: r.views,
+      lift: r.views && median > 0 ? Math.round((Number(r.views) / median) * 10) / 10 : null,
+      source_request_id: r.request_id,
+      created_by: me.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !trial) return { error: error?.message ?? "Could not start", id: null };
+
+  const cells = DIMENSIONS.flatMap((d) => [1, 2, 3, 4, 5, 6].map((slot) => ({ trial_id: trial.id, dimension: d, slot })));
+  const { error: cellErr } = await supabase.from("trial_cells").insert(cells);
+  if (cellErr) return { error: cellErr.message, id: trial.id };
+
+  await notifyTrial(trial.id, "started");
+  touch(trial.id);
+  return { error: null, id: trial.id };
+}
+
+/**
+ * The job behind a cell, made the first time a take is about to land.
+ * Status "requested" while takes are still coming in: it is not work for
+ * the editor until she presses finish.
+ */
+export async function openCellJob(cellId: string) {
+  const supabase = await createClient();
+  const { data: cell } = await supabase.from("trial_cells").select("*").eq("id", cellId).maybeSingle();
+  if (!cell) return { error: "No such cell", requestId: null, personaId: null };
+  const { data: trial } = await supabase
+    .from("trials")
+    .select("id, persona_id, account_id, post_url, phase")
+    .eq("id", cell.trial_id)
+    .maybeSingle();
+  if (!trial) return { error: "No such trial", requestId: null, personaId: null };
+  const me = await who(supabase, trial.persona_id);
+  if (!me?.member) return { error: "Not a member of this persona", requestId: null, personaId: null };
+  if (!rowOpen(trial.phase as Phase, cell.dimension as Dimension)) {
+    return { error: `${DIM_META[cell.dimension as Dimension].title} open once the round before is decided`, requestId: null, personaId: null };
+  }
+  if (cell.request_id) return { error: null, requestId: cell.request_id, personaId: trial.persona_id };
+
+  const view = await loadTrial(supabase, trial.id);
+  const { data: account } = trial.account_id
+    ? await supabase.from("accounts").select("handle, display_name").eq("id", trial.account_id).maybeSingle()
+    : { data: null };
+  const acc = account ? account.display_name || accountLabel(account.handle) : "the outlier's account";
+  const name = cellName({ dimension: cell.dimension as Dimension, slot: cell.slot, label: cell.label });
+  const brief = view ? roundBrief(cell.dimension as Dimension, winnersOf(view)) : "";
+  const { title } = await getNextReelTitle();
+  const { data: maxRow } = await supabase
+    .from("content_requests")
+    .select("position")
+    .eq("persona_id", trial.persona_id)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: req, error } = await supabase
+    .from("content_requests")
+    .insert({
+      persona_id: trial.persona_id,
+      title,
+      description: `🧪 Trial-Maxxing · ${name} for ${acc}. Recreate the outlier — ${brief} Post on ${acc} only.`,
+      inspo_link: trial.post_url,
+      status: "requested",
+      position: (maxRow?.position ?? 0) + 1,
+      created_by: me.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !req) return { error: error?.message ?? "Could not create the job", requestId: null, personaId: null };
+  // Two takes picked at once can race here; the second keeps the first job.
+  const { data: claimed } = await supabase
+    .from("trial_cells")
+    .update({ request_id: req.id, updated_at: new Date().toISOString() })
+    .eq("id", cellId)
+    .is("request_id", null)
+    .select("request_id")
+    .maybeSingle();
+  if (!claimed) {
+    await supabase.from("content_requests").delete().eq("id", req.id);
+    const { data: again } = await supabase.from("trial_cells").select("request_id").eq("id", cellId).maybeSingle();
+    return { error: null, requestId: again?.request_id ?? null, personaId: trial.persona_id };
+  }
+  touch(trial.id);
+  return { error: null, requestId: req.id, personaId: trial.persona_id };
+}
+
+/** One take of a cell, stored as a raw asset of its job. */
+export async function recordTake(input: {
+  cellId: string;
+  requestId: string;
+  file_path: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const { error } = await supabase.from("content_assets").insert({
+    request_id: input.requestId,
+    stage: "raw",
+    file_path: input.file_path,
+    file_name: input.file_name,
+    mime_type: input.mime_type,
+    size_bytes: input.size_bytes,
+    uploaded_by: user.id,
+  });
+  if (error) return { error: error.message };
+  // A take after finish is more material for a job already in editing —
+  // say so in TALK the way any upload does.
+  const { data: cell } = await supabase.from("trial_cells").select("trial_id, finished_at").eq("id", input.cellId).maybeSingle();
+  if (cell?.finished_at) await announceShoot(input.requestId);
+  if (cell) touch(cell.trial_id);
+  return { error: null };
+}
+
+/** The picture in the cell, from the first take. */
+export async function setCellThumb(cellId: string, path: string) {
+  const supabase = await createClient();
+  const { data: cell } = await supabase
+    .from("trial_cells")
+    .update({ thumb_path: path, updated_at: new Date().toISOString() })
+    .eq("id", cellId)
+    .is("thumb_path", null)
+    .select("trial_id")
+    .maybeSingle();
+  if (cell) touch(cell.trial_id);
+  return { error: null };
+}
+
+/** All takes are in: the job goes to editing. */
+export async function finishCell(cellId: string) {
+  const supabase = await createClient();
+  const { data: cell } = await supabase.from("trial_cells").select("trial_id, request_id").eq("id", cellId).maybeSingle();
+  if (!cell?.request_id) return { error: "Upload at least one take first" };
+  const { count } = await supabase
+    .from("content_assets")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", cell.request_id)
+    .eq("stage", "raw")
+    .is("deleted_at", null);
+  if (!count) return { error: "Upload at least one take first" };
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("content_requests")
+    .update({ status: "shooted", shooted_at: now, updated_at: now })
+    .eq("id", cell.request_id)
+    .eq("status", "requested");
+  if (error) return { error: error.message };
+  await supabase.from("trial_cells").update({ finished_at: now, updated_at: now }).eq("id", cellId);
+  await announceShoot(cell.request_id);
+  touch(cell.trial_id);
+  return { error: null };
+}
+
+/** What a cell is about: "black dress", "beach", "POV: …". Staff only. */
+export async function setCellLabel(cellId: string, label: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers can name cells" };
+  const { data: cell } = await supabase
+    .from("trial_cells")
+    .update({ label: label.trim().slice(0, 60) || null, updated_at: new Date().toISOString() })
+    .eq("id", cellId)
+    .select("trial_id")
+    .maybeSingle();
+  if (cell) touch(cell.trial_id);
+  return { error: null };
+}
+
+export async function toggleWinner(cellId: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers pick winners" };
+  const { data: cell } = await supabase.from("trial_cells").select("trial_id, winner").eq("id", cellId).maybeSingle();
+  if (!cell) return { error: "No such cell" };
+  await supabase.from("trial_cells").update({ winner: !cell.winner, updated_at: new Date().toISOString() }).eq("id", cellId);
+  touch(cell.trial_id);
+  return { error: null };
+}
+
+/**
+ * Decide the round and open the next one. Without winners picked by hand
+ * the two posted cells with the most views win.
+ */
+export async function advanceTrial(trialId: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers decide a round" };
+  const t = await loadTrial(supabase, trialId);
+  if (!t) return { error: "No such trial" };
+  if (t.phase === "done") return { error: "This trial is finished" };
+  const d = t.phase as Dimension;
+  const row = t.cells.filter((c) => c.dimension === d);
+  if (!row.some((c) => c.winner)) {
+    const ranked = row.filter((c) => c.state === "posted" && c.views != null).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+    if (ranked.length === 0) return { error: "Nothing in this round has been posted and read yet — pick winners by hand" };
+    const top = ranked.slice(0, 2).map((c) => c.id);
+    await supabase.from("trial_cells").update({ winner: true }).in("id", top);
+  }
+  const after = DIMENSIONS[DIMENSIONS.indexOf(d) + 1] as Dimension | undefined;
+  const next = (after ?? "done") as Phase;
+  await supabase
+    .from("trials")
+    .update({ phase: next, status: next === "done" ? "done" : "active", updated_at: new Date().toISOString() })
+    .eq("id", trialId);
+  await notifyTrial(trialId, next === "done" ? "done" : "round");
+  touch(trialId);
+  return { error: null };
+}
+
+export async function archiveTrial(trialId: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers can stop a trial" };
+  await supabase.from("trials").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", trialId);
+  touch(trialId);
+  return { error: null };
+}

@@ -46,6 +46,12 @@ export interface VaultAsset {
    * on @harold yesterday.
    */
   reelPostings: Record<string, { count: number; lastAt: string | null }>;
+  /**
+   * A Trial-Maxxing cut belongs to the outlier's account: the whole point
+   * is to read how that account's audience takes the variation, so it is
+   * offered there and nowhere else.
+   */
+  trialAccountId: string | null;
 }
 
 export interface PostingAccount {
@@ -148,6 +154,26 @@ export default async function VaultPage() {
   if (requestIds.length === 0) {
     return <VaultView assets={[]} accounts={accounts} viewer={viewer} members={members} />;
   }
+
+  // Jobs that are cells of a trial, and the account each must go out on.
+  const { data: trialCells } = await supabase
+    .from("trial_cells")
+    .select("request_id, dimension, slot, label, trial_id")
+    .in("request_id", requestIds);
+  const trialIds = Array.from(new Set((trialCells ?? []).map((c) => c.trial_id)));
+  const { data: trialRows } = trialIds.length
+    ? await supabase.from("trials").select("id, account_id").in("id", trialIds)
+    : { data: [] as { id: string; account_id: string | null }[] };
+  const trialAccount = new Map((trialRows ?? []).map((t) => [t.id, t.account_id]));
+  const ONE: Record<string, string> = { outfit: "Outfit", location: "Location", hook: "Hook" };
+  const trialOf = new Map(
+    (trialCells ?? [])
+      .filter((c) => c.request_id)
+      .map((c) => [
+        c.request_id!,
+        { accountId: trialAccount.get(c.trial_id) ?? null, tag: `🧪 ${c.label?.trim() || `${ONE[c.dimension] ?? c.dimension} ${c.slot}`}` },
+      ])
+  );
 
   const requestMap = Object.fromEntries(
     (requests ?? []).map((r) => [
@@ -289,7 +315,9 @@ export default async function VaultPage() {
         signedUrl,
         thumbnailUrl,
         thumbnailPath: asset.thumbnail_path ?? null,
-        request_title: req?.title ?? "Untitled",
+        request_title: trialOf.has(asset.request_id)
+          ? `${req?.title ?? "Untitled"} · ${trialOf.get(asset.request_id)!.tag}`
+          : req?.title ?? "Untitled",
         is_nsfw: req?.is_nsfw ?? false,
         is_trial: req?.is_trial ?? false,
         is_warmup: req?.is_warmup ?? false,
@@ -309,6 +337,7 @@ export default async function VaultPage() {
         variantNo: variantByAsset[asset.id]?.no ?? null,
         variantCount: variantByAsset[asset.id]?.of ?? 0,
         reelPostings: reelPostingsByRequest[asset.request_id] ?? {},
+        trialAccountId: trialOf.get(asset.request_id)?.accountId ?? null,
       } satisfies VaultAsset;
     })
     .filter(Boolean) as VaultAsset[];

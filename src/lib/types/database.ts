@@ -928,6 +928,105 @@ export type Database = {
         };
         Relationships: [];
       };
+      trials: {
+        Row: {
+          id: string;
+          persona_id: string;
+          account_id: string | null;
+          shortcode: string;
+          post_url: string | null;
+          caption: string | null;
+          cover_path: string | null;
+          views: number | null;
+          lift: number | null;
+          source_request_id: string | null;
+          phase: string;
+          status: string;
+          message_id: number | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          account_id?: string | null;
+          shortcode: string;
+          post_url?: string | null;
+          caption?: string | null;
+          cover_path?: string | null;
+          views?: number | null;
+          lift?: number | null;
+          source_request_id?: string | null;
+          phase?: string;
+          status?: string;
+          message_id?: number | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          account_id?: string | null;
+          shortcode?: string;
+          post_url?: string | null;
+          caption?: string | null;
+          cover_path?: string | null;
+          views?: number | null;
+          lift?: number | null;
+          source_request_id?: string | null;
+          phase?: string;
+          status?: string;
+          message_id?: number | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      trial_cells: {
+        Row: {
+          id: string;
+          trial_id: string;
+          dimension: string;
+          slot: number;
+          label: string | null;
+          request_id: string | null;
+          thumb_path: string | null;
+          finished_at: string | null;
+          winner: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          trial_id: string;
+          dimension: string;
+          slot: number;
+          label?: string | null;
+          request_id?: string | null;
+          thumb_path?: string | null;
+          finished_at?: string | null;
+          winner?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          trial_id?: string;
+          dimension?: string;
+          slot?: number;
+          label?: string | null;
+          request_id?: string | null;
+          thumb_path?: string | null;
+          finished_at?: string | null;
+          winner?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       winners: {
         Row: {
           id: string;

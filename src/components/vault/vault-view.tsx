@@ -1042,15 +1042,25 @@ export function VaultView({
   // cuts are left, but the reel already ran on one of her accounts — only
   // for the rare second cut of something that took off.
   const isFree = (a: VaultAsset) => a.postedAccountIds.length === 0 && !a.postedWithoutAccount;
+  // A Trial-Maxxing cut is only work for whoever posts on its account.
+  const trialFits = useCallback(
+    (a: VaultAsset) => !a.trialAccountId || postingTargets.some((acc) => acc.id === a.trialAccountId),
+    [postingTargets]
+  );
   const isFreshForViewer = useCallback(
     (a: VaultAsset) =>
-      isFree(a) && postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
-    [postingTargets]
+      isFree(a) && trialFits(a) && postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
+    [postingTargets, trialFits]
   );
   const isPostedForViewer = useCallback(
     (a: VaultAsset) =>
-      isFree(a) && postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) > 0),
-    [postingTargets]
+      isFree(a) && trialFits(a) && postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) > 0),
+    [postingTargets, trialFits]
+  );
+  // The accounts a card offers to mark it posted on.
+  const accountsFor = useCallback(
+    (a: VaultAsset) => (a.trialAccountId ? visibleAccounts.filter((x) => x.id === a.trialAccountId) : visibleAccounts),
+    [visibleAccounts]
   );
   // A VA with nothing to see: either nobody typed her handle on her profile,
   // or no account names her as manager. Either way, say so instead of
@@ -1522,7 +1532,7 @@ export function VaultView({
                 <VaultCard
                   key={reel.cuts[0].id}
                   asset={reel.cuts[0]}
-                  accounts={visibleAccounts}
+                  accounts={accountsFor(reel.cuts[0])}
                   reelCuts={cutsByRequest.get(reel.requestId)}
                   onUpdateNsfw={handleNsfwUpdate}
                   onUpdatePosted={handlePostedUpdate}
@@ -1533,7 +1543,7 @@ export function VaultView({
                   key={reel.requestId}
                   reel={reel}
                   allCuts={cutsByRequest.get(reel.requestId) ?? reel.cuts}
-                  accounts={visibleAccounts}
+                  accounts={accountsFor(reel.cover)}
                   expanded={expandedId === reel.requestId}
                   onToggle={() =>
                     setExpandedId((cur) => (cur === reel.requestId ? null : reel.requestId))

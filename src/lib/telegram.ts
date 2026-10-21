@@ -130,14 +130,22 @@ export async function sendMessage(opts: {
   message_thread_id?: number | null;
   parse_mode?: "HTML" | "Markdown";
   disable_notification?: boolean;
+  /** Answer this message, so the new one sits under it in the thread. */
+  reply_to_message_id?: number | null;
+  /** One row of link buttons under the message. */
+  buttons?: { text: string; url: string }[];
 }) {
-  return call("sendMessage", {
+  return call<{ message_id: number }>("sendMessage", {
     chat_id: opts.chat_id,
     text: opts.text,
     ...(opts.message_thread_id ? { message_thread_id: opts.message_thread_id } : {}),
     parse_mode: opts.parse_mode ?? "HTML",
     disable_web_page_preview: true,
     ...(opts.disable_notification ? { disable_notification: true } : {}),
+    ...(opts.reply_to_message_id
+      ? { reply_parameters: { message_id: opts.reply_to_message_id, allow_sending_without_reply: true } }
+      : {}),
+    ...(opts.buttons?.length ? { reply_markup: { inline_keyboard: [opts.buttons] } } : {}),
   });
 }
 

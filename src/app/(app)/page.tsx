@@ -4,12 +4,8 @@ import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
 import { Upload, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import {
-  PipelineDonut,
-  WeekBars,
-  WeeklyGoal,
-  PlatformBadges,
-} from "@/components/dashboard/pipeline-donut";
+import { LinksDonut, TrialJobs, WeekVsMust } from "@/components/dashboard/model-home";
+import { listTrials } from "@/lib/trials";
 import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 
 // The "Scrape now" action on the accounts tab runs inside this route and
@@ -18,38 +14,6 @@ export const maxDuration = 300;
 import { AccountsTab } from "@/components/pipeline/accounts-tab";
 import { LinkTab } from "@/components/pipeline/link/link-tab";
 import { PERIODS, type PeriodKey } from "@/lib/account-analytics";
-import { dailyDemand } from "@/lib/demand";
-
-// One colour per pipeline stage, used by the stat boxes and the donut alike
-// so a number and its slice always read as the same thing.
-const TONES: Record<string, string> = {
-  purple: "text-purple-400",
-  emerald: "text-emerald-400",
-  amber: "text-amber-400",
-  blue: "text-blue-400",
-};
-
-function StatBox({
-  value,
-  label,
-  hint,
-  tone,
-}: {
-  value: number;
-  label: string;
-  hint: string;
-  tone: keyof typeof TONES | string;
-}) {
-  return (
-    <div className="rounded-xl border border-border/50 bg-card p-3">
-      <p className={`text-2xl font-semibold tabular-nums ${TONES[tone] ?? ""}`}>
-        {value}
-      </p>
-      <p className="mt-0.5 text-[11px] font-medium leading-tight">{label}</p>
-      <p className="mt-1 text-[10px] leading-tight text-muted-foreground">{hint}</p>
-    </div>
-  );
-}
 
 export default async function DashboardPage({
   searchParams,
@@ -99,264 +63,94 @@ export default async function DashboardPage({
   const persona = active.personas as { name: string; brand_color: string } | null;
   const personaId = active.persona_id;
 
-  const { data: requests } = await supabase
-    .from("content_requests")
-    .select("id, status, created_at")
-    .eq("persona_id", personaId);
-
-  const count = (s: string) => requests?.filter((r) => r.status === s).length ?? 0;
-  const toEdit = count("shooted");
-  const readyToPost = count("edited");
-
   // ── Model dashboard ──
   // The model always lands here; owners/managers can preview it via
   // ?view=model to see exactly what she sees.
   const isModel = active.role === "model";
   const previewingModel = !isModel && sp.view === "model";
   if (isModel || previewingModel) {
-    const DAY = 24 * 60 * 60 * 1000;
-    const weekAgo = Date.now() - 7 * DAY;
-    const twoWeeksAgo = Date.now() - 14 * DAY;
+    // ── Shot this week, day by day, in her time zone ──
+    // Counted by when a reel was shot — the moment its takes went to
+    // editing — not when its job was created: a job made for her by the
+    // team, or one opened in Trial-Maxxing and finished two days later,
+    // counts on the day she actually delivered it.
+    const MUST_PER_DAY = 3;
+    const TZ = "Europe/Berlin";
+    const dayKey = (t: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(t);
+    const todayKey = dayKey(new Date());
+    const weekday = (new Date(`${todayKey}T12:00:00Z`).getUTCDay() + 6) % 7; // Monday = 0
+    const keyAt = (offset: number) => {
+      const d = new Date(`${todayKey}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + offset);
+      return d.toISOString().slice(0, 10);
+    };
+    const weekKeys = Array.from({ length: 7 }, (_, i) => keyAt(i - weekday));
+    const since = new Date(`${weekKeys[0]}T00:00:00Z`);
+    since.setUTCDate(since.getUTCDate() - 1);
+    const { data: shotRows } = await supabase
+      .from("content_requests")
+      .select("shooted_at, status")
+      .eq("persona_id", personaId)
+      .not("shooted_at", "is", null)
+      .neq("status", "requested")
+      .gte("shooted_at", since.toISOString());
+    const perDay = new Map<string, number>();
+    for (const r of shotRows ?? []) {
+      const k = dayKey(new Date(r.shooted_at!));
+      perDay.set(k, (perDay.get(k) ?? 0) + 1);
+    }
+    const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const week = weekKeys.map((k, i) => ({ label: labels[i], date: k, value: perDay.get(k) ?? 0 }));
 
-    const uploadTimes = (requests ?? []).map((r) =>
-      new Date(r.created_at).getTime()
-    );
-    const thisWeek = uploadTimes.filter((t) => t >= weekAgo).length;
-    const lastWeek = uploadTimes.filter(
-      (t) => t >= twoWeeksAgo && t < weekAgo
-    ).length;
-
-    // Uploads per day for the last 7 days (oldest → today).
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const weekDays = Array.from({ length: 7 }, (_, i) => {
-      const day = new Date();
-      day.setHours(0, 0, 0, 0);
-      day.setDate(day.getDate() - (6 - i));
-      const start = day.getTime();
-      const end = start + DAY;
-      return {
-        label: dayNames[day.getDay()],
-        value: uploadTimes.filter((t) => t >= start && t < end).length,
-      };
-    });
-
-    // Inspo links from Telegram that still need her.
+    // ── Inspo links: open against shot ──
     const { data: links } = await supabase
       .from("content_links")
-      .select("status, posted_at")
+      .select("status")
       .eq("persona_id", personaId);
     const openLinks = (links ?? []).filter((l) => l.status === "open").length;
+    const shotLinks = (links ?? []).filter((l) => ["shot", "uploaded", "edited"].includes(l.status)).length;
     const shotNotUploaded = (links ?? []).filter((l) => l.status === "shot").length;
-    const newLinksThisWeek = (links ?? []).filter(
-      (l) => new Date(l.posted_at).getTime() >= weekAgo
-    ).length;
-
-    // How many accounts are actually consuming content right now. A reel can
-    // only be posted once, so every live account raises what she has to shoot.
-    const { data: liveAccountRows } = await supabase
-      .from("accounts")
-      .select("id, platform")
-      .eq("persona_id", personaId)
-      .not("status", "in", '("dead","paused")');
-    const liveAccounts = liveAccountRows?.length ?? 0;
-
-    // Per-platform counts for the little overlapping badges.
-    const platformOrder = ["instagram", "facebook", "tiktok", "x"];
-    const platformCounts = platformOrder
-      .map((p) => ({
-        platform: p,
-        count: (liveAccountRows ?? []).filter((a) => a.platform === p).length,
-      }))
-      .filter((p) => p.count > 0);
 
     const { data: tgCfg } = await supabase
       .from("telegram_config")
-      .select("weekly_reel_target, chat_id, requests_thread_id")
+      .select("chat_id, requests_thread_id")
       .eq("persona_id", personaId)
       .maybeSingle();
-    // Each account posts at its own rate, so demand is their sum — a single
-    // rate times the account count claimed six a day where the real answer
-    // is three.
-    const demand = await dailyDemand(supabase, personaId);
-    // A manually set target wins over the account-derived one.
-    const manualTarget = tgCfg?.weekly_reel_target ?? null;
-    const weeklyTarget =
-      manualTarget && manualTarget > 0
-        ? manualTarget
-        : Math.max(1, Math.round(demand.perDay * 7));
+    const tgChat = tgCfg?.chat_id ? String(tgCfg.chat_id).replace(/^-100/, "") : null;
+    const tgLink = tgChat && tgCfg?.requests_thread_id ? `https://t.me/c/${tgChat}/${tgCfg.requests_thread_id}` : null;
 
-    // Only the three stages she has any feel for.
-    const pipeline = [
-      { label: "Open inspo", value: openLinks, color: "stroke-amber-400" },
-      { label: "Shot", value: toEdit, color: "stroke-purple-400" },
-      { label: "Edited", value: readyToPost, color: "stroke-emerald-400" },
-    ];
-    const pipelineTotal = pipeline.reduce((a, s) => a + s.value, 0);
-
-    // The shelf, counted the same way the manager dashboard counts it:
-    // finished cuts nobody has posted. A job is not the unit — it yields
-    // several cuts and each goes out once — and counting jobs is why this
-    // number and the manager's disagreed.
-    const { data: cutRows } = await supabase
-      .from("content_assets")
-      .select("id, request_id, stage")
-      .in("request_id", (requests ?? []).map((r) => r.id))
-      .eq("stage", "edited")
-      .is("deleted_at", null);
-    const { data: postedSlots } = await supabase
-      .from("schedule_slots")
-      .select("asset_id, request_id, status")
-      .eq("persona_id", personaId)
-      .eq("status", "posted");
-    const postedCutIds = new Set<string>();
-    const postedJobsLegacy = new Set<string>();
-    for (const s of postedSlots ?? []) {
-      if (s.asset_id) postedCutIds.add(s.asset_id);
-      else if (s.request_id) postedJobsLegacy.add(s.request_id);
-    }
-    const inStock = (cutRows ?? []).filter(
-      (c) =>
-        !postedCutIds.has(c.id) &&
-        !(c.request_id && postedJobsLegacy.has(c.request_id))
-    ).length;
-    // What the accounts actually consume — not what she is asked to shoot.
-    // Those are different numbers whenever the weekly goal is set by hand,
-    // and using the goal would report a healthy buffer while it drains.
-    const dailyOut = Math.max(1, demand.perDay);
-
-    // Deep link into the requests topic, so "to shoot" is one tap from the
-    // list it comes from. Supergroup ids carry a -100 prefix t.me won't take.
-    const tgChat = tgCfg?.chat_id
-      ? String(tgCfg.chat_id).replace(/^-100/, "")
-      : null;
-    const tgLink =
-      tgChat && tgCfg?.requests_thread_id
-        ? `https://t.me/c/${tgChat}/${tgCfg.requests_thread_id}`
-        : null;
-
-    const trend = thisWeek - lastWeek;
+    // ── Trial-Maxxing waiting for her ──
+    const trials = await listTrials(supabase, personaId);
 
     return (
-      <div className="mx-auto max-w-md space-y-6">
+      <div className="mx-auto max-w-md space-y-5 pb-6">
         {previewingModel && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
             <span className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
               <Eye className="h-3.5 w-3.5" />
               Model view
             </span>
-            <Link
-              href="/"
-              className="flex items-center gap-1 text-xs text-amber-300/80 hover:text-amber-200"
-            >
+            <Link href="/" className="flex items-center gap-1 text-xs text-amber-300/80 hover:text-amber-200">
               <ArrowLeft className="h-3 w-3" /> Back to yours
             </Link>
           </div>
         )}
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Hey{persona?.name ? ` ${persona.name}` : ""} 👋
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Here&apos;s where your reels stand.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Hey{persona?.name ? ` ${persona.name}` : ""} 👋</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Here&apos;s where your reels stand.</p>
         </div>
 
-        {/* Hero: how far into this week's minimum she is */}
-        <WeeklyGoal
-          done={thisWeek}
-          target={weeklyTarget}
-          liveAccounts={liveAccounts}
-          manual={!!manualTarget && manualTarget > 0}
-          stockReels={inStock}
-          perDay={dailyOut}
-        />
+        <LinksDonut open={openLinks} shot={shotLinks} topicHref={tgLink} />
 
-        {/* Three numbers she can act on, each with context */}
-        <div className="grid grid-cols-3 gap-2.5">
-          <StatBox
-            value={openLinks}
-            label="To shoot"
-            tone="amber"
-            hint={
-              newLinksThisWeek > 0 ? `${newLinksThisWeek} new this week` : "no new links"
-            }
-          />
-          <StatBox
-            value={thisWeek}
-            label="Shot this week"
-            tone="purple"
-            hint={
-              lastWeek === 0 && thisWeek === 0
-                ? "let's go 💪"
-                : trend > 0
-                  ? `▲ ${trend} vs last week`
-                  : trend < 0
-                    ? `▼ ${Math.abs(trend)} vs last week`
-                    : "same as last week"
-            }
-          />
-          <div className="rounded-xl border border-border/50 bg-card p-3">
-            <div className="flex items-start justify-between gap-1">
-              <p className="text-2xl font-semibold tabular-nums text-blue-400">
-                {liveAccounts}
-              </p>
-              <PlatformBadges counts={platformCounts} />
-            </div>
-            <p className="mt-0.5 text-[11px] font-medium leading-tight">
-              Live accounts
-            </p>
-            <p className="mt-1 text-[10px] leading-tight text-muted-foreground">
-              {demand.perDay} reels a day between them
-            </p>
-          </div>
-        </div>
+        <WeekVsMust days={week} must={MUST_PER_DAY} todayIndex={weekday} />
 
-        <p className="px-1 text-[11px] leading-snug text-muted-foreground/80">
-          &ldquo;To shoot&rdquo; are the open inspo links in Telegram
-          {tgLink ? (
-            <>
-              {" · "}
-              <a
-                href={tgLink}
-                target="_blank"
-                rel="noreferrer"
-                className="text-foreground underline underline-offset-2"
-              >
-                open the topic
-              </a>
-            </>
-          ) : null}
-        </p>
-
-        {openLinks === 0 && (
-          <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-300">
-            🎉 No open links — you&apos;re fully caught up!
-          </p>
-        )}
         {shotNotUploaded > 0 && (
-          <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-            📤 {shotNotUploaded} reel{shotNotUploaded === 1 ? "" : "s"} marked as shot
-            but not uploaded yet — send them over!
+          <p className="rounded-2xl bg-amber-500/10 px-3 py-2.5 text-xs text-amber-300">
+            📤 {shotNotUploaded} reel{shotNotUploaded === 1 ? "" : "s"} marked as shot but not uploaded yet — send them over!
           </p>
         )}
 
-        {/* Where everything sits right now */}
-        {pipelineTotal > 0 && (
-          <div className="rounded-2xl border border-border/50 bg-card p-5">
-            <h2 className="mb-4 text-sm font-medium">Your pipeline</h2>
-            <PipelineDonut
-              segments={pipeline}
-              centerLabel="reels"
-              centerValue={pipelineTotal}
-            />
-          </div>
-        )}
-
-        {/* Consistency beats bursts — show the rhythm */}
-        <div className="rounded-2xl border border-border/50 bg-card p-5">
-          <h2 className="mb-4 text-sm font-medium">Last 7 days shot</h2>
-          <WeekBars days={weekDays} />
-        </div>
+        <TrialJobs trials={trials} />
 
         <Link href="/upload" className="block">
           <div className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-4 text-base font-semibold text-primary-foreground">

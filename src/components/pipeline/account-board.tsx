@@ -18,6 +18,8 @@ import {
   Plus,
   Repeat2,
   TrendingUp,
+  Loader2,
+  FlaskConical,
 } from "lucide-react";
 import {
   AccountAvatar,
@@ -39,6 +41,7 @@ import {
   setAccountOrder,
   updateAccountSettings,
 } from "@/components/pipeline/actions";
+import { createTrial } from "@/app/(app)/trials/actions";
 import { useWidth } from "@/components/pipeline/analytics/use-width";
 
 export type ReelTileData = {
@@ -58,6 +61,10 @@ export type ReelTileData = {
   engagement: number | null;
   /** Times the account's median views. 2× is doing well, 5× is a hit. */
   lift: number | null;
+  /** The platform's id of the post — what a trial is started on. */
+  shortcode: string | null;
+  /** The trial this reel is the outlier of, if one is running. */
+  trialId: string | null;
 };
 
 export type AccountTileData = {
@@ -937,7 +944,7 @@ function AccountPanel({
       ) : (
         <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-2">
           {a.reels.map((r) => (
-            <ReelTile key={r.key} r={r} />
+            <ReelTile key={r.key} r={r} accountId={a.id} canEdit={canEdit} />
           ))}
         </div>
       )}
@@ -970,13 +977,23 @@ function Field({
  * our number when it is one of ours, the caption on two lines, views and
  * what they did since the last reading, then likes, comments, shares.
  */
-function ReelTile({ r }: { r: ReelTileData }) {
+function ReelTile({
+  r,
+  accountId,
+  canEdit,
+}: {
+  r: ReelTileData;
+  accountId: string;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
   const [playing, setPlaying] = useState(false);
   const [broken, setBroken] = useState(false);
+  const [starting, startTrial] = useTransition();
   const hit = r.lift != null && r.lift >= 5;
   const good = r.lift != null && r.lift >= 2 && !hit;
   return (
-    <div className="w-40 shrink-0">
+    <div className="group/reel w-40 shrink-0">
       <div
         className={`relative aspect-[9/16] overflow-hidden rounded-xl bg-muted/40 ${
           hit
@@ -1048,6 +1065,47 @@ function ReelTile({ r }: { r: ReelTileData }) {
           <span className="absolute right-1.5 top-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
             {r.number}
           </span>
+        )}
+        {!playing && (r.trialId || (canEdit && r.shortcode)) && (
+          <button
+            type="button"
+            disabled={starting}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (r.trialId) return router.push(`/trials/${r.trialId}`);
+              startTrial(async () => {
+                const res = await createTrial({
+                  accountId,
+                  shortcode: r.shortcode!,
+                });
+                if (res.error || !res.id)
+                  return void toast.error(res.error ?? "Could not start");
+                toast.success(
+                  "Trial-Maxxing started — the model got a message",
+                );
+                router.push(`/trials/${res.id}`);
+              });
+            }}
+            className={`absolute bottom-1.5 left-1.5 inline-flex h-6 items-center gap-1 rounded-full px-2 text-[10px] font-bold backdrop-blur-sm transition-colors ${
+              r.trialId
+                ? "bg-fuchsia-500 text-white"
+                : hit
+                  ? "bg-fuchsia-500/90 text-white hover:bg-fuchsia-400"
+                  : "bg-black/55 text-white/80 opacity-0 hover:bg-fuchsia-500 group-hover/reel:opacity-100"
+            }`}
+            title={
+              r.trialId
+                ? "Open its Trial-Maxxing"
+                : "Start Trial-Maxxing on this reel"
+            }
+          >
+            {starting ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <FlaskConical className="h-3 w-3" />
+            )}
+            {r.trialId ? "TM" : "Trial-Max"}
+          </button>
         )}
         {!playing && r.postUrl && (
           <a
