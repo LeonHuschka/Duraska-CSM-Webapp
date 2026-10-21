@@ -81,7 +81,7 @@ export function WeekVsMust({
   const balance = shot - due;
   const today = days[todayIndex]?.value ?? 0;
   const top = Math.max(must + 1, ...days.map((d) => d.value));
-  const H = 120;
+  const H = 110;
   return (
     <div className="rounded-3xl border border-border/50 bg-card p-5">
       <div className="flex items-start justify-between gap-3">
@@ -104,38 +104,51 @@ export function WeekVsMust({
         </div>
       </div>
 
-      <div className="mt-5 flex items-end justify-between gap-2" style={{ height: H + 34 }}>
+      <div className="mt-5 flex items-end justify-between gap-2">
         {days.map((d, i) => {
           const future = i > todayIndex;
+          const isToday = i === todayIndex;
           const mustH = (must / top) * H;
-          const valH = (d.value / top) * H;
+          const valH = d.value > 0 ? Math.max(8, (d.value / top) * H) : 0;
           const met = d.value >= must;
+          const missed = !future && !isToday && !met;
           return (
-            <div key={d.date} className="flex flex-1 flex-col items-center gap-1">
-              <span
-                className={`text-[11px] font-semibold tabular-nums ${
-                  future ? "text-transparent" : met ? "text-emerald-300" : d.value > 0 ? "text-foreground" : "text-muted-foreground/60"
-                }`}
-              >
-                {d.value}
-              </span>
+            <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5">
               <div className="relative w-full" style={{ height: H }}>
-                {/* The must: three, faint and dashed */}
+                {/* The must: faint and dashed — red where a past day fell short */}
                 <div
-                  className="absolute inset-x-0 bottom-0 rounded-lg border border-dashed border-foreground/20 bg-foreground/[0.04]"
+                  className={`absolute inset-x-0 bottom-0 rounded-lg border border-dashed ${
+                    missed
+                      ? "border-rose-400/40 bg-rose-500/[0.07]"
+                      : isToday
+                        ? "border-fuchsia-400/60 bg-fuchsia-500/[0.07]"
+                        : "border-foreground/15 bg-foreground/[0.03]"
+                  }`}
                   style={{ height: mustH }}
                 />
                 {/* What she shot, laid over it */}
                 {d.value > 0 && (
                   <div
                     className={`absolute inset-x-[3px] bottom-0 rounded-lg ${
-                      met ? "bg-gradient-to-t from-emerald-500 to-emerald-300" : "bg-gradient-to-t from-violet-600 to-fuchsia-400"
-                    } shadow-[0_0_14px_-2px] ${met ? "shadow-emerald-400/50" : "shadow-fuchsia-500/40"}`}
-                    style={{ height: Math.max(6, valH) }}
+                      met ? "bg-gradient-to-t from-emerald-500 to-emerald-300 shadow-emerald-400/50" : "bg-gradient-to-t from-violet-600 to-fuchsia-400 shadow-fuchsia-500/40"
+                    } shadow-[0_0_14px_-2px]`}
+                    style={{ height: valH }}
                   />
                 )}
+                {!future && (
+                  <span
+                    className={`absolute inset-x-0 text-center text-[11px] font-bold tabular-nums ${
+                      met ? "text-emerald-300" : missed ? "text-rose-300" : d.value > 0 ? "text-foreground" : "text-muted-foreground"
+                    }`}
+                    style={{ bottom: Math.max(mustH, valH) + 3 }}
+                  >
+                    {d.value}
+                  </span>
+                )}
               </div>
-              <span className={`text-[10px] ${i === todayIndex ? "font-bold text-foreground" : "text-muted-foreground"}`}>{d.label}</span>
+              <span className={`text-[10px] ${isToday ? "font-bold text-fuchsia-300" : "text-muted-foreground"}`}>
+                {isToday ? "Today" : d.label}
+              </span>
             </div>
           );
         })}
