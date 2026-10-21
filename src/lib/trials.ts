@@ -202,7 +202,7 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
         ? "posted"
         : req?.status === "edited" || req?.status === "scheduled"
           ? "edited"
-          : c.finished_at || req?.status === "shooted"
+          : c.finished_at
             ? "finished"
             : "takes";
     const thumbPath = c.thumb_path ?? (c.request_id ? firstThumb.get(c.request_id) : undefined);

@@ -419,13 +419,18 @@ function CellSheet({
   const [busy, setBusy] = useState(false);
   const [finishing, startFinish] = useTransition();
   const [label, setLabel] = useState("");
+  // Takes the server knew of when this round of uploads began; the page
+  // refreshes after it and then counts them itself.
+  const [takesBase, setTakesBase] = useState<number | null>(null);
   const uploading = rows.some((r) => r.status === "uploading");
-  const takes = (cell?.takes ?? 0) + rows.filter((r) => r.status === "done").length;
+  const done = rows.filter((r) => r.status === "done").length;
+  const takes = Math.max(cell?.takes ?? 0, (takesBase ?? cell?.takes ?? 0) + done);
   const brief = cell ? trial.briefs[cell.dimension] : "";
 
   const reset = () => {
     setRows([]);
     setLabel("");
+    setTakesBase(null);
   };
 
   async function addTakes(list: FileList | null) {
@@ -435,6 +440,7 @@ function CellSheet({
     const tooBig = files.filter((f) => f.size > MAX_UPLOAD_MB * 1024 * 1024);
     if (tooBig.length) toast.error(`${tooBig.length} take(s) are over ${MAX_UPLOAD_MB} MB and will fail`);
     setBusy(true);
+    if (takesBase === null) setTakesBase(cell.takes);
     const job = await openCellJob(cell.id);
     if (job.error || !job.requestId) {
       setBusy(false);
