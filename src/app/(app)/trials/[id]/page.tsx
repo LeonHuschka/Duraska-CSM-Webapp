@@ -37,6 +37,7 @@ export default async function TrialPage({ params }: { params: Promise<{ id: stri
         postUrl: t.postUrl,
         caption: t.caption,
         cover: t.cover,
+        video: t.video,
         views: t.views,
         lift: t.lift,
         sourceTitle: t.sourceTitle,

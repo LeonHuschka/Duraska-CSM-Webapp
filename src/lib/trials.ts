@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage } from "@/lib/telegram";
+import { downloadVideo, resolveFacebookVideoUrl, resolveVideoUrl } from "@/lib/inspo-video";
 import { accountLabel } from "@/lib/account-analytics";
 
 /**
@@ -62,6 +63,8 @@ export type TrialView = {
   postUrl: string | null;
   caption: string | null;
   cover: string | null;
+  /** The outlier itself, playable: our cut when it is one of ours, else the copy stored at the start. */
+  video: string | null;
   views: number | null;
   lift: number | null;
   sourceTitle: string | null;
@@ -104,13 +107,27 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
   ]);
   const views = await cellsView(supabase, cells ?? [], t.account_id);
 
-  const paths = [t.cover_path, account?.avatar_path].filter((p): p is string => !!p);
-  const signed = await sign(supabase, paths);
   let sourceTitle: string | null = null;
+  let cutPath: string | null = null;
   if (t.source_request_id) {
-    const { data: r } = await supabase.from("content_requests").select("title").eq("id", t.source_request_id).maybeSingle();
+    const [{ data: r }, { data: cut }] = await Promise.all([
+      supabase.from("content_requests").select("title").eq("id", t.source_request_id).maybeSingle(),
+      supabase
+        .from("content_assets")
+        .select("file_path")
+        .eq("request_id", t.source_request_id)
+        .eq("stage", "edited")
+        .is("deleted_at", null)
+        .order("uploaded_at", { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    ]);
     sourceTitle = r?.title ?? null;
+    cutPath = cut?.file_path ?? null;
   }
+  const videoPath = t.video_path ?? cutPath;
+  const paths = [t.cover_path, account?.avatar_path, videoPath].filter((p): p is string => !!p);
+  const signed = await sign(supabase, paths);
   const median = t.views && t.lift ? Math.round(Number(t.views) / Number(t.lift)) : null;
   return {
     id: t.id,
@@ -128,6 +145,7 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
     postUrl: t.post_url,
     caption: t.caption,
     cover: t.cover_path ? signed.get(t.cover_path) ?? null : null,
+    video: videoPath ? signed.get(videoPath) ?? null : null,
     views: t.views,
     lift: t.lift == null ? null : Number(t.lift),
     sourceTitle,
@@ -297,6 +315,102 @@ export function winnersOf(t: Pick<TrialView, "cells">): { outfit: string[]; loca
   return { outfit: pick("outfit"), location: pick("location"), hook: pick("hook") };
 }
 
+/**
+ * The trial of a reel, made if there is none: the outlier as it stands,
+ * its eighteen empty cells, and — when it is not a reel we hold a cut of —
+ * a copy of its video, so the matrix can play it. Used by the winner
+ * announcement, which opens a trial for every winner, and by the button on
+ * the accounts tab.
+ */
+export async function ensureTrial(
+  supabase: Sb,
+  input: {
+    personaId: string;
+    accountId: string;
+    platform: string;
+    shortcode: string;
+    postUrl: string | null;
+    caption: string | null;
+    coverPath: string | null;
+    views: number | null;
+    lift: number | null;
+    sourceRequestId: string | null;
+    createdBy?: string | null;
+    /** The video, when the caller already downloaded it. */
+    videoBytes?: Uint8Array | null;
+  }
+): Promise<{ id: string | null; created: boolean; error: string | null }> {
+  const { data: existing } = await supabase
+    .from("trials")
+    .select("id")
+    .eq("account_id", input.accountId)
+    .eq("shortcode", input.shortcode)
+    .maybeSingle();
+  if (existing) return { id: existing.id, created: false, error: null };
+
+  const { data: trial, error } = await supabase
+    .from("trials")
+    .insert({
+      persona_id: input.personaId,
+      account_id: input.accountId,
+      shortcode: input.shortcode,
+      post_url: input.postUrl,
+      caption: input.caption,
+      cover_path: input.coverPath,
+      views: input.views,
+      lift: input.lift == null ? null : Math.round(input.lift * 10) / 10,
+      source_request_id: input.sourceRequestId,
+      created_by: input.createdBy ?? null,
+    })
+    .select("id")
+    .single();
+  if (error || !trial) return { id: null, created: false, error: error?.message ?? "could not start" };
+  const cells = DIMENSIONS.flatMap((d) => [1, 2, 3, 4, 5, 6].map((slot) => ({ trial_id: trial.id, dimension: d, slot })));
+  const { error: cellErr } = await supabase.from("trial_cells").insert(cells);
+  if (cellErr) return { id: trial.id, created: true, error: cellErr.message };
+  await storeOutlierVideo(supabase, trial.id, { bytes: input.videoBytes ?? null, platform: input.platform });
+  return { id: trial.id, created: true, error: null };
+}
+
+/**
+ * Put the outlier's video in storage. Not needed when it is a reel of
+ * ours — the cut plays — and fetched from the platform otherwise, which
+ * costs a fraction of a cent through the same resolvers the bot uses.
+ */
+export async function storeOutlierVideo(
+  supabase: Sb,
+  trialId: string,
+  opts: { bytes?: Uint8Array | null; platform?: string } = {}
+): Promise<boolean> {
+  const { data: t } = await supabase.from("trials").select("id, persona_id, account_id, post_url, video_path, source_request_id").eq("id", trialId).maybeSingle();
+  if (!t || t.video_path) return !!t?.video_path;
+  if (t.source_request_id) {
+    const { count } = await supabase
+      .from("content_assets")
+      .select("id", { count: "exact", head: true })
+      .eq("request_id", t.source_request_id)
+      .eq("stage", "edited")
+      .is("deleted_at", null);
+    if (count) return true;
+  }
+  let bytes = opts.bytes ?? null;
+  if (!bytes && t.post_url) {
+    let platform = opts.platform;
+    if (!platform && t.account_id) {
+      const { data: a } = await supabase.from("accounts").select("platform").eq("id", t.account_id).maybeSingle();
+      platform = a?.platform;
+    }
+    const resolved = platform === "facebook" ? await resolveFacebookVideoUrl(t.post_url) : await resolveVideoUrl(t.post_url);
+    bytes = resolved.ok ? await downloadVideo(resolved.url) : null;
+  }
+  if (!bytes) return false;
+  const path = `personas/${t.persona_id}/trials/${t.id}/outlier.mp4`;
+  const { error } = await supabase.storage.from("content-assets").upload(path, bytes, { contentType: "video/mp4", upsert: true });
+  if (error) return false;
+  await supabase.from("trials").update({ video_path: path }).eq("id", t.id);
+  return true;
+}
+
 /** Where the trial's messages go, and who they speak to. */
 async function telegramTarget(admin: Sb, personaId: string) {
   const { data: cfg } = await admin
@@ -315,11 +429,10 @@ async function telegramTarget(admin: Sb, personaId: string) {
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
- * Tell the model in the winners topic. The first message answers the
- * winner post of the same reel, so it sits right under the video she was
- * asked to reshoot; every later one answers the first.
+ * A round decided: one short line in the winners topic, under the winner
+ * post of the reel, in the same voice as the winner post itself.
  */
-export async function notifyTrial(trialId: string, kind: "started" | "round" | "done") {
+export async function notifyTrial(trialId: string, kind: "round" | "done") {
   try {
     const admin = createAdminClient();
     const { data: t } = await admin.from("trials").select("*").eq("id", trialId).maybeSingle();
@@ -328,64 +441,41 @@ export async function notifyTrial(trialId: string, kind: "started" | "round" | "
     if (!target) return;
     const view = await loadTrial(admin, trialId);
     if (!view) return;
-    const acc = view.account ? `${view.account.platform === "facebook" ? "Facebook" : "IG"} ${view.account.label}` : "the account";
-    const link = `${APP_URL}/trials/${trialId}`;
+    const { data: winner } = await admin
+      .from("winners")
+      .select("message_id")
+      .eq("persona_id", t.persona_id)
+      .eq("shortcode", t.shortcode)
+      .not("message_id", "is", null)
+      .limit(1)
+      .maybeSingle();
     const w = winnersOf(view);
-    let text = "";
-    let replyTo: number | null = t.message_id ?? null;
-
-    if (kind === "started") {
-      const { data: winner } = await admin
-        .from("winners")
-        .select("message_id")
-        .eq("persona_id", t.persona_id)
-        .eq("shortcode", t.shortcode)
-        .not("message_id", "is", null)
-        .limit(1)
-        .maybeSingle();
-      replyTo = winner?.message_id ?? null;
-      text = [
-        `🧪 <b>Trial-Maxxing started</b> · ${esc(acc)}`,
-        `This reel is our outlier — now we find out <i>why</i> it hit.`,
-        ``,
-        `${target.model ? `${target.model} ` : ""}<b>Round 1 of 3 · ${DIM_META.outfit.emoji} 6 outfits</b>`,
-        roundBrief("outfit", w),
-        ``,
-        `Each outfit gets its own box — tap it, drop the takes, press finish.`,
-      ].join("\n");
-    } else if (kind === "round") {
-      const d = view.phase as Dimension;
-      const prev = DIMENSIONS[DIMENSIONS.indexOf(d) - 1];
-      const won = prev ? w[prev] : [];
-      text = [
-        `🧪 <b>Round ${DIM_META[d].round} of 3 · ${DIM_META[d].emoji} 6 ${DIM_META[d].many}</b> · ${esc(acc)}`,
-        won.length ? `🏆 ${DIM_META[prev!].title} won: <b>${esc(won.join(", "))}</b>` : "",
-        ``,
-        `${target.model ? `${target.model} ` : ""}${esc(roundBrief(d, w))}`,
-      ]
-        .filter((l, i, a) => !(l === "" && a[i - 1] === ""))
-        .join("\n");
-    } else {
-      text = [
-        `🏁 <b>Pattern found</b> · ${esc(acc)}`,
-        `${DIM_META.outfit.emoji} ${esc(w.outfit.join(", ") || "—")}`,
-        `${DIM_META.location.emoji} ${esc(w.location.join(", ") || "—")}`,
-        `${DIM_META.hook.emoji} ${esc(w.hook.join(", ") || "—")}`,
-        ``,
-        `This is what works on this account. More of exactly this 💃🏻`,
-      ].join("\n");
-    }
-
+    const acc = view.account ? `${view.account.label} (${view.account.platform === "facebook" ? "Facebook" : "IG"})` : "the account";
+    const lines =
+      kind === "done"
+        ? [
+            `🏁 <b>Pattern found on ${esc(acc)}</b>`,
+            `${esc(w.outfit.join(", ") || "—")} · ${esc(w.location.join(", ") || "—")} · ${esc(w.hook.join(", ") || "—")}`,
+            ``,
+            `${target.model ? `${target.model}, ` : ""}this is what works here — more of exactly this 💃🏻`,
+          ]
+        : (() => {
+            const d = view.phase as Dimension;
+            const prev = DIMENSIONS[DIMENSIONS.indexOf(d) - 1];
+            const won = prev ? w[prev] : [];
+            return [
+              `🏆 <b>${DIM_META[prev ?? "outfit"].title} decided on ${esc(acc)}</b>${won.length ? ` · ${esc(won.join(", "))}` : ""}`,
+              ``,
+              `${target.model ? `${target.model}, ` : ""}next up: 6 ${DIM_META[d].many} — ${esc(roundBrief(d, w))}`,
+            ];
+          })();
     const res = await sendMessage({
       chat_id: target.chat,
       message_thread_id: target.thread,
-      text,
-      reply_to_message_id: replyTo,
-      buttons: [{ text: kind === "done" ? "See the pattern" : "Open the matrix", url: link }],
+      text: lines.join("\n"),
+      reply_to_message_id: winner?.message_id ?? null,
+      buttons: [{ text: "Direct Link Reshoot", url: `${APP_URL}/trials/${trialId}` }],
     });
-    if (res.ok && kind === "started" && res.result?.message_id) {
-      await admin.from("trials").update({ message_id: res.result.message_id }).eq("id", trialId);
-    }
     if (!res.ok) console.warn("[trials] telegram:", res.error);
   } catch (err) {
     console.warn("[trials] notify failed", err);

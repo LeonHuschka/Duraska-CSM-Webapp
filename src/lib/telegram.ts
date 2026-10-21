@@ -51,11 +51,14 @@ export async function sendVideo(opts: {
   reply_to_message_id?: number | null;
   caption?: string;
   parse_mode?: "HTML" | "Markdown";
+  /** One row of link buttons under the message. */
+  buttons?: { text: string; url: string }[];
 }): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
   const t = token();
   if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
   const form = new FormData();
   form.append("chat_id", String(opts.chat_id));
+  if (opts.buttons?.length) form.append("reply_markup", JSON.stringify({ inline_keyboard: [opts.buttons] }));
   if (opts.message_thread_id) form.append("message_thread_id", String(opts.message_thread_id));
   if (opts.reply_to_message_id) {
     form.append("reply_to_message_id", String(opts.reply_to_message_id));
@@ -98,11 +101,13 @@ export async function sendPhoto(opts: {
   message_thread_id?: number | null;
   caption?: string;
   parse_mode?: "HTML" | "Markdown";
+  buttons?: { text: string; url: string }[];
 }): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
   const t = token();
   if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
   const form = new FormData();
   form.append("chat_id", String(opts.chat_id));
+  if (opts.buttons?.length) form.append("reply_markup", JSON.stringify({ inline_keyboard: [opts.buttons] }));
   if (opts.message_thread_id) form.append("message_thread_id", String(opts.message_thread_id));
   if (opts.caption) {
     form.append("caption", opts.caption);

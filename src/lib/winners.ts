@@ -4,6 +4,7 @@ import type { Database } from "@/lib/types/database";
 import { accountLabel } from "@/lib/account-analytics";
 import { downloadVideo, resolveFacebookVideoUrl, resolveVideoUrl } from "@/lib/inspo-video";
 import { deleteMessage, sendMessage, sendPhoto, sendVideo } from "@/lib/telegram";
+import { APP_URL, ensureTrial } from "@/lib/trials";
 
 /**
  * Winners: a reel on one of our accounts that took off.
@@ -70,7 +71,7 @@ export async function announceWinners(
       .eq("persona_id", personaId),
     supabase
       .from("reel_metrics")
-      .select("account_id, shortcode, views, captured_at, posted_at, post_url, caption, request_id, tile_path")
+      .select("account_id, shortcode, views, captured_at, posted_at, post_url, caption, request_id, tile_path, cover_path")
       .eq("persona_id", personaId)
       .eq("source", "scrape")
       .eq("needs_review", false)
@@ -153,12 +154,35 @@ export async function announceWinners(
     // through its own. The cover when the video is out of reach, text alone
     // as the last resort — a winner must not go unreported over a download.
     let messageId: number | null = null;
+    let bytes: Uint8Array | null = null;
     if (c.reel.post_url) {
       const resolved =
         account.platform === "facebook"
           ? await resolveFacebookVideoUrl(c.reel.post_url)
           : await resolveVideoUrl(c.reel.post_url);
-      const bytes = resolved.ok ? await downloadVideo(resolved.url) : null;
+      bytes = resolved.ok ? await downloadVideo(resolved.url) : null;
+      if (!bytes) out.notes.push(`${c.reel.shortcode}: video not fetched — ${resolved.ok ? "download failed" : resolved.note}`);
+    }
+
+    // Every winner opens its Trial-Maxxing straight away; the post carries
+    // the button into it.
+    const trial = await ensureTrial(supabase, {
+      personaId,
+      accountId: c.reel.account_id!,
+      platform: account.platform,
+      shortcode: c.reel.shortcode!,
+      postUrl: c.reel.post_url,
+      caption: c.reel.caption,
+      coverPath: c.reel.cover_path,
+      views: Number(c.reel.views),
+      lift: c.lift,
+      sourceRequestId: c.reel.request_id,
+      videoBytes: bytes,
+    });
+    if (trial.error) out.notes.push(`${c.reel.shortcode}: trial not opened — ${trial.error}`);
+    const buttons = trial.id ? [{ text: "Direct Link Reshoot", url: `${APP_URL}/trials/${trial.id}` }] : undefined;
+
+    if (c.reel.post_url) {
       if (bytes) {
         const sent = await sendVideo({
           chat_id: cfg.chat_id,
@@ -167,11 +191,10 @@ export async function announceWinners(
           filename: "winner.mp4",
           caption: text,
           parse_mode: "HTML",
+          buttons,
         });
         if (sent.ok) messageId = sent.result?.message_id ?? null;
         else out.notes.push(`${c.reel.shortcode}: video not sent — ${sent.error}`);
-      } else {
-        out.notes.push(`${c.reel.shortcode}: video not fetched — ${resolved.ok ? "download failed" : resolved.note}`);
       }
     }
     if (messageId == null && c.reel.tile_path && /^https:\/\//.test(c.reel.tile_path)) {
@@ -183,6 +206,7 @@ export async function announceWinners(
           photo: cover,
           caption: text,
           parse_mode: "HTML",
+          buttons,
         });
         if (sent.ok) messageId = sent.result?.message_id ?? null;
       }
@@ -192,6 +216,7 @@ export async function announceWinners(
         chat_id: cfg.chat_id,
         message_thread_id: cfg.winners_thread_id,
         text,
+        buttons,
       });
       if (!sent.ok) {
         out.notes.push(`${c.reel.shortcode}: not announced — ${sent.error}`);
@@ -254,7 +279,7 @@ function message(x: {
     `🔥 <b>Winner on ${esc(x.account)}</b>`,
     `${esc(x.title)} · ${nf.format(x.views)} plays · ${x.lift.toFixed(0)}× the account's usual reach${when}`,
     ``,
-    `${at ? `${at}, ` : ""}this one hit — please shoot a fresh version of it 💃🏻`,
+    `${at ? `${at}, ` : ""}this one hit — start shooting new versions of it following the Trial-Maxxing 💃🏻`,
   ];
   if (x.url) lines.push(`🔗 Link: ${esc(x.url)}`);
   return lines.join("\n");

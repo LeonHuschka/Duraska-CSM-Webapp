@@ -1,27 +1,11 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  ArrowUpRight,
-  Check,
-  CheckCircle2,
-  Clapperboard,
-  Eye,
-  Film,
-  Flame,
-  FlaskConical,
-  Loader2,
-  Lock,
-  Plus,
-  Send,
-  Trophy,
-  Upload,
-} from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Film, Loader2, Lock, Play, Plus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -32,6 +16,7 @@ import { AccountAvatar } from "@/components/pipeline/account-avatar";
 import {
   advanceTrial,
   archiveTrial,
+  fetchOutlierVideo,
   finishCell,
   openCellJob,
   recordTake,
@@ -66,6 +51,7 @@ export type MatrixTrial = {
   postUrl: string | null;
   caption: string | null;
   cover: string | null;
+  video: string | null;
   views: number | null;
   lift: number | null;
   sourceTitle: string | null;
@@ -76,26 +62,146 @@ export type MatrixTrial = {
 };
 
 const DIMS: Dimension[] = ["outfit", "location", "hook"];
-const META: Record<Dimension, { title: string; one: string; emoji: string }> = {
-  outfit: { title: "Outfits", one: "Outfit", emoji: "👗" },
-  location: { title: "Locations", one: "Location", emoji: "📍" },
-  hook: { title: "Hooks", one: "Hook", emoji: "🪝" },
+const META: Record<Dimension, { title: string; one: string }> = {
+  outfit: { title: "Outfits", one: "Outfit" },
+  location: { title: "Locations", one: "Location" },
+  hook: { title: "Hooks", one: "Hook" },
 };
 const nf = new Intl.NumberFormat("de-DE");
 const short = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : nf.format(n);
 const name = (c: Pick<MatrixCell, "dimension" | "slot" | "label">) => c.label?.trim() || `${META[c.dimension].one} ${c.slot}`;
 const phaseIdx = (p: Phase) => (p === "done" ? 3 : DIMS.indexOf(p));
+const doneCount = (row: MatrixCell[]) => row.filter((c) => c.state !== "empty" && c.state !== "takes").length;
 
+/**
+ * The trial: the outlier and the three rounds of six. On a phone only the
+ * round she is in is open; the others are one line each. On a computer
+ * it is the table from the whiteboard — a row per round, a column per
+ * variation, the outlier on top.
+ */
 export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; staff: boolean; backHref: string }) {
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
-  const [deciding, startDecide] = useTransition();
   const open = trial.cells.find((c) => c.id === openId) ?? null;
   const pIdx = phaseIdx(trial.phase);
+  const rows = DIMS.map((d) => trial.cells.filter((c) => c.dimension === d).sort((a, b) => a.slot - b.slot));
+  const winners = (d: Dimension) => trial.cells.filter((c) => c.dimension === d && c.winner).map(name);
 
-  // A cell whose picture could not be drawn while uploading — a phone that
-  // locked, a tab in the background — gets it from its first take now.
+  const refresh = useCallback(() => router.refresh(), [router]);
+  useMissingPictures(trial, refresh);
+
+  // The outlier's video, fetched once for a trial that has none yet.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (trial.video || asked.current || !trial.postUrl) return;
+    asked.current = true;
+    fetchOutlierVideo(trial.id).then((r) => r.ok && router.refresh());
+  }, [trial.video, trial.id, trial.postUrl, router]);
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4 pb-16">
+      <div className="flex items-center justify-between gap-3">
+        <Link href={backHref} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back
+        </Link>
+        {trial.account && (
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AccountAvatar src={trial.account.avatar} platform={trial.account.platform} label={trial.account.label} size={20} />
+            {trial.account.label}
+          </span>
+        )}
+      </div>
+
+      {/* ── Phone ── */}
+      <div className="space-y-3 md:hidden">
+        <OutlierCard trial={trial} />
+        {DIMS.map((d, i) => (
+          <MobileRound
+            key={d}
+            d={d}
+            index={i}
+            row={rows[i]}
+            state={i < pIdx ? "decided" : i === pIdx ? "now" : "locked"}
+            brief={trial.briefs[d]}
+            winners={winners(d)}
+            staff={staff}
+            trialId={trial.id}
+            onOpen={setOpenId}
+          />
+        ))}
+        {trial.phase === "done" && <Pattern trial={trial} winners={winners} />}
+      </div>
+
+      {/* ── Computer: the table ── */}
+      <div className="hidden overflow-hidden rounded-2xl border border-border/50 bg-card md:block">
+        <table className="w-full border-collapse">
+          <tbody>
+            <tr className="border-b border-border/50">
+              <th className="w-44 p-4 text-left align-top text-sm font-medium">Outlier</th>
+              <td className="p-4">
+                <OutlierInline trial={trial} />
+              </td>
+            </tr>
+            {DIMS.map((d, i) => {
+              const state = i < pIdx ? "decided" : i === pIdx ? "now" : "locked";
+              return (
+                <tr key={d} className={`border-b border-border/50 last:border-0 ${state === "locked" ? "opacity-50" : ""}`}>
+                  <th className="w-44 p-4 text-left align-top">
+                    <p className="text-sm font-medium">6 {META[d].title}</p>
+                    <p className="mt-1 text-[11px] font-normal text-muted-foreground">
+                      {state === "decided" ? "Decided" : state === "now" ? `${doneCount(rows[i])} of 6 shot` : "After the round above"}
+                    </p>
+                    {state === "decided" && winners(d).length > 0 && (
+                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-normal text-amber-300">
+                        <Trophy className="h-3 w-3" /> {winners(d).join(", ")}
+                      </p>
+                    )}
+                    {state === "now" && staff && <DecideButton trialId={trial.id} index={i} row={rows[i]} compact />}
+                  </th>
+                  <td className="p-4">
+                    {state === "now" && <p className="mb-3 text-xs text-muted-foreground">{trial.briefs[d]}</p>}
+                    <div className="grid grid-cols-6 gap-3">
+                      {rows[i].map((c) => (
+                        <CellTile key={c.id} c={c} locked={state === "locked"} onOpen={() => state !== "locked" && setOpenId(c.id)} />
+                      ))}
+                    </div>
+                    {staff && rows[i].some((c) => c.views != null) && (
+                      <Ranking row={rows[i]} decided={state === "decided"} />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="hidden md:block">{trial.phase === "done" && <Pattern trial={trial} winners={winners} />}</div>
+
+      {staff && trial.status === "active" && (
+        <div className="text-center">
+          <button
+            type="button"
+            className="text-[11px] text-muted-foreground hover:text-rose-400"
+            onClick={async () => {
+              if (!confirm("Stop this trial? The jobs already made stay where they are.")) return;
+              const r = await archiveTrial(trial.id);
+              if (r.error) toast.error(r.error);
+              router.refresh();
+            }}
+          >
+            Stop this trial
+          </button>
+        </div>
+      )}
+
+      <CellSheet cell={open} trial={trial} staff={staff} onClose={() => setOpenId(null)} onChanged={() => router.refresh()} />
+    </div>
+  );
+}
+
+/** Draw a cell's picture from its first take when uploading could not. */
+function useMissingPictures(trial: MatrixTrial, refresh: () => void) {
   const drawing = useRef(new Set<string>());
   useEffect(() => {
     const todo = trial.cells.filter((c) => !c.thumb && c.firstTake && !drawing.current.has(c.id));
@@ -118,7 +224,7 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
           }
         } catch {}
       }
-      if (any && !cancelled) router.refresh();
+      if (any && !cancelled) refresh();
     };
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
@@ -131,236 +237,141 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [trial.cells, trial.id, trial.personaId, router]);
-  const winners = (d: Dimension) => trial.cells.filter((c) => c.dimension === d && c.winner).map(name);
+  }, [trial.cells, trial.id, trial.personaId, refresh]);
+}
 
+/** The outlier, playable: the reel she is reshooting. */
+function OutlierPlayer({ trial, className }: { trial: MatrixTrial; className: string }) {
+  const [playing, setPlaying] = useState(false);
   return (
-    <div className="mx-auto max-w-3xl space-y-5 pb-16">
-      <div className="flex items-center justify-between gap-3">
-        <Link href={backHref} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back
-        </Link>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-fuchsia-500/10 px-2.5 py-1 text-[11px] font-semibold text-fuchsia-300">
-          <FlaskConical className="h-3.5 w-3.5" /> Trial-Maxxing
-        </span>
-      </div>
-
-      {/* The outlier */}
-      <div className="relative overflow-hidden rounded-3xl border border-amber-400/30 bg-gradient-to-br from-amber-500/15 via-card to-card p-4">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-amber-400/20 blur-3xl" />
-        <div className="relative flex gap-4">
-          <a
-            href={trial.postUrl ?? undefined}
-            target="_blank"
-            rel="noreferrer"
-            className="relative aspect-[9/16] w-28 shrink-0 overflow-hidden rounded-2xl bg-muted ring-2 ring-amber-400 sm:w-32"
-          >
-            {trial.cover ? (
-              <img src={trial.cover} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <span className="flex h-full items-center justify-center text-[10px] text-muted-foreground">no cover</span>
-            )}
-            <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-black">
-              <Flame className="h-3 w-3" />
-              {trial.lift ? `${trial.lift.toFixed(1)}×` : "outlier"}
+    <div className={`relative overflow-hidden rounded-xl bg-muted ${className}`}>
+      {playing && trial.video ? (
+        <video src={trial.video} autoPlay controls playsInline className="h-full w-full bg-black object-cover" />
+      ) : (
+        <button
+          type="button"
+          onClick={() => (trial.video ? setPlaying(true) : trial.postUrl && window.open(trial.postUrl, "_blank", "noreferrer"))}
+          className="group block h-full w-full"
+        >
+          {trial.cover && <img src={trial.cover} alt="" className="h-full w-full object-cover" />}
+          <span className="absolute inset-0 flex items-center justify-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-transform group-active:scale-95">
+              {trial.video ? <Play className="h-5 w-5 fill-white text-white" /> : <Loader2 className="h-5 w-5 animate-spin text-white/70" />}
             </span>
-          </a>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">The outlier</p>
-            <p className="mt-1 text-3xl font-bold tabular-nums leading-none">{trial.views != null ? short(trial.views) : "—"}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              plays
-              {trial.account?.median ? ` · usual on this account ${short(trial.account.median)}` : ""}
-            </p>
-            {trial.account && (
-              <div className="mt-3 flex items-center gap-2">
-                <AccountAvatar src={trial.account.avatar} platform={trial.account.platform} label={trial.account.label} size={24} />
-                <span className="truncate text-xs font-medium">{trial.account.label}</span>
-              </div>
-            )}
-            {trial.caption && <p className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{trial.caption}</p>}
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-              {trial.sourceTitle && <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">{trial.sourceTitle}</span>}
-              {trial.postUrl && (
-                <a href={trial.postUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-amber-300 hover:underline">
-                  Watch it <ArrowUpRight className="h-3 w-3" />
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
 
-        {/* The three rounds */}
-        <div className="relative mt-4 grid grid-cols-4 gap-1.5">
-          {[...DIMS, "done" as const].map((p, i) => {
-            const done = i < pIdx;
-            const now = i === pIdx;
-            return (
-              <div
-                key={p}
-                className={`rounded-xl px-2 py-1.5 text-center text-[10px] font-medium ${
-                  now ? "bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/30" : done ? "bg-emerald-500/15 text-emerald-300" : "bg-muted/50 text-muted-foreground"
-                }`}
-              >
-                <span className="block text-sm leading-none">{p === "done" ? "🏁" : META[p].emoji}</span>
-                {p === "done" ? "Pattern" : META[p].title}
-              </div>
-            );
-          })}
-        </div>
+function OutlierStats({ trial }: { trial: MatrixTrial }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] text-muted-foreground">The reel to reshoot</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{trial.views != null ? nf.format(trial.views) : "—"}</p>
+      <p className="text-[11px] text-muted-foreground">
+        plays{trial.lift ? ` · ${trial.lift.toFixed(0)}× the usual` : ""}
+      </p>
+      {trial.caption && <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{trial.caption}</p>}
+      {trial.postUrl && (
+        <a href={trial.postUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
+          Open on {trial.account?.platform === "facebook" ? "Facebook" : "Instagram"} <ArrowUpRight className="h-3 w-3" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function OutlierCard({ trial }: { trial: MatrixTrial }) {
+  return (
+    <div className="flex gap-4 rounded-2xl border border-border/50 bg-card p-3">
+      <OutlierPlayer trial={trial} className="aspect-[9/16] w-28 shrink-0" />
+      <OutlierStats trial={trial} />
+    </div>
+  );
+}
+
+function OutlierInline({ trial }: { trial: MatrixTrial }) {
+  return (
+    <div className="flex gap-5">
+      <OutlierPlayer trial={trial} className="aspect-[9/16] w-32 shrink-0" />
+      <OutlierStats trial={trial} />
+    </div>
+  );
+}
+
+function MobileRound({
+  d,
+  index,
+  row,
+  state,
+  brief,
+  winners,
+  staff,
+  trialId,
+  onOpen,
+}: {
+  d: Dimension;
+  index: number;
+  row: MatrixCell[];
+  state: "decided" | "now" | "locked";
+  brief: string;
+  winners: string[];
+  staff: boolean;
+  trialId: string;
+  onOpen: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(state === "now");
+  const shot = doneCount(row);
+  const head = (
+    <div className="flex w-full items-center justify-between gap-3">
+      <div className="min-w-0 text-left">
+        <p className="text-sm font-medium">
+          {index + 1}. {META[d].title}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {state === "decided"
+            ? winners.length
+              ? `Winner: ${winners.join(", ")}`
+              : "Decided"
+            : state === "now"
+              ? `${shot} of 6 shot`
+              : "Opens after the round before"}
+        </p>
       </div>
-
-      {trial.phase === "done" && (
-        <div className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 p-4">
-          <p className="text-sm font-semibold text-emerald-300">🏁 Pattern found</p>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-            {DIMS.map((d) => (
-              <div key={d} className="rounded-xl bg-background/40 p-2">
-                <p className="text-base">{META[d].emoji}</p>
-                <p className="font-medium">{winners(d).join(", ") || "—"}</p>
-              </div>
+      {state === "locked" ? (
+        <Lock className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+      ) : state === "decided" ? (
+        <span className="flex shrink-0 items-center gap-2">
+          <Check className="h-4 w-4 text-emerald-400" />
+          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </span>
+      ) : null}
+    </div>
+  );
+  if (state === "locked") return <div className="rounded-2xl border border-border/40 px-4 py-3 opacity-60">{head}</div>;
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card p-4">
+      {state === "decided" ? (
+        <button type="button" className="w-full" onClick={() => setExpanded((x) => !x)}>
+          {head}
+        </button>
+      ) : (
+        head
+      )}
+      {expanded && (
+        <>
+          {state === "now" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {row.map((c) => (
+              <CellTile key={c.id} c={c} locked={false} onOpen={() => onOpen(c.id)} />
             ))}
           </div>
-        </div>
+          {staff && row.some((c) => c.views != null) && <Ranking row={row} decided={state === "decided"} />}
+          {staff && state === "now" && <DecideButton trialId={trialId} index={index} row={row} />}
+        </>
       )}
-
-      {DIMS.map((d, i) => {
-        const row = trial.cells.filter((c) => c.dimension === d).sort((a, b) => a.slot - b.slot);
-        const isOpen = i <= pIdx;
-        const isNow = i === pIdx;
-        const decided = i < pIdx;
-        const shot = row.filter((c) => c.state !== "empty" && c.state !== "takes").length;
-        const posted = row.filter((c) => c.state === "posted").length;
-        const ranked = row.filter((c) => c.views != null).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-        const top = Math.max(1, ...ranked.map((c) => c.views ?? 0));
-        return (
-          <section
-            key={d}
-            className={`rounded-3xl border p-4 transition-colors ${
-              isNow ? "border-fuchsia-500/50 bg-card shadow-lg shadow-fuchsia-500/5" : "border-border/50 bg-card/60"
-            } ${!isOpen ? "opacity-60" : ""}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Round {i + 1}</p>
-                <h2 className="mt-0.5 flex items-center gap-2 text-lg font-semibold">
-                  <span>{META[d].emoji}</span> 6 {META[d].title}
-                </h2>
-              </div>
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                  decided ? "bg-emerald-500/15 text-emerald-300" : isNow ? "bg-fuchsia-500/15 text-fuchsia-300" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {decided ? "Decided ✓" : isNow ? `${shot}/6 shot · ${posted} posted` : "Locked"}
-              </span>
-            </div>
-            {isOpen && !decided && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{trial.briefs[d]}</p>}
-            {decided && winners(d).length > 0 && (
-              <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-medium text-amber-300">
-                <Trophy className="h-3.5 w-3.5" /> {winners(d).join(" & ")}
-              </p>
-            )}
-            {!isOpen && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Lock className="h-3.5 w-3.5" /> Opens once {META[DIMS[i - 1]].title.toLowerCase()} are decided.
-              </p>
-            )}
-
-            <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {row.map((c) => (
-                <CellTile key={c.id} c={c} locked={!isOpen} onOpen={() => isOpen && setOpenId(c.id)} />
-              ))}
-            </div>
-
-            {/* The analysis: what each variation drew once posted */}
-            {ranked.length > 0 && (
-              <div className="mt-4 space-y-1.5 rounded-2xl bg-background/40 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Analysis · plays</p>
-                {ranked.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2 text-[11px]">
-                    <span className="w-24 shrink-0 truncate">{name(c)}</span>
-                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                      <span
-                        className={`block h-full rounded-full ${c.winner ? "bg-amber-400" : "bg-fuchsia-500/70"}`}
-                        style={{ width: `${((c.views ?? 0) / top) * 100}%` }}
-                      />
-                    </span>
-                    <span className="w-14 shrink-0 text-right font-medium tabular-nums">{short(c.views ?? 0)}</span>
-                    {staff && !decided && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          startDecide(async () => {
-                            const r = await toggleWinner(c.id);
-                            if (r.error) toast.error(r.error);
-                            router.refresh();
-                          })
-                        }
-                        className={`rounded-md p-1 ${c.winner ? "text-amber-300" : "text-muted-foreground/50 hover:text-amber-300"}`}
-                        title={c.winner ? "Winner — click to undo" : "Mark as winner"}
-                      >
-                        <Trophy className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {staff && isNow && trial.status === "active" && (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground">
-                  {row.some((c) => c.winner)
-                    ? `Winners: ${row.filter((c) => c.winner).map(name).join(", ")}`
-                    : "No winner picked — the two with most plays win."}
-                </p>
-                <Button
-                  size="sm"
-                  disabled={deciding || posted === 0}
-                  onClick={() =>
-                    startDecide(async () => {
-                      const r = await advanceTrial(trial.id);
-                      if (r.error) toast.error(r.error);
-                      else toast.success(i < 2 ? `Round ${i + 2} is open — the model gets a message` : "Pattern found 🏁");
-                      router.refresh();
-                    })
-                  }
-                  className="bg-fuchsia-600 hover:bg-fuchsia-500"
-                >
-                  {deciding ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trophy className="mr-1.5 h-3.5 w-3.5" />}
-                  {i < 2 ? `Decide · start ${META[DIMS[i + 1]].title.toLowerCase()}` : "Decide · pattern found"}
-                </Button>
-              </div>
-            )}
-          </section>
-        );
-      })}
-
-      {staff && trial.status === "active" && (
-        <div className="text-center">
-          <button
-            type="button"
-            className="text-[11px] text-muted-foreground underline-offset-2 hover:text-rose-400 hover:underline"
-            onClick={async () => {
-              if (!confirm("Stop this trial? The jobs already made stay where they are.")) return;
-              const r = await archiveTrial(trial.id);
-              if (r.error) toast.error(r.error);
-              router.refresh();
-            }}
-          >
-            Stop this trial
-          </button>
-        </div>
-      )}
-
-      <CellSheet
-        cell={open}
-        trial={trial}
-        staff={staff}
-        onClose={() => setOpenId(null)}
-        onChanged={() => router.refresh()}
-      />
     </div>
   );
 }
@@ -372,75 +383,138 @@ function CellTile({ c, locked, onOpen }: { c: MatrixCell; locked: boolean; onOpe
       type="button"
       onClick={onOpen}
       disabled={locked}
-      className={`group relative aspect-[4/5] overflow-hidden rounded-2xl text-left transition-all active:scale-[0.97] ${
-        filled ? "bg-muted" : locked ? "border border-border/40 bg-muted/20" : "border-2 border-dashed border-fuchsia-500/40 bg-fuchsia-500/5 hover:border-fuchsia-400 hover:bg-fuchsia-500/10"
-      } ${c.winner ? "ring-[3px] ring-amber-400" : ""}`}
+      className={`relative aspect-[4/5] overflow-hidden rounded-xl text-left transition-transform active:scale-[0.97] ${
+        filled ? "bg-muted" : "border border-dashed border-border bg-muted/20 hover:border-foreground/40"
+      } ${c.winner ? "ring-2 ring-amber-400" : ""}`}
     >
       {filled && c.thumb && <img src={c.thumb} alt="" className="absolute inset-0 h-full w-full object-cover" />}
       {filled && !c.thumb && (
-        <span className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-fuchsia-500/30 to-violet-600/30">
-          <Film className="h-6 w-6 text-white/70" />
+        <span className="absolute inset-0 flex items-center justify-center">
+          <Film className="h-5 w-5 text-muted-foreground" />
         </span>
       )}
       {!filled && (
-        <span className="absolute inset-0 flex items-center justify-center">
-          {locked ? (
-            <Lock className="h-4 w-4 text-muted-foreground/50" />
-          ) : (
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-fuchsia-500/20 text-fuchsia-300 transition-transform group-hover:scale-110">
-              <Plus className="h-5 w-5" />
-            </span>
-          )}
+        <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+          {locked ? <Lock className="h-4 w-4 opacity-50" /> : <Plus className="h-5 w-5" />}
         </span>
       )}
 
-      {/* The cell's status, top right: takes · ✓ · 100% */}
+      {/* takes · ✓ · 100% */}
       {c.state === "takes" && (
-        <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[11px] font-bold text-white backdrop-blur">
-          <Film className="h-3 w-3" />
+        <span className="absolute right-1.5 top-1.5 min-w-5 rounded-full bg-black/70 px-1.5 py-0.5 text-center text-[11px] font-semibold tabular-nums text-white">
           {c.takes}
         </span>
       )}
       {(c.state === "finished" || c.state === "edited") && (
-        <span
-          className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full ${
-            c.state === "edited" ? "bg-sky-500" : "bg-emerald-500"
-          } text-white shadow`}
-          title={c.state === "edited" ? "Cut and ready to post" : "All takes in — with the editor"}
-        >
-          <Check className="h-4 w-4" strokeWidth={3} />
+        <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white">
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </span>
       )}
       {c.state === "posted" && (
-        <span className="absolute right-1.5 top-1.5 rounded-full bg-gradient-to-r from-emerald-400 to-teal-400 px-1.5 py-0.5 text-[11px] font-black text-black shadow">
-          100%
-        </span>
+        <span className="absolute right-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">100%</span>
       )}
       {c.winner && (
-        <span className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-black shadow">
-          <Trophy className="h-3.5 w-3.5" />
+        <span className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-black">
+          <Trophy className="h-3 w-3" />
         </span>
       )}
 
       <span
-        className={`absolute inset-x-0 bottom-0 px-2 pb-1.5 pt-5 text-[10px] font-medium leading-tight ${
-          filled ? "bg-gradient-to-t from-black/80 to-transparent text-white" : "text-muted-foreground"
+        className={`absolute inset-x-0 bottom-0 px-2 pb-1.5 pt-4 text-[10px] leading-tight ${
+          filled ? "bg-gradient-to-t from-black/70 to-transparent text-white" : "text-muted-foreground"
         }`}
       >
         <span className="block truncate">{name(c)}</span>
-        {c.views != null && (
-          <span className="flex items-center gap-0.5 font-semibold tabular-nums text-white">
-            <Eye className="h-3 w-3" />
-            {short(c.views)}
-          </span>
-        )}
+        {c.views != null && <span className="block font-semibold tabular-nums">{short(c.views)} plays</span>}
       </span>
     </button>
   );
 }
 
+/** Staff only: the posted variations by plays, with the winner switch. */
+function Ranking({ row, decided }: { row: MatrixCell[]; decided: boolean }) {
+  const router = useRouter();
+  const [, start] = useTransition();
+  const ranked = row.filter((c) => c.views != null).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+  const top = Math.max(1, ...ranked.map((c) => c.views ?? 0));
+  return (
+    <div className="mt-3 space-y-1">
+      {ranked.map((c) => (
+        <div key={c.id} className="flex items-center gap-2 text-[11px]">
+          <span className="w-24 shrink-0 truncate text-muted-foreground">{name(c)}</span>
+          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+            <span className={`block h-full rounded-full ${c.winner ? "bg-amber-400" : "bg-foreground/40"}`} style={{ width: `${((c.views ?? 0) / top) * 100}%` }} />
+          </span>
+          <span className="w-12 shrink-0 text-right tabular-nums">{short(c.views ?? 0)}</span>
+          {!decided && (
+            <button
+              type="button"
+              onClick={() =>
+                start(async () => {
+                  const r = await toggleWinner(c.id);
+                  if (r.error) toast.error(r.error);
+                  router.refresh();
+                })
+              }
+              className={`p-0.5 ${c.winner ? "text-amber-400" : "text-muted-foreground/40 hover:text-amber-400"}`}
+              title={c.winner ? "Winner — click to undo" : "Mark as winner"}
+            >
+              <Trophy className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DecideButton({ trialId, index, row, compact = false }: { trialId: string; index: number; row: MatrixCell[]; compact?: boolean }) {
+  const router = useRouter();
+  const [busy, start] = useTransition();
+  const posted = row.filter((c) => c.state === "posted").length;
+  const next = DIMS[index + 1];
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={busy || posted === 0}
+      title={posted === 0 ? "Decide once something of this round is posted" : row.some((c) => c.winner) ? undefined : "Without a pick, the two with most plays win"}
+      className={compact ? "mt-3 h-7 px-2 text-[11px]" : "mt-3 w-full"}
+      onClick={() =>
+        start(async () => {
+          const r = await advanceTrial(trialId);
+          if (r.error) toast.error(r.error);
+          else toast.success(next ? `${META[next].title} are open` : "Pattern found");
+          router.refresh();
+        })
+      }
+    >
+      {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trophy className="mr-1.5 h-3.5 w-3.5" />}
+      {next ? `Decide · open ${META[next].title.toLowerCase()}` : "Decide · pattern found"}
+    </Button>
+  );
+}
+
+function Pattern({ trial, winners }: { trial: MatrixTrial; winners: (d: Dimension) => string[] }) {
+  void trial;
+  return (
+    <div className="rounded-2xl border border-border/50 bg-card p-4">
+      <p className="text-sm font-medium">Pattern found</p>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+        {DIMS.map((d) => (
+          <div key={d} className="rounded-xl bg-muted/40 p-2">
+            <p className="text-[10px] text-muted-foreground">{META[d].one}</p>
+            <p className="font-medium">{winners(d).join(", ") || "—"}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type UploadRow = { name: string; pct: number; status: "uploading" | "done" | "error" };
 
+/** One box: drop the takes, then finish to send it to editing. */
 function CellSheet({
   cell,
   trial,
@@ -459,13 +533,11 @@ function CellSheet({
   const [busy, setBusy] = useState(false);
   const [finishing, startFinish] = useTransition();
   const [label, setLabel] = useState("");
-  // Takes the server knew of when this round of uploads began; the page
-  // refreshes after it and then counts them itself.
   const [takesBase, setTakesBase] = useState<number | null>(null);
   const uploading = rows.some((r) => r.status === "uploading");
   const done = rows.filter((r) => r.status === "done").length;
   const takes = Math.max(cell?.takes ?? 0, (takesBase ?? cell?.takes ?? 0) + done);
-  const brief = cell ? trial.briefs[cell.dimension] : "";
+  const finished = !!cell && (cell.state === "finished" || cell.state === "edited" || cell.state === "posted");
 
   const reset = () => {
     setRows([]);
@@ -487,10 +559,10 @@ function CellSheet({
       return void toast.error(job.error ?? "Could not start the job");
     }
     const supabase = createClient();
-    const base = rows.length;
+    const start = rows.length;
     setRows((r) => [...r, ...files.map((f) => ({ name: f.name, pct: 0, status: "uploading" as const }))]);
     let thumbDone = !!cell.thumb;
-    const queue = files.map((f, i) => ({ f, i: base + i }));
+    const queue = files.map((f, i) => ({ f, i: start + i }));
     const lane = async () => {
       for (;;) {
         const next = queue.shift();
@@ -498,9 +570,7 @@ function CellSheet({
         const { f, i } = next;
         const path = `personas/${job.personaId}/requests/${job.requestId}/raw/${crypto.randomUUID()}_${safeStorageName(f.name)}`;
         try {
-          await uploadToStorage(supabase, path, f, (pct) =>
-            setRows((r) => r.map((x, j) => (j === i ? { ...x, pct } : x)))
-          );
+          await uploadToStorage(supabase, path, f, (pct) => setRows((r) => r.map((x, j) => (j === i ? { ...x, pct } : x))));
           const res = await recordTake({
             cellId: cell.id,
             requestId: job.requestId!,
@@ -511,8 +581,6 @@ function CellSheet({
           });
           if (res.error) throw new Error(res.error);
           setRows((r) => r.map((x, j) => (j === i ? { ...x, pct: 100, status: "done" } : x)));
-          // The first take becomes the cell's picture — one frame, read
-          // locally, so she does not wait for it.
           if (!thumbDone) {
             thumbDone = true;
             const blob = await generateThumbnail(f, resolveMime(f));
@@ -533,8 +601,6 @@ function CellSheet({
     onChanged();
   }
 
-  const finished = cell && (cell.state === "finished" || cell.state === "edited" || cell.state === "posted");
-
   return (
     <Sheet
       open={!!cell}
@@ -546,64 +612,33 @@ function CellSheet({
         }
       }}
     >
-      <SheetContent side="bottom" className="max-h-[90dvh] overflow-y-auto rounded-t-3xl border-t border-border/60 p-5 sm:mx-auto sm:max-w-lg">
+      <SheetContent side="bottom" className="max-h-[90dvh] overflow-y-auto rounded-t-2xl p-5 sm:mx-auto sm:max-w-lg">
         {cell && (
           <>
             <SheetHeader className="text-left">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fuchsia-300">
-                {META[cell.dimension].emoji} {META[cell.dimension].title} · {cell.slot} of 6
-              </p>
-              <SheetTitle className="text-xl">{name(cell)}</SheetTitle>
-              <SheetDescription className="text-xs leading-relaxed">{brief}</SheetDescription>
+              <SheetTitle>{name(cell)}</SheetTitle>
+              <SheetDescription className="text-xs leading-relaxed">{trial.briefs[cell.dimension]}</SheetDescription>
             </SheetHeader>
 
-            {staff && (
-              <div className="mt-3 flex gap-2">
-                <Input
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder={cell.label ?? `Name it — e.g. "black dress"`}
-                  className="h-9 text-sm"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  disabled={!label.trim()}
-                  onClick={async () => {
-                    const r = await setCellLabel(cell.id, label);
-                    if (r.error) toast.error(r.error);
-                    else {
-                      setLabel("");
-                      onChanged();
-                    }
-                  }}
-                >
-                  Save name
-                </Button>
-              </div>
-            )}
-
-            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-              <Step on={takes > 0} icon={<Upload className="h-4 w-4" />} label={takes > 0 ? `${takes} take${takes === 1 ? "" : "s"}` : "Takes"} />
-              <Step on={!!finished} icon={<Clapperboard className="h-4 w-4" />} label="Editing" />
-              <Step on={cell.state === "posted"} icon={<CheckCircle2 className="h-4 w-4" />} label={cell.state === "posted" ? "Posted" : "Posted"} />
-            </div>
-
-            {cell.state === "posted" && (
-              <p className="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-300">
-                Live{cell.views != null ? ` · ${nf.format(cell.views)} plays so far` : " · plays come in with the next morning read"}
-              </p>
-            )}
+            <p className="mt-4 text-sm">
+              {cell.state === "posted"
+                ? `Posted${cell.views != null ? ` · ${nf.format(cell.views)} plays` : ""}`
+                : cell.state === "edited"
+                  ? "Cut — waiting to be posted"
+                  : finished
+                    ? `With the editor · ${takes} take${takes === 1 ? "" : "s"}`
+                    : takes > 0
+                      ? `${takes} take${takes === 1 ? "" : "s"} uploaded`
+                      : "No takes yet"}
+            </p>
 
             {rows.length > 0 && (
-              <ul className="mt-4 space-y-1.5">
+              <ul className="mt-3 space-y-1">
                 {rows.map((r, i) => (
-                  <li key={i} className="flex items-center gap-2 rounded-xl bg-muted/40 px-3 py-2 text-xs">
-                    <Film className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                    {r.status === "uploading" && <span className="tabular-nums text-muted-foreground">{r.pct}%</span>}
-                    {r.status === "done" && <Check className="h-4 w-4 text-emerald-400" />}
+                    {r.status === "uploading" && <span className="tabular-nums">{r.pct}%</span>}
+                    {r.status === "done" && <Check className="h-3.5 w-3.5 text-emerald-400" />}
                     {r.status === "error" && <span className="text-rose-400">failed</span>}
                   </li>
                 ))}
@@ -625,52 +660,62 @@ function CellSheet({
               <div className="mt-5 space-y-2">
                 <Button
                   variant={takes > 0 ? "outline" : "default"}
-                  className={`h-12 w-full text-base ${takes > 0 ? "" : "bg-fuchsia-600 hover:bg-fuchsia-500"}`}
+                  className="h-12 w-full text-base"
                   disabled={busy}
                   onClick={() => fileRef.current?.click()}
                 >
                   {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
                   {takes > 0 ? "Add more takes" : "Upload takes"}
                 </Button>
-                {!finished && (
+                {!finished && takes > 0 && (
                   <Button
-                    className="h-12 w-full bg-emerald-600 text-base hover:bg-emerald-500"
-                    disabled={takes === 0 || uploading || finishing}
+                    className="h-12 w-full text-base"
+                    disabled={uploading || finishing}
                     onClick={() =>
                       startFinish(async () => {
                         const r = await finishCell(cell.id);
                         if (r.error) return void toast.error(r.error);
-                        toast.success(`${name(cell)} is with the editor ✂️`);
+                        toast.success(`${name(cell)} sent to editing`);
                         reset();
                         onClose();
                         onChanged();
                       })
                     }
                   >
-                    {finishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                    Finish — send to editing
+                    {finishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    Done — send to editing
                   </Button>
                 )}
                 <p className="text-center text-[11px] text-muted-foreground">
-                  {finished
-                    ? "In editing. More takes still go to the same job."
-                    : "Upload today, add more tomorrow — finish when all takes are in."}
+                  {finished ? "More takes still go to the same job." : "You can add takes over several days, then press done."}
                 </p>
               </div>
             )}
-            {cell.title && <p className="mt-4 text-center text-[10px] text-muted-foreground">Job {cell.title}</p>}
+
+            {staff && (
+              <div className="mt-5 flex gap-2 border-t border-border/50 pt-4">
+                <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={cell.label ?? 'Name it, e.g. "black dress"'} className="h-9 text-sm" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  disabled={!label.trim()}
+                  onClick={async () => {
+                    const r = await setCellLabel(cell.id, label);
+                    if (r.error) toast.error(r.error);
+                    else {
+                      setLabel("");
+                      onChanged();
+                    }
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+            )}
           </>
         )}
       </SheetContent>
     </Sheet>
-  );
-}
-
-function Step({ on, icon, label }: { on: boolean; icon: React.ReactNode; label: string }) {
-  return (
-    <div className={`rounded-xl px-2 py-2.5 text-[11px] font-medium ${on ? "bg-emerald-500/15 text-emerald-300" : "bg-muted/40 text-muted-foreground"}`}>
-      <span className="mx-auto mb-1 flex justify-center">{icon}</span>
-      {label}
-    </div>
   );
 }

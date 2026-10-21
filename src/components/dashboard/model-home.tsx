@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import Link from "next/link";
-import { ChevronRight, Flame, FlaskConical } from "lucide-react";
+import { ChevronRight, FlaskConical } from "lucide-react";
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
 
 /**
@@ -20,8 +20,7 @@ export function LinksDonut({ open, shot, topicHref }: { open: number; shot: numb
   const R = 52;
   const C = 2 * Math.PI * R;
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-border/50 bg-card p-5">
-      <div className="pointer-events-none absolute -left-10 -top-10 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl" />
+    <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card p-5">
       <div className="relative flex items-center gap-5">
         <div className="relative h-36 w-36 shrink-0">
           <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
@@ -83,7 +82,7 @@ export function WeekVsMust({
   const top = Math.max(must + 1, ...days.map((d) => d.value));
   const H = 110;
   return (
-    <div className="rounded-3xl border border-border/50 bg-card p-5">
+    <div className="rounded-2xl border border-border/50 bg-card p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">This week</h2>
@@ -93,7 +92,7 @@ export function WeekVsMust({
         </div>
         <div className="text-right">
           <p
-            className={`text-4xl font-black tabular-nums leading-none ${
+            className={`text-3xl font-semibold tabular-nums leading-none ${
               balance >= 0 ? "text-emerald-400" : "text-rose-400"
             }`}
           >
@@ -121,7 +120,7 @@ export function WeekVsMust({
                     missed
                       ? "border-rose-400/40 bg-rose-500/[0.07]"
                       : isToday
-                        ? "border-fuchsia-400/60 bg-fuchsia-500/[0.07]"
+                        ? "border-foreground/40 bg-foreground/[0.05]"
                         : "border-foreground/15 bg-foreground/[0.03]"
                   }`}
                   style={{ height: mustH }}
@@ -130,8 +129,8 @@ export function WeekVsMust({
                 {d.value > 0 && (
                   <div
                     className={`absolute inset-x-[3px] bottom-0 rounded-lg ${
-                      met ? "bg-gradient-to-t from-emerald-500 to-emerald-300 shadow-emerald-400/50" : "bg-gradient-to-t from-violet-600 to-fuchsia-400 shadow-fuchsia-500/40"
-                    } shadow-[0_0_14px_-2px]`}
+                      met ? "bg-emerald-400" : "bg-primary"
+                    }`}
                     style={{ height: valH }}
                   />
                 )}
@@ -146,7 +145,7 @@ export function WeekVsMust({
                   </span>
                 )}
               </div>
-              <span className={`text-[10px] ${isToday ? "font-bold text-fuchsia-300" : "text-muted-foreground"}`}>
+              <span className={`text-[10px] ${isToday ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
                 {isToday ? "Today" : d.label}
               </span>
             </div>
@@ -190,7 +189,7 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
     <div className="space-y-3">
       <div className="flex items-baseline justify-between px-1">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-          <FlaskConical className="h-4 w-4 text-fuchsia-400" /> Trial-Maxxing
+          <FlaskConical className="h-4 w-4 text-muted-foreground" /> Trial-Maxxing
         </h2>
         <span className="text-[11px] text-muted-foreground">reshoot what went viral</span>
       </div>
@@ -206,12 +205,11 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
             <Link
               key={t.id}
               href={`/trials/${t.id}`}
-              className="group flex items-stretch gap-3 overflow-hidden rounded-3xl border border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-500/10 via-card to-card p-3 transition-colors active:bg-fuchsia-500/15"
+              className="group flex items-stretch gap-3 overflow-hidden rounded-2xl border border-border/50 bg-card p-3 transition-colors active:bg-muted/40"
             >
-              <div className="relative aspect-[9/16] w-20 shrink-0 overflow-hidden rounded-2xl bg-muted ring-2 ring-amber-400">
+              <div className="relative aspect-[9/16] w-16 shrink-0 overflow-hidden rounded-xl bg-muted">
                 {t.cover ? <img src={t.cover} alt="" className="h-full w-full object-cover" /> : null}
-                <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-gradient-to-t from-black/80 to-transparent pb-1 pt-4 text-[10px] font-bold text-amber-300">
-                  <Flame className="h-3 w-3" />
+                <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-gradient-to-t from-black/80 to-transparent pb-1 pt-4 text-[10px] font-semibold text-white">
                   {t.views != null ? short(t.views) : "viral"}
                 </span>
               </div>
@@ -220,17 +218,16 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
                   <AccountAvatar src={t.avatar} platform={t.platform} label={t.accountLabel} size={20} />
                   <span className="truncate text-xs font-medium">{t.accountLabel}</span>
                 </div>
-                <p className="mt-1.5 text-base font-semibold leading-tight">
-                  {r.emoji} Round {r.n} · {r.label}
+                <p className="mt-1.5 text-sm font-medium leading-tight">
+                  Round {r.n} of 3 · {r.label}
                 </p>
-                <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{t.brief}</p>
                 <div className="mt-auto pt-2">
                   <div className="flex gap-1">
                     {Array.from({ length: 6 }, (_, i) => (
                       <span
                         key={i}
                         className={`h-1.5 flex-1 rounded-full ${
-                          i < t.posted ? "bg-emerald-400" : i < t.shot ? "bg-fuchsia-400" : i < t.shot + t.started ? "bg-fuchsia-400/40" : "bg-muted"
+                          i < t.posted ? "bg-emerald-400" : i < t.shot ? "bg-foreground/70" : i < t.shot + t.started ? "bg-foreground/30" : "bg-muted"
                         }`}
                       />
                     ))}
@@ -239,7 +236,7 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
                     <span>
                       {t.phase === "done" ? "All rounds decided" : `${t.shot}/6 shot · ${pct}%`}
                     </span>
-                    <span className="flex items-center font-semibold text-fuchsia-300">
+                    <span className="flex items-center font-medium text-foreground">
                       {t.toShoot > 0 && t.phase !== "done" ? "Shoot" : "Open"} <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                     </span>
                   </p>

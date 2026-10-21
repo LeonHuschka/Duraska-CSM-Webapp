@@ -5,7 +5,20 @@ import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { announceShoot } from "@/lib/shoot-notice";
 import { getNextReelTitle } from "@/app/(app)/vault/actions";
-import { DIMENSIONS, DIM_META, cellName, loadTrial, notifyTrial, rowOpen, winnersOf, roundBrief, type Dimension, type Phase } from "@/lib/trials";
+import {
+  DIMENSIONS,
+  DIM_META,
+  cellName,
+  ensureTrial,
+  loadTrial,
+  notifyTrial,
+  rowOpen,
+  roundBrief,
+  storeOutlierVideo,
+  winnersOf,
+  type Dimension,
+  type Phase,
+} from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
@@ -40,19 +53,11 @@ export async function createTrial(input: { accountId: string; shortcode: string 
   const me = await who(supabase, personaId);
   if (!me?.staff) return { error: "Only owners and managers can start Trial-Maxxing", id: null };
 
-  const { data: existing } = await supabase
-    .from("trials")
-    .select("id")
-    .eq("account_id", input.accountId)
-    .eq("shortcode", input.shortcode)
-    .maybeSingle();
-  if (existing) return { error: null, id: existing.id };
-
   // The outlier as the scrape last saw it, and what is usual on its account.
-  const [{ data: rows }, { data: all }] = await Promise.all([
+  const [{ data: rows }, { data: all }, { data: account }] = await Promise.all([
     supabase
       .from("reel_metrics")
-      .select("views, post_url, caption, cover_path, tile_path, request_id, captured_at")
+      .select("views, post_url, caption, cover_path, request_id, captured_at")
       .eq("account_id", input.accountId)
       .eq("shortcode", input.shortcode)
       .order("captured_at", { ascending: false })
@@ -65,6 +70,7 @@ export async function createTrial(input: { accountId: string; shortcode: string 
       .not("views", "is", null)
       .order("captured_at", { ascending: false })
       .limit(3000),
+    supabase.from("accounts").select("platform").eq("id", input.accountId).maybeSingle(),
   ]);
   const r = rows?.[0];
   if (!r) return { error: "That reel has not been read from the account yet", id: null };
@@ -73,31 +79,29 @@ export async function createTrial(input: { accountId: string; shortcode: string 
   const vals = Array.from(latest.values()).filter((v) => v > 0).sort((a, b) => a - b);
   const median = vals.length ? (vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2) : 0;
 
-  const { data: trial, error } = await supabase
-    .from("trials")
-    .insert({
-      persona_id: personaId,
-      account_id: input.accountId,
-      shortcode: input.shortcode,
-      post_url: r.post_url,
-      caption: r.caption,
-      cover_path: r.cover_path,
-      views: r.views,
-      lift: r.views && median > 0 ? Math.round((Number(r.views) / median) * 10) / 10 : null,
-      source_request_id: r.request_id,
-      created_by: me.userId,
-    })
-    .select("id")
-    .single();
-  if (error || !trial) return { error: error?.message ?? "Could not start", id: null };
+  const res = await ensureTrial(supabase, {
+    personaId,
+    accountId: input.accountId,
+    platform: account?.platform ?? "instagram",
+    shortcode: input.shortcode,
+    postUrl: r.post_url,
+    caption: r.caption,
+    coverPath: r.cover_path,
+    views: r.views,
+    lift: r.views && median > 0 ? Number(r.views) / median : null,
+    sourceRequestId: r.request_id,
+    createdBy: me.userId,
+  });
+  if (res.id) touch(res.id);
+  return { error: res.error, id: res.id };
+}
 
-  const cells = DIMENSIONS.flatMap((d) => [1, 2, 3, 4, 5, 6].map((slot) => ({ trial_id: trial.id, dimension: d, slot })));
-  const { error: cellErr } = await supabase.from("trial_cells").insert(cells);
-  if (cellErr) return { error: cellErr.message, id: trial.id };
-
-  await notifyTrial(trial.id, "started");
-  touch(trial.id);
-  return { error: null, id: trial.id };
+/** Fetch the outlier's video for a trial that has none yet. */
+export async function fetchOutlierVideo(trialId: string) {
+  const supabase = await createClient();
+  const ok = await storeOutlierVideo(supabase, trialId);
+  if (ok) touch(trialId);
+  return { ok };
 }
 
 /**

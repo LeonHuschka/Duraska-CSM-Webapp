@@ -943,6 +943,7 @@ export type Database = {
           phase: string;
           status: string;
           message_id: number | null;
+          video_path: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -961,6 +962,7 @@ export type Database = {
           phase?: string;
           status?: string;
           message_id?: number | null;
+          video_path?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -979,6 +981,7 @@ export type Database = {
           phase?: string;
           status?: string;
           message_id?: number | null;
+          video_path?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
