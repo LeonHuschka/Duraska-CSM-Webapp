@@ -101,7 +101,8 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
     const todo = trial.cells.filter((c) => !c.thumb && c.firstTake && !drawing.current.has(c.id));
     if (todo.length === 0) return;
     let cancelled = false;
-    (async () => {
+    // Browsers decode no video frames in a hidden tab; wait until she looks.
+    const run = async () => {
       const supabase = createClient();
       let any = false;
       for (const c of todo) {
@@ -118,9 +119,17 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
         } catch {}
       }
       if (any && !cancelled) router.refresh();
-    })();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", onVisible);
+      run();
+    };
+    if (document.visibilityState === "visible") run();
+    else document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [trial.cells, trial.id, trial.personaId, router]);
   const winners = (d: Dimension) => trial.cells.filter((c) => c.dimension === d && c.winner).map(name);
