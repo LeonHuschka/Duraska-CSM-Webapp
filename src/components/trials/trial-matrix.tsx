@@ -1,7 +1,7 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { createClient } from "@/lib/supabase/client";
-import { generateThumbnail, safeStorageName } from "@/lib/thumbnails";
+import { generateThumbnail, generateThumbnailFromUrl, safeStorageName } from "@/lib/thumbnails";
 import { isMediaFile, MAX_UPLOAD_MB, resolveMime, uploadToStorage } from "@/lib/upload-takes";
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
 import {
@@ -57,6 +57,7 @@ export type MatrixCell = {
   views: number | null;
   postedAt: string | null;
   winner: boolean;
+  firstTake: { url: string; mime: string | null } | null;
 };
 export type MatrixTrial = {
   id: string;
@@ -92,6 +93,36 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
   const [deciding, startDecide] = useTransition();
   const open = trial.cells.find((c) => c.id === openId) ?? null;
   const pIdx = phaseIdx(trial.phase);
+
+  // A cell whose picture could not be drawn while uploading — a phone that
+  // locked, a tab in the background — gets it from its first take now.
+  const drawing = useRef(new Set<string>());
+  useEffect(() => {
+    const todo = trial.cells.filter((c) => !c.thumb && c.firstTake && !drawing.current.has(c.id));
+    if (todo.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      let any = false;
+      for (const c of todo) {
+        drawing.current.add(c.id);
+        try {
+          const blob = await generateThumbnailFromUrl(c.firstTake!.url, c.firstTake!.mime);
+          if (!blob || cancelled) continue;
+          const tp = `personas/${trial.personaId}/trials/${trial.id}/${c.id}.jpg`;
+          const { error } = await supabase.storage.from("content-assets").upload(tp, blob, { contentType: "image/jpeg", upsert: true });
+          if (!error) {
+            await setCellThumb(c.id, tp);
+            any = true;
+          }
+        } catch {}
+      }
+      if (any && !cancelled) router.refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trial.cells, trial.id, trial.personaId, router]);
   const winners = (d: Dimension) => trial.cells.filter((c) => c.dimension === d && c.winner).map(name);
 
   return (

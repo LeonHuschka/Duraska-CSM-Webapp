@@ -49,6 +49,8 @@ export type CellView = {
   views: number | null;
   postedAt: string | null;
   winner: boolean;
+  /** The first take, signed, for drawing a picture when the cell has none. */
+  firstTake: { url: string; mime: string | null } | null;
 };
 
 export type TrialView = {
@@ -152,7 +154,12 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
   const [reqs, assets, slots, reels] = ids.length
     ? await Promise.all([
         supabase.from("content_requests").select("id, title, status").in("id", ids),
-        supabase.from("content_assets").select("request_id, stage, thumbnail_path, uploaded_at").in("request_id", ids).is("deleted_at", null),
+        supabase
+          .from("content_assets")
+          .select("request_id, stage, thumbnail_path, uploaded_at, file_path, mime_type")
+          .in("request_id", ids)
+          .is("deleted_at", null)
+          .order("uploaded_at", { ascending: true }),
         supabase.from("schedule_slots").select("request_id, status, posted_at, scheduled_for").in("request_id", ids).eq("status", "posted"),
         supabase
           .from("reel_metrics")
@@ -166,7 +173,9 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
   const takes = new Map<string, number>();
   const cuts = new Map<string, number>();
   const firstThumb = new Map<string, string>();
-  for (const a of (assets.data ?? []) as { request_id: string; stage: string; thumbnail_path: string | null }[]) {
+  const firstRaw = new Map<string, { path: string; mime: string | null }>();
+  for (const a of (assets.data ?? []) as { request_id: string; stage: string; thumbnail_path: string | null; file_path: string; mime_type: string | null }[]) {
+    if (a.stage === "raw" && !firstRaw.has(a.request_id)) firstRaw.set(a.request_id, { path: a.file_path, mime: a.mime_type });
     if (a.stage === "raw") takes.set(a.request_id, (takes.get(a.request_id) ?? 0) + 1);
     else cuts.set(a.request_id, (cuts.get(a.request_id) ?? 0) + 1);
     if (a.thumbnail_path && !firstThumb.has(a.request_id)) firstThumb.set(a.request_id, a.thumbnail_path);
@@ -190,7 +199,11 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
   const thumbPaths = cells
     .map((c) => c.thumb_path ?? (c.request_id ? firstThumb.get(c.request_id) : undefined))
     .filter((p): p is string => !!p);
-  const signed = await sign(supabase, thumbPaths);
+  // Cells with takes but no picture yet: their first take, to draw one from.
+  const needPicture = cells
+    .filter((c) => !c.thumb_path && c.request_id && !firstThumb.has(c.request_id) && firstRaw.has(c.request_id))
+    .map((c) => firstRaw.get(c.request_id!)!.path);
+  const signed = await sign(supabase, [...thumbPaths, ...needPicture]);
 
   return cells.map((c) => {
     const req = c.request_id ? reqById.get(c.request_id) : undefined;
@@ -220,6 +233,10 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
       views: c.request_id ? viewsByReq.get(c.request_id) ?? null : null,
       postedAt: c.request_id ? postedAt.get(c.request_id) ?? null : null,
       winner: c.winner,
+      firstTake:
+        !thumbPath && c.request_id && firstRaw.has(c.request_id) && signed.has(firstRaw.get(c.request_id)!.path)
+          ? { url: signed.get(firstRaw.get(c.request_id)!.path)!, mime: firstRaw.get(c.request_id)!.mime }
+          : null,
     };
   });
 }
