@@ -77,18 +77,19 @@ export function TelegramButton({ href, label, preview = false }: { href: string;
         e.preventDefault();
         if (!preview) openTelegram(href, app);
       }}
+      // The OnlyFans button's twin — same width, size, colour and shadow —
+      // without its breathing and sweeping light.
       style={{
-        marginTop: 10,
+        margin: "10px 14px 0",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         gap: 10,
-        width: "100%",
-        padding: "14px 18px",
+        padding: "15px 18px",
         borderRadius: 16,
         background: "#1f2230",
         color: "#fff",
-        fontSize: 17,
+        fontSize: 18,
         fontWeight: 700,
         textDecoration: "none",
         boxShadow: "0 10px 30px rgba(0,0,0,.45)",
