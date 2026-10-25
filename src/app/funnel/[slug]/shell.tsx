@@ -1,3 +1,5 @@
+import { TelegramIcon, VisitorsToday } from "./telegram";
+import { visitorsToday } from "@/lib/funnel-visitors";
 /** The fields of a page the head shows. */
 export type ShellPage = {
   display_name: string;
@@ -7,6 +9,9 @@ export type ShellPage = {
   show_followers: boolean;
   bio_line: string;
 };
+
+/** Where the Telegram icon leads: straight there, or asked for on the tap. */
+export type ShellTelegram = { href: string } | { base: string; slug: string } | null;
 
 /**
  * What both pages share: the cover fading into black, the name with its
@@ -22,6 +27,10 @@ export function FunnelShell({
   coverSrc,
   fill = "100dvh",
   link = null,
+  stat = "followers",
+  showBio = true,
+  telegram = null,
+  preview = false,
   children,
 }: {
   page: ShellPage;
@@ -34,6 +43,12 @@ export function FunnelShell({
   fill?: string;
   /** Which of the page's addresses this is, for the canary. */
   link?: string | null;
+  /** The line under the head: followers, the visitors counter, or nothing. */
+  stat?: "followers" | "visitors" | null;
+  showBio?: boolean;
+  telegram?: ShellTelegram;
+  /** In the editor: drawn, never acting. */
+  preview?: boolean;
   children: React.ReactNode;
 }) {
   const nf = new Intl.NumberFormat("en-US");
@@ -81,8 +96,9 @@ export function FunnelShell({
             {page.handle && (
               <p style={{ margin: "2px 0 0", fontSize: 13, color: "rgba(255,255,255,.65)" }}>@{page.handle.replace(/^@/, "")}</p>
             )}
-            {page.instagram_url && (
+            {(page.instagram_url || telegram) && (
               <div style={{ marginTop: 10, display: "flex", justifyContent: "center", gap: 10 }}>
+                {page.instagram_url && (
                 <a
                   href={page.instagram_url}
                   target="_blank"
@@ -100,18 +116,26 @@ export function FunnelShell({
                 >
                   <InstagramGlyph />
                 </a>
+                )}
+                {telegram &&
+                  ("href" in telegram ? (
+                    <TelegramIcon href={telegram.href} preview={preview} />
+                  ) : (
+                    <TelegramIcon base={telegram.base} slug={telegram.slug} preview={preview} />
+                  ))}
               </div>
             )}
           </div>
         </div>
 
         <div style={{ padding: "12px 12px 28px", textAlign: "center" }}>
-          {page.show_followers && followers != null && (
+          {stat === "followers" && page.show_followers && followers != null && (
             <p style={{ margin: 0, fontSize: 15 }}>
               <b>{nf.format(followers)}</b> <span style={{ color: "rgba(255,255,255,.8)" }}>Total Followers</span>
             </p>
           )}
-          {page.bio_line && <p style={{ margin: "14px 0 0", fontSize: 14 }}>{page.bio_line}</p>}
+          {stat === "visitors" && <VisitorsToday initial={visitorsToday()} />}
+          {showBio && page.bio_line && <p style={{ margin: "14px 0 0", fontSize: 14 }}>{page.bio_line}</p>}
 
           {children}
 

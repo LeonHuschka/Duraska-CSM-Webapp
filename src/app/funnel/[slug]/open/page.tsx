@@ -1,9 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { checkKey, checkPass, findPage, logEvent, readCookie, readVisitor } from "@/lib/funnel";
 import { pictureUrl } from "@/lib/funnel-pictures";
-import { totalFollowers } from "@/lib/funnel-dashboard";
 import { gateCopy, gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "../shell";
 import { FunnelClient } from "../funnel-client";
@@ -44,7 +42,7 @@ export default async function OpenPage({
   const admitted = !visitor.bot && (checkKey(req, k) || checkPass(req, page.id, readCookie(h.get("cookie"), "fp")));
 
   const [followers] = await Promise.all([
-    page.show_followers ? totalFollowers(createAdminClient(), page.persona_id) : Promise.resolve(null),
+    Promise.resolve(null),
     logEvent(page, visitor, "view", admitted ? "open" : "open-refused"),
   ]);
 
@@ -57,6 +55,8 @@ export default async function OpenPage({
         lang={lang}
         coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
         link={page.link}
+        stat="visitors"
+        telegram={page.telegram_url ? { base, slug: page.link } : null}
       >
         <GateClient base={base} slug={page.link} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
       </FunnelShell>
@@ -77,6 +77,9 @@ export default async function OpenPage({
             : null
       }
       link={page.link}
+      stat={null}
+      showBio={false}
+      telegram={page.telegram_url ? { href: page.telegram_url } : null}
     >
       <FunnelClient
         base={base}
@@ -94,6 +97,8 @@ export default async function OpenPage({
         ageGate={page.age_gate}
         breakout={page.breakout}
         openUrl={`https://${host}/${page.link}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
+        telegramUrl={page.telegram_url}
+        telegramLabel={page.telegram_label}
       />
     </FunnelShell>
   );

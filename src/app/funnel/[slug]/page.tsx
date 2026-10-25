@@ -1,9 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { findPage, logEvent, readVisitor } from "@/lib/funnel";
 import { pictureUrl } from "@/lib/funnel-pictures";
-import { totalFollowers } from "@/lib/funnel-dashboard";
 import { gateCopy, gateLang } from "@/lib/funnel-i18n";
 import { FunnelShell } from "./shell";
 import { GateClient } from "./gate-client";
@@ -31,7 +29,7 @@ export default async function GatePage({ params }: { params: Promise<{ slug: str
   const base = `/api/funnel/${page.id}`;
 
   const [followers] = await Promise.all([
-    page.show_followers ? totalFollowers(createAdminClient(), page.persona_id) : Promise.resolve(null),
+    Promise.resolve(null),
     logEvent(page, visitor, "view", "gate"),
   ]);
 
@@ -43,6 +41,8 @@ export default async function GatePage({ params }: { params: Promise<{ slug: str
       lang={lang}
       coverSrc={page.cover_path ? pictureUrl(base, "cover", page.cover_path) : null}
       link={page.link}
+      stat="visitors"
+      telegram={page.telegram_url ? { base, slug: page.link } : null}
     >
       <GateClient base={base} slug={page.link} copy={gateCopy(h.get("accept-language"))} breakout={page.breakout} />
     </FunnelShell>

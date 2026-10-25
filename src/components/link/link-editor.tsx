@@ -85,6 +85,8 @@ export function LinkEditor({
     handle: page?.handle ?? "",
     instagram_url: page?.instagram_url ?? "",
     show_followers: page?.show_followers ?? true,
+    telegram_url: page?.telegram_url ?? "",
+    telegram_label: page?.telegram_label ?? "or get naughty wm here..",
   });
   const [saved, setSaved] = useState(f);
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
@@ -270,11 +272,17 @@ export function LinkEditor({
                 placeholder="https://instagram.com/…"
                 hint="The icon under the name. Empty hides it."
               />
-              <Field label="Text line" value={f.bio_line} onChange={(v) => set("bio_line", v)} />
+              <Field
+                label="Telegram"
+                value={f.telegram_url}
+                onChange={(v) => set("telegram_url", v)}
+                placeholder="https://t.me/…"
+                hint="Icon beside Instagram on both pages, and a button on page 2. On page 1 the address is only handed out on the tap."
+              />
+              <Field label="Text line (page 1)" value={f.bio_line} onChange={(v) => set("bio_line", v)} hint="Under the visitors line." />
             </div>
             <div className="mt-3 flex flex-wrap gap-4">
               <Toggle label="Verified badge" checked={f.verified} onChange={(v) => set("verified", v)} />
-              <Toggle label="Show total followers" checked={f.show_followers} onChange={(v) => set("show_followers", v)} />
             </div>
           </Section>
 
@@ -316,6 +324,7 @@ export function LinkEditor({
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Status pill" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the pulsing green dot. Empty hides it." />
               <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Next to the OnlyFans mark." />
+              <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The second button, under the card." />
             </div>
             <div className="mt-3">
               <Field
@@ -394,11 +403,32 @@ export function LinkEditor({
           <div className="mx-auto w-[375px] max-w-full overflow-hidden rounded-[44px] border-[10px] border-neutral-900 bg-black shadow-2xl">
             <div className="h-[720px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
               {shown === 1 ? (
-                <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.cover} fill="100%">
+                <FunnelShell
+                  page={shellPage}
+                  base={base}
+                  followers={followers}
+                  lang={lang}
+                  coverSrc={pics.cover}
+                  fill="100%"
+                  stat="visitors"
+                  telegram={f.telegram_url ? { href: "#" } : null}
+                  preview
+                >
                   <GateClient base={base} slug={f.slug || "ig"} copy={gateCopy(lang)} breakout={f.breakout} preview />
                 </FunnelShell>
               ) : (
-                <FunnelShell page={shellPage} base={base} followers={followers} lang={lang} coverSrc={pics.open_cover ?? pics.cover} fill="100%">
+                <FunnelShell
+                  page={shellPage}
+                  base={base}
+                  followers={followers}
+                  lang={lang}
+                  coverSrc={pics.open_cover ?? pics.cover}
+                  fill="100%"
+                  stat={null}
+                  showBio={false}
+                  telegram={f.telegram_url ? { href: "#" } : null}
+                  preview
+                >
                   <FunnelClient
                     base={base}
                     slug={f.slug || "ig"}
@@ -409,6 +439,8 @@ export function LinkEditor({
                     ageGate={f.age_gate}
                     breakout={f.breakout}
                     openUrl={link ? `${link}/open` : "#"}
+                    telegramUrl={f.telegram_url ? "#" : null}
+                    telegramLabel={f.telegram_label}
                     preview
                   />
                 </FunnelShell>

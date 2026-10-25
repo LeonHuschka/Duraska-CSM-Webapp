@@ -60,6 +60,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       );
     }
 
+    case "tg": {
+      // Telegram, asked for on the tap from the gate. A crawler gets nothing.
+      if (!page.telegram_url || v.bot || (await tripped(page, v))) {
+        return new NextResponse(null, { status: 204, headers: noStore });
+      }
+      const handle = page.telegram_url.match(/t\.me\/([A-Za-z0-9_]+)/)?.[1] ?? null;
+      return NextResponse.json(
+        { u: page.telegram_url, app: handle ? `tg://resolve?domain=${handle}` : null },
+        { headers: noStore }
+      );
+    }
+
     case "config": {
       const k = new URL(req.url).searchParams.get("k");
       const pass = readCookie(req.headers.get("cookie"), "fp");

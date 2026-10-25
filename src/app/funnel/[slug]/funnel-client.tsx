@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { TelegramButton } from "./telegram";
 
 /**
  * The picture card that is the button, and the way out of the in-app
@@ -28,6 +29,8 @@ export function FunnelClient({
   ageGate,
   breakout,
   openUrl,
+  telegramUrl = null,
+  telegramLabel = "",
   preview = false,
 }: {
   base: string;
@@ -43,6 +46,9 @@ export function FunnelClient({
   breakout: boolean;
   /** The real page's own address — what the app is asked to open outside. */
   openUrl: string;
+  /** The second button under the card, when the page has a Telegram. */
+  telegramUrl?: string | null;
+  telegramLabel?: string;
   /** In the editor: drawn, but never fetches the link or leaves. */
   preview?: boolean;
 }) {
@@ -137,7 +143,7 @@ export function FunnelClient({
         marginTop: 14,
         display: "block",
         width: "100%",
-        aspectRatio: "4 / 3",
+        aspectRatio: "16 / 11",
         position: "relative",
         border: 0,
         padding: 0,
@@ -258,6 +264,7 @@ export function FunnelClient({
   return (
     <div>
       {card}
+      {telegramUrl && <TelegramButton href={telegramUrl} label={telegramLabel || "Telegram"} preview={preview} />}
       {asked && env === "ios-app" && (
         <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
           Press and hold the picture, then choose <b>Open Link</b> — or tap <b>···</b> top right and <b>Open in browser</b>

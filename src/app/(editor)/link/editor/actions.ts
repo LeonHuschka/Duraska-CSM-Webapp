@@ -37,6 +37,8 @@ export type FunnelForm = {
   handle: string;
   instagram_url: string;
   show_followers: boolean;
+  telegram_url: string;
+  telegram_label: string;
 };
 
 export async function saveFunnelPage(id: string | null, f: FunnelForm) {
@@ -53,6 +55,11 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
   if (destination && !/^https:\/\/\S+$/i.test(destination)) return { error: "The destination must be an https:// link", id: null };
   const color = (c: string, fallback: string) => (/^#[0-9a-f]{6}$/i.test(c.trim()) ? c.trim() : fallback);
   const instagram = f.instagram_url.trim();
+  const tgRaw = f.telegram_url.trim().replace(/^@/, "");
+  const telegram = !tgRaw ? "" : /^https?:\/\//i.test(tgRaw) ? tgRaw.replace(/^http:/i, "https:") : `https://t.me/${tgRaw}`;
+  if (telegram && !/^https:\/\/t\.me\/[A-Za-z0-9_+/-]+$/i.test(telegram)) {
+    return { error: "The Telegram link must be a t.me address or a username", id: null };
+  }
   if (instagram && !/^https:\/\/(www\.)?instagram\.com\/\S+$/i.test(instagram)) {
     return { error: "The Instagram link must be an https://instagram.com/… address", id: null };
   }
@@ -77,6 +84,8 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
     enabled: f.enabled,
     handle: f.handle.trim().replace(/^@/, "") || null,
     instagram_url: instagram || null,
+    telegram_url: telegram || null,
+    telegram_label: f.telegram_label.trim().slice(0, 60) || "or get naughty wm here..",
     show_followers: f.show_followers,
     updated_at: new Date().toISOString(),
   };
