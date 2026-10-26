@@ -59,7 +59,12 @@ const IG_REELS_ACTOR = "data-slayer~instagram-profile-reels";
 const IG_POST_ACTOR = "data-slayer~instagram-post-details";
 /** A brake: at $0.0015 a reel, sixty is nine cents. */
 const HIDDEN_REELS_MAX = 60;
-const IG_POSTS_PER_ACCOUNT = 12;
+/**
+ * The daily window. Eight reels is four days at two a day — the days a
+ * reel moves most; one that has left it keeps its last reading. Twelve
+ * cost a third more and moved the month past the $5 the plan includes.
+ */
+const IG_POSTS_PER_ACCOUNT = 8;
 
 /**
  * A full read takes every reel the account has, not just the newest. Done
@@ -79,7 +84,8 @@ const FB_PAGES_ACTOR = "apify~facebook-pages-scraper";
  * which is all these pages post.
  */
 const FB_REELS_ACTOR = "dami_studio~facebook-reels-scraper";
-const FB_REELS_PER_PAGE = 10;
+/** Six: the feed fallback charges $0.005 for every post, reel or not. */
+const FB_REELS_PER_PAGE = 6;
 
 /**
  * The fallback, for pages the cheap actor cannot read. A page made from a
@@ -710,6 +716,10 @@ export async function scrapeAccounts(
     .not("status", "in", '("dead","paused")');
   // A list of accounts reads only those — a freshly added one, say.
   if (opts.accountIds?.length) query = query.in("id", opts.accountIds);
+  // A parked account (0 reels a day) posts nothing and is out of every
+  // chart; reading it every morning was money for nothing. Named on
+  // purpose — a first read of a fresh account — it is still read.
+  else query = query.gt("posts_per_day", 0);
   const { data: rows } = await query.order("platform").limit(MAX_ACCOUNTS);
   const accounts = (rows ?? []) as Account[];
   const ig = accounts.filter((a) => a.platform === "instagram");
