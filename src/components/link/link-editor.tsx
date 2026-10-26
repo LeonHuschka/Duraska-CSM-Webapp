@@ -86,7 +86,7 @@ export function LinkEditor({
     instagram_url: page?.instagram_url ?? "",
     show_followers: page?.show_followers ?? true,
     telegram_url: page?.telegram_url ?? "",
-    telegram_label: page?.telegram_label ?? "chat with mee..",
+    telegram_label: page?.telegram_label ?? "dm me a 🤫",
   });
   const [saved, setSaved] = useState(f);
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
