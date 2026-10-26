@@ -449,6 +449,7 @@ export type Database = {
           telegram_thread_id: number | null;
           posts_per_day: number;
           trial_reels_per_day: number;
+          stories_per_day: number;
           manager_username: string | null;
           avatar_path: string | null;
           avatar_updated_at: string | null;
@@ -472,6 +473,7 @@ export type Database = {
           telegram_thread_id?: number | null;
           posts_per_day?: number;
           trial_reels_per_day?: number;
+          stories_per_day?: number;
           manager_username?: string | null;
           avatar_path?: string | null;
           avatar_updated_at?: string | null;
@@ -495,6 +497,7 @@ export type Database = {
           telegram_thread_id?: number | null;
           posts_per_day?: number;
           trial_reels_per_day?: number;
+          stories_per_day?: number;
           manager_username?: string | null;
           avatar_path?: string | null;
           avatar_updated_at?: string | null;
@@ -504,6 +507,18 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
+      };
+      account_stories: {
+        Row: { id: string; persona_id: string; account_id: string; taken_at: string; media_type: string | null; seen_at: string };
+        Insert: { id: string; persona_id: string; account_id: string; taken_at: string; media_type?: string | null; seen_at?: string };
+        Update: { id?: string; persona_id?: string; account_id?: string; taken_at?: string; media_type?: string | null; seen_at?: string };
+        Relationships: [];
+      };
+      pattern_reports: {
+        Row: { id: string; persona_id: string; account_id: string; week_start: string; analysis: Json; model: string | null; created_at: string; sent_at: string | null };
+        Insert: { id?: string; persona_id: string; account_id: string; week_start: string; analysis: Json; model?: string | null; created_at?: string; sent_at?: string | null };
+        Update: { id?: string; persona_id?: string; account_id?: string; week_start?: string; analysis?: Json; model?: string | null; created_at?: string; sent_at?: string | null };
         Relationships: [];
       };
       reel_metrics: {
@@ -1111,6 +1126,7 @@ export type Database = {
           shoot_notice_started_at: string | null;
           shoot_notice_last_at: string | null;
           winners_thread_id: number | null;
+          pattern_thread_id: number | null;
           viral_lift: number;
           viral_min_views: number;
           created_at: string;
@@ -1142,6 +1158,7 @@ export type Database = {
           shoot_notice_started_at?: string | null;
           shoot_notice_last_at?: string | null;
           winners_thread_id?: number | null;
+          pattern_thread_id?: number | null;
           viral_lift?: number;
           viral_min_views?: number;
           created_at?: string;
@@ -1173,6 +1190,7 @@ export type Database = {
           shoot_notice_started_at?: string | null;
           shoot_notice_last_at?: string | null;
           winners_thread_id?: number | null;
+          pattern_thread_id?: number | null;
           viral_lift?: number;
           viral_min_views?: number;
           created_at?: string;

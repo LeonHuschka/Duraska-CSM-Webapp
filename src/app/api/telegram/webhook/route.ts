@@ -49,6 +49,9 @@ type TgMessage = {
   text?: string;
   caption?: string;
   photo?: TgPhoto[];
+  /** In a forum topic: the message that opened it, which carries its name. */
+  reply_to_message?: { forum_topic_created?: { name?: string } };
+  forum_topic_created?: { name?: string };
 };
 type TgReactionUpdate = {
   chat: TgChat;
@@ -215,6 +218,13 @@ function fire(req: Request, path: string, secret: string, what: string) {
 }
 
 async function handleMessage(req: Request, msg: TgMessage) {
+  // The weekly pattern analysis goes into the topic named for it. Any
+  // message there tells the bot which topic that is — no id to look up.
+  const topic = msg.forum_topic_created?.name ?? msg.reply_to_message?.forum_topic_created?.name ?? "";
+  if (msg.message_thread_id && /pattern\s*analys/i.test(topic)) {
+    await rememberPatternTopic(msg.chat.id, msg.message_thread_id);
+  }
+
   // A screenshot in an account group → read the stats off it.
   if (msg.photo && msg.photo.length > 0) {
     await handleScreenshot(msg);
@@ -695,4 +705,21 @@ async function handleReaction(r: TgReactionUpdate) {
       updated_at: new Date().toISOString(),
     })
     .in("id", open);
+}
+
+/** Store the PATTERN ANALYSIS topic, once, and say so in it. */
+async function rememberPatternTopic(chatId: number, threadId: number) {
+  const supabase = createAdminClient();
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("persona_id, pattern_thread_id")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (!cfg || cfg.pattern_thread_id === threadId) return;
+  await supabase.from("telegram_config").update({ pattern_thread_id: threadId }).eq("persona_id", cfg.persona_id);
+  await sendMessage({
+    chat_id: chatId,
+    message_thread_id: threadId,
+    text: "✅ Got it — the weekly pattern analysis lands here every Sunday.",
+  });
 }
