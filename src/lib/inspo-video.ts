@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { deleteMessage, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
+import { apifyRunSync } from "@/lib/apify";
 
 /**
  * Keep the inspo reel, not just its link.
@@ -221,17 +222,11 @@ const FB_ACTOR = "apple_yang~facebook-video-audio-downloader";
 export async function resolveFacebookVideoUrl(
   postUrl: string
 ): Promise<{ ok: true; url: string } | { ok: false; note: string }> {
-  const token = process.env.APIFY_TOKEN;
-  if (!token) return { ok: false, note: "APIFY_TOKEN not set" };
-  const res = await fetch(
-    `https://api.apify.com/v2/acts/${FB_ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=${ACTOR_TIMEOUT_S}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ videoUrls: [postUrl] }),
-      signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
-    }
-  ).catch(() => null);
+  if (!process.env.APIFY_TOKEN && !process.env.APIFY_TOKEN_2) return { ok: false, note: "APIFY_TOKEN not set" };
+  const res = await apifyRunSync(FB_ACTOR, { videoUrls: [postUrl] }, {
+    query: { timeout: ACTOR_TIMEOUT_S },
+    signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
+  }).catch(() => null);
   if (!res) return { ok: false, note: "resolver unreachable" };
   const items = (await res.json().catch(() => null)) as Record<string, unknown>[] | null;
   if (!res.ok || !Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
@@ -246,17 +241,11 @@ export async function resolveFacebookVideoUrl(
 export async function resolveVideoUrl(
   postUrl: string
 ): Promise<{ ok: true; url: string } | { ok: false; note: string }> {
-  const token = process.env.APIFY_TOKEN;
-  if (!token) return { ok: false, note: "APIFY_TOKEN not set" };
-  const res = await fetch(
-    `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items?token=${token}&timeout=${ACTOR_TIMEOUT_S}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ postUrls: [postUrl] }),
-      signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
-    }
-  ).catch(() => null);
+  if (!process.env.APIFY_TOKEN && !process.env.APIFY_TOKEN_2) return { ok: false, note: "APIFY_TOKEN not set" };
+  const res = await apifyRunSync(ACTOR, { postUrls: [postUrl] }, {
+    query: { timeout: ACTOR_TIMEOUT_S },
+    signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
+  }).catch(() => null);
   if (!res) return { ok: false, note: "resolver unreachable" };
   const items = (await res.json().catch(() => null)) as Record<string, unknown>[] | null;
   if (!res.ok || !Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };

@@ -1,4 +1,5 @@
 import "server-only";
+import { apifyRunSync } from "@/lib/apify";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { storeCovers, storeImage } from "@/lib/stored-images";
@@ -153,20 +154,12 @@ async function runActorOnce(
   input: unknown,
   memoryMb?: number
 ): Promise<{ rows: Row[]; error: string | null }> {
-  const token = process.env.APIFY_TOKEN;
-  if (!token) return { rows: [], error: "APIFY_TOKEN is not set" };
   try {
-    const res = await fetch(
-      `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}${
-        memoryMb ? `&memory=${memoryMb}` : ""
-      }`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-        signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
-      }
-    );
+    const res = await apifyRunSync(actor, input, {
+      query: { memory: memoryMb },
+      signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+    });
+    if (!res) return { rows: [], error: "APIFY_TOKEN is not set" };
     if (!res.ok) return { rows: [], error: `${actor}: http ${res.status}` };
     const body: unknown = await res.json();
     if (!Array.isArray(body)) return { rows: [], error: `${actor}: no rows` };

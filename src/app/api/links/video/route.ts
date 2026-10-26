@@ -106,7 +106,9 @@ async function run(url: URL, personaId: string | undefined) {
   const results = [];
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    results.push(await fetchInspoVideo(supabase, id, note));
+    // ?retry=1: a later try, which keeps the original message when no note
+    // was ever stored for the link.
+    results.push(await fetchInspoVideo(supabase, id, note, url.searchParams.get("retry") === "1"));
   }
   return NextResponse.json({ ok: true, done: results.length, of: ids.length, results });
 }
