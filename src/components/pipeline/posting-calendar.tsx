@@ -1,18 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, FlaskConical } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleDashed, FlaskConical } from "lucide-react";
 import { berlinDay } from "@/lib/berlin-day";
 
 /**
  * What an account posted, day by day, against what it should: regular
- * reels and trial reels, each with its own number a day. A day is green
- * once both are met, red when nothing went up at all, yellow for anything
- * in between. Days are Berlin days; the scrape reads every morning, so
+ * reels, trial reels and stories, each with its own number a day. A day is
+ * green once all are met, red when nothing went up at all, yellow for
+ * anything in between. Days are Berlin days; the scrape reads every morning, so
  * today only fills in tomorrow and is not held against anyone yet.
  */
 
-export type DayCount = { r: number; t: number };
+/** Regular reels, trial reels, stories. */
+export type DayCount = { r: number; t: number; s: number };
 export type Posting = {
   /** The first day we can speak for — the oldest reel the scrape has seen. */
   since: string | null;
@@ -23,8 +24,13 @@ export type Posting = {
    * nothing there counts against anyone until a later read has seen them.
    */
   until: string | null;
+  /** The first day stories were read; before it a day is not held to them. */
+  storiesSince: string | null;
 };
-export type Need = { r: number; t: number };
+export type Need = { r: number; t: number; s: number };
+const EMPTY: DayCount = { r: 0, t: 0, s: 0 };
+const storiesDue = (key: string, posting: Posting, need: Need) =>
+  posting.storiesSince && key >= posting.storiesSince ? need.s : 0;
 type Tone = "green" | "yellow" | "red" | "plain" | "pending" | "none";
 
 const DAY = 86_400_000;
@@ -38,10 +44,11 @@ const mondayOf = (k: string) => addDays(k, -((new Date(toTime(k)).getUTCDay() + 
 function toneOf(key: string, today: string, posting: Posting, d: DayCount, need: Need): Tone {
   const { since, until } = posting;
   if (key > today || !since || key < since) return "none";
-  if (need.r + need.t === 0) return d.r + d.t > 0 ? "plain" : "none";
-  if (d.r >= need.r && d.t >= need.t) return "green";
+  const s = storiesDue(key, posting, need);
+  if (need.r + need.t + s === 0) return d.r + d.t + d.s > 0 ? "plain" : "none";
+  if (d.r >= need.r && d.t >= need.t && d.s >= s) return "green";
   if (key === today || !until || key >= until) return "pending";
-  return d.r + d.t === 0 ? "red" : "yellow";
+  return d.r + d.t + d.s === 0 ? "red" : "yellow";
 }
 
 const TONE: Record<Tone, string> = {
@@ -70,7 +77,7 @@ export function PostingStrip({ posting, need }: { posting: Posting; need: Need }
   return (
     <div className="mt-3 flex gap-1" title="The last 7 days: green all posted, yellow some, red none">
       {keys.map((k) => {
-        const d = posting.days[k] ?? { r: 0, t: 0 };
+        const d = posting.days[k] ?? EMPTY;
         return <span key={k} className={`h-1.5 flex-1 rounded-full ${DOT[toneOf(k, today, posting, d, need)]}`} />;
       })}
     </div>
@@ -82,6 +89,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
   const [mode, setMode] = useState<"week" | "month">("week");
   const [offset, setOffset] = useState(0);
   const trials = need.t > 0 || Object.values(posting.days).some((d) => d.t > 0);
+  const stories = need.s > 0 || Object.values(posting.days).some((d) => d.s > 0);
 
   const view = useMemo(() => {
     if (mode === "week") {
@@ -113,10 +121,17 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
   );
   const sum = counted.reduce(
     (a, c) => {
-      const d = posting.days[c.key] ?? { r: 0, t: 0 };
-      return { r: a.r + d.r, t: a.t + d.t, full: a.full + (d.r >= need.r && d.t >= need.t ? 1 : 0) };
+      const d = posting.days[c.key] ?? EMPTY;
+      const sDue = storiesDue(c.key, posting, need);
+      return {
+        r: a.r + d.r,
+        t: a.t + d.t,
+        s: a.s + (sDue ? d.s : 0),
+        sDue: a.sDue + sDue,
+        full: a.full + (d.r >= need.r && d.t >= need.t && d.s >= sDue ? 1 : 0),
+      };
     },
-    { r: 0, t: 0, full: 0 },
+    { r: 0, t: 0, s: 0, sDue: 0, full: 0 },
   );
 
   return (
@@ -172,7 +187,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
         ))}
         {view.cells.map(({ key, inMonth }) => {
           if (!inMonth) return <span key={key} />;
-          const d = posting.days[key] ?? { r: 0, t: 0 };
+          const d = posting.days[key] ?? EMPTY;
           const tone = toneOf(key, today, posting, d, need);
           const known = tone !== "none" || (key <= today && posting.since != null && key >= posting.since);
           const isToday = key === today;
@@ -184,7 +199,13 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
                   ? undefined
                   : `${fmt(key, { weekday: "long", day: "numeric", month: "long" })}: ${d.r} reel${d.r === 1 ? "" : "s"}${
                       trials ? ` · ${d.t} trial` : ""
-                    }${need.r + need.t > 0 ? ` (needs ${need.r}${trials ? ` + ${need.t} trial` : ""})` : ""}${
+                    }${stories ? ` · ${d.s} stor${d.s === 1 ? "y" : "ies"}` : ""}${
+                      need.r + need.t > 0
+                        ? ` (needs ${need.r}${trials ? ` + ${need.t} trial` : ""}${
+                            storiesDue(key, posting, need) ? ` + ${storiesDue(key, posting, need)} story` : ""
+                          })`
+                        : ""
+                    }${
                       tone === "pending" ? " — not read yet, the scrape fills it in" : ""
                     }`
               }
@@ -196,12 +217,22 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
               {known ? (
                 <>
                   <span className={`font-bold tabular-nums leading-none ${mode === "week" ? "text-base" : "text-[13px]"}`}>
-                    {tone === "pending" && d.r + d.t === 0 ? "–" : d.r}
+                    {tone === "pending" && d.r + d.t + d.s === 0 ? "–" : d.r}
                   </span>
-                  {trials && (
-                    <span className="inline-flex items-center text-[8px] font-medium leading-none tabular-nums opacity-90">
-                      <FlaskConical className="h-2 w-2" />
-                      {d.t}
+                  {(trials || stories) && (
+                    <span className="inline-flex items-center gap-1 text-[8px] font-medium leading-none tabular-nums opacity-90">
+                      {trials && (
+                        <span className="inline-flex items-center">
+                          <FlaskConical className="h-2 w-2" />
+                          {d.t}
+                        </span>
+                      )}
+                      {stories && (
+                        <span className="inline-flex items-center">
+                          <CircleDashed className="h-2 w-2" />
+                          {d.s}
+                        </span>
+                      )}
                     </span>
                   )}
                 </>
@@ -231,6 +262,16 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
               trial
             </>
           )}
+          {sum.sDue > 0 && (
+            <>
+              {" "}
+              ·{" "}
+              <span className="tabular-nums text-foreground">
+                {sum.s}/{sum.sDue}
+              </span>{" "}
+              stories
+            </>
+          )}
         </p>
       ) : need.r + need.t === 0 ? (
         <p className="mt-2 text-[10px] text-muted-foreground">Set reels a day to colour the days.</p>
@@ -242,6 +283,11 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
         {trials && (
           <span className="inline-flex items-center gap-0.5">
             <FlaskConical className="h-2.5 w-2.5" /> trial
+          </span>
+        )}
+        {stories && (
+          <span className="inline-flex items-center gap-0.5">
+            <CircleDashed className="h-2.5 w-2.5" /> story
           </span>
         )}
       </p>

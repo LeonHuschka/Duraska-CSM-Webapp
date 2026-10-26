@@ -53,7 +53,7 @@ export async function AccountsTab({
     supabase
       .from("accounts")
       .select(
-        "id, handle, display_name, platform, status, telegram_thread_id, posts_per_day, trial_reels_per_day, manager_username, avatar_path, sort_order, linked_account_id"
+        "id, handle, display_name, platform, status, telegram_thread_id, posts_per_day, trial_reels_per_day, stories_per_day, manager_username, avatar_path, sort_order, linked_account_id"
       )
       .eq("persona_id", personaId)
       .order("platform")
@@ -90,6 +90,18 @@ export async function AccountsTab({
   // trials included — what was posted stays posted.
   const { data: allTrials } = await supabase.from("trials").select("id, account_id").eq("persona_id", personaId);
   const trialAccount = new Map((allTrials ?? []).map((t) => [t.id, t.account_id as string | null]));
+  // Stories, by the day they went up. Before the first one was read no day
+  // is held to them — there was nothing reading them yet.
+  const { data: storyRows } = await supabase
+    .from("account_stories")
+    .select("account_id, taken_at, seen_at")
+    .eq("persona_id", personaId)
+    .gte("taken_at", new Date(Date.now() - 120 * DAY).toISOString());
+  const storiesSince = (storyRows ?? []).reduce<string | null>((min, r) => {
+    const k = berlinDay(r.seen_at);
+    return !min || k < min ? k : min;
+  }, null);
+
   const trialRequestAccount = new Map<string, string | null>();
   if (trialAccount.size) {
     const { data: cells } = await supabase
@@ -259,9 +271,9 @@ export async function AccountsTab({
     // trial, which never shows on the profile, so a take marked posted in
     // the app counts on its day even when the scrape never sees it.
     const days: Posting["days"] = {};
-    const bump = (iso: string, kind: "r" | "t") => {
+    const bump = (iso: string, kind: "r" | "t" | "s") => {
       const k = berlinDay(iso);
-      (days[k] ??= { r: 0, t: 0 })[kind]++;
+      (days[k] ??= { r: 0, t: 0, s: 0 })[kind]++;
     };
     const trialSeen = new Set<string>();
     let since: string | null = null;
@@ -283,6 +295,8 @@ export async function AccountsTab({
       bump(at, "t");
     }
 
+    for (const st of storyRows ?? []) if (st.account_id === a.id) bump(st.taken_at, "s");
+
     const weekAgo = now - 7 * DAY;
     const inWeek = (t: (typeof tiles)[number]) => t.postedAt != null && new Date(t.postedAt).getTime() >= weekAgo;
     const isHit = (t: (typeof tiles)[number]) => t.lift != null && t.lift >= 5;
@@ -302,7 +316,7 @@ export async function AccountsTab({
       hitsTotal: tiles.filter(isHit).length,
       goodWeek: tiles.filter((t) => isGood(t) && inWeek(t)).length,
       goodTotal: tiles.filter(isGood).length,
-      posting: { since, days, until: lastSeen ? berlinDay(lastSeen) : null } as Posting,
+      posting: { since, days, until: lastSeen ? berlinDay(lastSeen) : null, storiesSince } as Posting,
       profileUrl: /^https?:\/\//i.test(handle)
         ? handle
         : a.platform === "instagram"
@@ -353,6 +367,7 @@ export async function AccountsTab({
       managerName: r.a.manager_username ? nameOf.get(r.a.manager_username.replace(/^@/, "").toLowerCase()) ?? null : null,
       perDay: Number(r.a.posts_per_day ?? 0),
       trialPerDay: Number(r.a.trial_reels_per_day ?? 0),
+      storiesPerDay: Number(r.a.stories_per_day ?? 0),
       posting: r.posting,
       followers: r.latestFollowers,
       followerDelta: r.followerDelta,

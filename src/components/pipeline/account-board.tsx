@@ -86,6 +86,8 @@ export type AccountTileData = {
   perDay: number;
   /** Trial reels a day, on top of the regular ones. */
   trialPerDay: number;
+  /** Stories a day. */
+  storiesPerDay: number;
   /** What went up, day by day. */
   posting: Posting;
   followers: number | null;
@@ -633,7 +635,7 @@ function AccountTile({
       {!a.disabled && (
         <PostingStrip
           posting={a.posting}
-          need={{ r: a.perDay, t: a.trialPerDay }}
+          need={{ r: a.perDay, t: a.trialPerDay, s: a.storiesPerDay }}
         />
       )}
 
@@ -755,6 +757,7 @@ function AccountPanel({
     manager: a.manager ?? "",
     perDay: String(a.perDay),
     trialPerDay: String(a.trialPerDay),
+    storiesPerDay: String(a.storiesPerDay),
     linkedId: a.linkedId ?? "none",
   };
   const [f, setF] = useState(initial);
@@ -767,6 +770,7 @@ function AccountPanel({
       a.manager,
       a.perDay,
       a.trialPerDay,
+      a.storiesPerDay,
       a.linkedId,
     ],
   ); // eslint-disable-line react-hooks/exhaustive-deps
@@ -788,6 +792,7 @@ function AccountPanel({
         manager: f.manager,
         perDay: Number(f.perDay),
         trialPerDay: Number(f.trialPerDay),
+        storiesPerDay: Number(f.storiesPerDay),
       });
       if (res.error) return void toast.error(res.error);
       const link = f.linkedId === "none" ? null : f.linkedId;
@@ -837,7 +842,7 @@ function AccountPanel({
 
       {canEdit && (
         <div className="mt-4 rounded-xl border border-border/40 bg-background/40 p-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.5fr_1fr_0.6fr_0.6fr_1.3fr]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.4fr_1fr_0.6fr_0.6fr_0.6fr_1.3fr]">
             <Field label="Name" hint="shown on the tiles and charts">
               <Input
                 value={f.displayName}
@@ -881,6 +886,16 @@ function AccountPanel({
                 max={50}
                 value={f.trialPerDay}
                 onChange={(e) => set("trialPerDay", e.target.value)}
+                className="h-9 text-sm tabular-nums"
+              />
+            </Field>
+            <Field label="Stories a day">
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={f.storiesPerDay}
+                onChange={(e) => set("storiesPerDay", e.target.value)}
                 className="h-9 text-sm tabular-nums"
               />
             </Field>
@@ -969,7 +984,7 @@ function AccountPanel({
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
         <PostingCalendar
           posting={a.posting}
-          need={{ r: a.perDay, t: a.trialPerDay }}
+          need={{ r: a.perDay, t: a.trialPerDay, s: a.storiesPerDay }}
         />
 
         <div className="min-w-0 flex-1">

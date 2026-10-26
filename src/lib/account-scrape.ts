@@ -213,7 +213,13 @@ function fbKey(url: string | null): string {
     .replace(/\/+$/, "");
 }
 
-type Account = { id: string; handle: string; platform: string; avatar_updated_at?: string | null };
+type Account = {
+  id: string;
+  handle: string;
+  platform: string;
+  avatar_updated_at?: string | null;
+  stories_per_day?: number;
+};
 
 /** What one post looked like today. */
 type PostReading = {
@@ -837,6 +843,44 @@ async function fillHiddenReels(supabase: Sb, readings: AccountReading[]) {
   }
 }
 
+/**
+ * The stories up right now, every account in one run: $0.0045 a story and
+ * $0.002 a run. A story lives 24 hours and this runs every morning, so
+ * each one is seen at least once; its id keeps a second sighting from
+ * counting twice. Instagram only — Facebook gets the same stories cross-posted.
+ */
+const IG_STORIES_ACTOR = "silentflow~instagram-story-scraper";
+
+async function readStories(supabase: Sb, personaId: string, accounts: Account[]): Promise<number> {
+  if (accounts.length === 0) return 0;
+  const run = await runActor(
+    IG_STORIES_ACTOR,
+    { usernames: accounts.map((a) => igUsername(a.handle)), contentType: "stories", maxItems: accounts.length * 10 },
+    { memoryMb: 512, retry: true }
+  );
+  if (run.error) {
+    console.error("[scrape] instagram stories:", run.error);
+    return 0;
+  }
+  const byName = new Map(accounts.map((a) => [igUsername(a.handle).toLowerCase(), a]));
+  const rows = run.rows
+    .filter((r) => r.type === "story" || r.type == null)
+    .map((r) => {
+      const a = byName.get((str(r.username) ?? "").toLowerCase());
+      const id = str(r.id);
+      const takenAt = str(r.takenAt);
+      return a && id && takenAt
+        ? { id, persona_id: personaId, account_id: a.id, taken_at: takenAt, media_type: str(r.mediaType) }
+        : null;
+    })
+    .filter((r): r is NonNullable<typeof r> => !!r);
+  if (rows.length) {
+    const { error } = await supabase.from("account_stories").upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+    if (error) console.error("[scrape] stories not stored:", error.message);
+  }
+  return rows.length;
+}
+
 /** One persona's accounts, read and written. `full` reads every reel, not just the newest. */
 export async function scrapeAccounts(
   supabase: Sb,
@@ -855,7 +899,7 @@ export async function scrapeAccounts(
   const perPage = opts.fbPerPage ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE);
   let query = supabase
     .from("accounts")
-    .select("id, handle, platform, status, avatar_updated_at")
+    .select("id, handle, platform, status, avatar_updated_at, stories_per_day")
     .eq("persona_id", personaId)
     .not("status", "in", '("dead","paused")');
   // A list of accounts reads only those — a freshly added one, say.
@@ -869,9 +913,10 @@ export async function scrapeAccounts(
   const ig = accounts.filter((a) => a.platform === "instagram");
   const fb = accounts.filter((a) => a.platform === "facebook");
 
-  const [igReadings, fbReadings] = await Promise.all([
+  const [igReadings, fbReadings, stories] = await Promise.all([
     readInstagram(ig, perAccount),
     readFacebook(fb, perPage),
+    readStories(supabase, personaId, ig.filter((a) => (a.stories_per_day ?? 0) > 0)),
   ]);
   const readings = [...igReadings, ...fbReadings];
   for (const r of readings) {
@@ -991,6 +1036,7 @@ export async function scrapeAccounts(
     ig.length * 0.0026 +
     (ig.length ? 0.0001 + ig.length * perAccount * 0.00099 : 0) +
     fb.length * perPage * 0.0015 +
+    (ig.some((a) => (a.stories_per_day ?? 0) > 0) ? 0.002 + stories * 0.0045 : 0) +
     (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
