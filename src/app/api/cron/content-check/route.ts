@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { pipelineCounts } from "@/lib/pipeline-counts";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
@@ -105,6 +106,17 @@ export async function GET(req: Request) {
     })
   );
   summary.videos = Object.fromEntries(videos);
+  // Sundays: the week's pattern analysis, on this morning's numbers. It
+  // runs account by account in invocations of its own (api/pattern).
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Berlin", weekday: "short" }).format(new Date());
+  if (weekday === "Sun" && only !== "scrape" && secret) {
+    waitUntil(
+      fetch(new URL("/api/pattern?all=1", req.url), { method: "POST", headers: { "x-link-check-secret": secret } })
+        .then((res) => console.log("[cron] pattern analysis started", res.status))
+        .catch((err) => console.error("[cron] pattern analysis not started", err))
+    );
+    summary.pattern = "started";
+  }
   if (only === "scrape") return NextResponse.json({ ok: true, summary });
 
   for (const cfg of configs ?? []) {
