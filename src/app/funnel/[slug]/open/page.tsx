@@ -80,6 +80,7 @@ export default async function OpenPage({
       stat={null}
       showBio={false}
       telegram={page.telegram_url ? { href: page.telegram_url } : null}
+      fit
     >
       <FunnelClient
         base={base}
@@ -99,6 +100,7 @@ export default async function OpenPage({
         openUrl={`https://${host}/${page.link}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
         telegramUrl={page.telegram_url}
         telegramLabel={page.telegram_label}
+        fit
       />
     </FunnelShell>
   );

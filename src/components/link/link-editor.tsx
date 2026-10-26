@@ -86,7 +86,7 @@ export function LinkEditor({
     instagram_url: page?.instagram_url ?? "",
     show_followers: page?.show_followers ?? true,
     telegram_url: page?.telegram_url ?? "",
-    telegram_label: page?.telegram_label ?? "or get naughty wm here..",
+    telegram_label: page?.telegram_label ?? "chat with mee..",
   });
   const [saved, setSaved] = useState(f);
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
@@ -401,7 +401,7 @@ export function LinkEditor({
           </div>
 
           <div className="mx-auto w-[375px] max-w-full overflow-hidden rounded-[44px] border-[10px] border-neutral-900 bg-black shadow-2xl">
-            <div className="h-[720px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
+            <div className="h-[700px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
               {shown === 1 ? (
                 <FunnelShell
                   page={shellPage}
@@ -423,7 +423,8 @@ export function LinkEditor({
                   followers={followers}
                   lang={lang}
                   coverSrc={pics.open_cover ?? pics.cover}
-                  fill="100%"
+                  fill="700px"
+                  fit
                   stat={null}
                   showBio={false}
                   telegram={f.telegram_url ? { href: "#" } : null}
@@ -442,6 +443,7 @@ export function LinkEditor({
                     telegramUrl={f.telegram_url ? "#" : null}
                     telegramLabel={f.telegram_label}
                     preview
+                    fit
                   />
                 </FunnelShell>
               )}

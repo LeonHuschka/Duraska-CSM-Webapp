@@ -43,6 +43,7 @@ import {
 } from "@/components/pipeline/actions";
 import { createTrial } from "@/app/(app)/trials/actions";
 import { useWidth } from "@/components/pipeline/analytics/use-width";
+import { PostingCalendar, PostingStrip, type Posting } from "@/components/pipeline/posting-calendar";
 
 export type ReelTileData = {
   key: string;
@@ -79,6 +80,10 @@ export type AccountTileData = {
   manager: string | null;
   managerName: string | null;
   perDay: number;
+  /** Trial reels a day, on top of the regular ones. */
+  trialPerDay: number;
+  /** What went up, day by day. */
+  posting: Posting;
   followers: number | null;
   followerDelta: number | null;
   views: number;
@@ -621,6 +626,8 @@ function AccountTile({
         </span>
       </div>
 
+      {!a.disabled && <PostingStrip posting={a.posting} need={{ r: a.perDay, t: a.trialPerDay }} />}
+
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
         {a.disabled ? (
           <span className="flex items-center gap-1 font-medium text-rose-400">
@@ -738,12 +745,13 @@ function AccountPanel({
     handle: a.handle,
     manager: a.manager ?? "",
     perDay: String(a.perDay),
+    trialPerDay: String(a.trialPerDay),
     linkedId: a.linkedId ?? "none",
   };
   const [f, setF] = useState(initial);
   useEffect(
     () => setF(initial),
-    [a.id, a.displayName, a.handle, a.manager, a.perDay, a.linkedId],
+    [a.id, a.displayName, a.handle, a.manager, a.perDay, a.trialPerDay, a.linkedId],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
@@ -762,6 +770,7 @@ function AccountPanel({
         handle: f.handle,
         manager: f.manager,
         perDay: Number(f.perDay),
+        trialPerDay: Number(f.trialPerDay),
       });
       if (res.error) return void toast.error(res.error);
       const link = f.linkedId === "none" ? null : f.linkedId;
@@ -811,7 +820,7 @@ function AccountPanel({
 
       {canEdit && (
         <div className="mt-4 rounded-xl border border-border/40 bg-background/40 p-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.6fr_1fr_0.6fr_1.3fr]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1.5fr_1fr_0.6fr_0.6fr_1.3fr]">
             <Field label="Name" hint="shown on the tiles and charts">
               <Input
                 value={f.displayName}
@@ -845,6 +854,16 @@ function AccountPanel({
                 max={50}
                 value={f.perDay}
                 onChange={(e) => set("perDay", e.target.value)}
+                className="h-9 text-sm tabular-nums"
+              />
+            </Field>
+            <Field label="Trial reels a day">
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={f.trialPerDay}
+                onChange={(e) => set("trialPerDay", e.target.value)}
                 className="h-9 text-sm tabular-nums"
               />
             </Field>
@@ -928,6 +947,8 @@ function AccountPanel({
           </div>
         </div>
       )}
+
+      <PostingCalendar posting={a.posting} need={{ r: a.perDay, t: a.trialPerDay }} />
 
       <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         Reels{" "}

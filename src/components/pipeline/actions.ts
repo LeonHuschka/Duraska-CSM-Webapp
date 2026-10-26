@@ -267,7 +267,7 @@ export async function setAccountDisabled(accountId: string, disabled: boolean) {
  */
 export async function updateAccountSettings(
   accountId: string,
-  data: { displayName: string; handle: string; manager: string; perDay: number }
+  data: { displayName: string; handle: string; manager: string; perDay: number; trialPerDay: number }
 ) {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
@@ -279,6 +279,9 @@ export async function updateAccountSettings(
   if (!Number.isFinite(data.perDay) || data.perDay < 0 || data.perDay > 50) {
     return { error: "Reels a day: a number between 0 and 50" };
   }
+  if (!Number.isFinite(data.trialPerDay) || data.trialPerDay < 0 || data.trialPerDay > 50) {
+    return { error: "Trial reels a day: a number between 0 and 50" };
+  }
   const manager = data.manager.trim().replace(/^@/, "");
   const name = data.displayName.trim().slice(0, 60);
   const { error } = await supabase
@@ -288,6 +291,7 @@ export async function updateAccountSettings(
       handle,
       manager_username: manager || null,
       posts_per_day: Math.round(data.perDay),
+      trial_reels_per_day: Math.round(data.trialPerDay),
       updated_at: new Date().toISOString(),
     })
     .eq("id", accountId)

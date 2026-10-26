@@ -448,6 +448,7 @@ export type Database = {
           telegram_chat_id: number | null;
           telegram_thread_id: number | null;
           posts_per_day: number;
+          trial_reels_per_day: number;
           manager_username: string | null;
           avatar_path: string | null;
           avatar_updated_at: string | null;
@@ -470,6 +471,7 @@ export type Database = {
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
           posts_per_day?: number;
+          trial_reels_per_day?: number;
           manager_username?: string | null;
           avatar_path?: string | null;
           avatar_updated_at?: string | null;
@@ -492,6 +494,7 @@ export type Database = {
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
           posts_per_day?: number;
+          trial_reels_per_day?: number;
           manager_username?: string | null;
           avatar_path?: string | null;
           avatar_updated_at?: string | null;

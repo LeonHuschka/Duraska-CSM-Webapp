@@ -85,7 +85,7 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
     handle: f.handle.trim().replace(/^@/, "") || null,
     instagram_url: instagram || null,
     telegram_url: telegram || null,
-    telegram_label: f.telegram_label.trim().slice(0, 60) || "or get naughty wm here..",
+    telegram_label: f.telegram_label.trim().slice(0, 60) || "chat with mee..",
     show_followers: f.show_followers,
     updated_at: new Date().toISOString(),
   };

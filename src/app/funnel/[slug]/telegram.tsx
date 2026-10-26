@@ -81,6 +81,7 @@ export function TelegramButton({ href, label, preview = false }: { href: string;
       // without its breathing and sweeping light.
       style={{
         margin: "10px 14px 0",
+        flexShrink: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

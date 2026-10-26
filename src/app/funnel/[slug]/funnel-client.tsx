@@ -32,6 +32,7 @@ export function FunnelClient({
   telegramUrl = null,
   telegramLabel = "",
   preview = false,
+  fit = false,
 }: {
   base: string;
   /** The address this page was reached through. */
@@ -51,6 +52,8 @@ export function FunnelClient({
   telegramLabel?: string;
   /** In the editor: drawn, but never fetches the link or leaves. */
   preview?: boolean;
+  /** The card takes whatever height the screen has left, buttons in view. */
+  fit?: boolean;
 }) {
   const [target, setTarget] = useState<string | null>(null);
   const [env, setEnv] = useState<Env>("browser");
@@ -140,10 +143,10 @@ export function FunnelClient({
       aria-label={label}
       aria-disabled={!target}
       style={{
-        marginTop: 14,
+        marginTop: fit ? 12 : 14,
         display: "block",
         width: "100%",
-        aspectRatio: "16 / 11",
+        ...(fit ? { flex: "1 1 auto", minHeight: 220 } : { aspectRatio: "16 / 11" }),
         position: "relative",
         border: 0,
         padding: 0,
@@ -163,8 +166,8 @@ export function FunnelClient({
         style={{
           position: "absolute",
           inset: "auto 0 0 0",
-          height: "45%",
-          background: "linear-gradient(to top, rgba(0,0,0,.85), transparent)",
+          height: fit ? 140 : "45%",
+          background: "linear-gradient(to top, rgba(0,0,0,.8), transparent)",
         }}
       />
       <span
@@ -262,7 +265,7 @@ export function FunnelClient({
   }
 
   return (
-    <div>
+    <div style={fit ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
       {card}
       {telegramUrl && <TelegramButton href={telegramUrl} label={telegramLabel || "Telegram"} preview={preview} />}
       {asked && env === "ios-app" && (

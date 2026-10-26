@@ -17,6 +17,7 @@ import {
 } from "@/components/pipeline/analytics/sections";
 import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
 import { AccountBoard, type AccountTileData } from "@/components/pipeline/account-board";
+import { berlinDay, type Posting } from "@/components/pipeline/posting-calendar";
 
 /**
  * Accounts tab: the whole operation summarised, then one tile per account
@@ -51,7 +52,7 @@ export async function AccountsTab({
     supabase
       .from("accounts")
       .select(
-        "id, handle, display_name, platform, status, telegram_thread_id, posts_per_day, manager_username, avatar_path, sort_order, linked_account_id"
+        "id, handle, display_name, platform, status, telegram_thread_id, posts_per_day, trial_reels_per_day, manager_username, avatar_path, sort_order, linked_account_id"
       )
       .eq("persona_id", personaId)
       .order("platform")
@@ -82,6 +83,21 @@ export async function AccountsTab({
     .eq("persona_id", personaId)
     .neq("status", "archived");
   const trialOf = new Map((trialRows ?? []).map((t) => [`${t.account_id}|${t.shortcode}`, t.id]));
+
+  // Every Trial-Maxxing take by its job, and the account it is for: a reel
+  // made from one counts as a trial reel on the posting calendar, archived
+  // trials included — what was posted stays posted.
+  const { data: allTrials } = await supabase.from("trials").select("id, account_id").eq("persona_id", personaId);
+  const trialAccount = new Map((allTrials ?? []).map((t) => [t.id, t.account_id as string | null]));
+  const trialRequestAccount = new Map<string, string | null>();
+  if (trialAccount.size) {
+    const { data: cells } = await supabase
+      .from("trial_cells")
+      .select("trial_id, request_id")
+      .in("trial_id", Array.from(trialAccount.keys()))
+      .not("request_id", "is", null);
+    for (const c of cells ?? []) if (c.request_id) trialRequestAccount.set(c.request_id, trialAccount.get(c.trial_id) ?? null);
+  }
 
   // Who runs each account, by name. Profiles are read with the service
   // key: a VA's own profile row is not visible to every other member.
@@ -237,6 +253,35 @@ export async function AccountsTab({
         };
       });
 
+    // Day by day, what went up: the scraped reels by the day they were
+    // posted, trial takes apart. A trial reel can be posted as an Instagram
+    // trial, which never shows on the profile, so a take marked posted in
+    // the app counts on its day even when the scrape never sees it.
+    const days: Posting["days"] = {};
+    const bump = (iso: string, kind: "r" | "t") => {
+      const k = berlinDay(iso);
+      (days[k] ??= { r: 0, t: 0 })[kind]++;
+    };
+    const trialSeen = new Set<string>();
+    let since: string | null = null;
+    latestPerReel.forEach((r) => {
+      if (!r.posted_at) return;
+      const k = berlinDay(r.posted_at);
+      if (!since || k < since) since = k;
+      if (r.request_id && trialRequestAccount.has(r.request_id)) {
+        trialSeen.add(r.request_id);
+        bump(r.posted_at, "t");
+      } else bump(r.posted_at, "r");
+    });
+    for (const s of slots ?? []) {
+      if (!s.request_id || trialSeen.has(s.request_id) || !trialRequestAccount.has(s.request_id)) continue;
+      if ((s.account_id ?? trialRequestAccount.get(s.request_id)) !== a.id) continue;
+      const at = s.posted_at ?? s.scheduled_for;
+      if (!at) continue;
+      trialSeen.add(s.request_id);
+      bump(at, "t");
+    }
+
     const weekAgo = now - 7 * DAY;
     const inWeek = (t: (typeof tiles)[number]) => t.postedAt != null && new Date(t.postedAt).getTime() >= weekAgo;
     const isHit = (t: (typeof tiles)[number]) => t.lift != null && t.lift >= 5;
@@ -256,6 +301,7 @@ export async function AccountsTab({
       hitsTotal: tiles.filter(isHit).length,
       goodWeek: tiles.filter((t) => isGood(t) && inWeek(t)).length,
       goodTotal: tiles.filter(isGood).length,
+      posting: { since, days } as Posting,
       profileUrl: /^https?:\/\//i.test(handle)
         ? handle
         : a.platform === "instagram"
@@ -305,6 +351,8 @@ export async function AccountsTab({
       manager: r.a.manager_username,
       managerName: r.a.manager_username ? nameOf.get(r.a.manager_username.replace(/^@/, "").toLowerCase()) ?? null : null,
       perDay: Number(r.a.posts_per_day ?? 0),
+      trialPerDay: Number(r.a.trial_reels_per_day ?? 0),
+      posting: r.posting,
       followers: r.latestFollowers,
       followerDelta: r.followerDelta,
       views: r.views,
