@@ -79,12 +79,13 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
 
   const view = useMemo(() => {
     if (mode === "week") {
-      const start = addDays(mondayOf(today), offset * 7);
+      // The seven days up to today, so a Monday does not open on an empty week.
+      const start = addDays(today, offset * 7 - 6);
       const keys = Array.from({ length: 7 }, (_, i) => addDays(start, i));
       const end = keys[6];
       const label =
         offset === 0
-          ? "This week"
+          ? "Last 7 days"
           : `${fmt(start, { day: "numeric", month: "short" })} – ${fmt(end, { day: "numeric", month: "short" })}`;
       return { cells: keys.map((k) => ({ key: k, inMonth: true })), label };
     }
@@ -161,7 +162,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
       </div>
 
       <div className="mt-3 grid grid-cols-7 gap-1.5">
-        {WEEKDAYS.map((w) => (
+        {(mode === "week" ? view.cells.map((c) => fmt(c.key, { weekday: "short" })) : WEEKDAYS).map((w) => (
           <span key={w} className="text-center text-[10px] text-muted-foreground">
             {w}
           </span>
@@ -191,7 +192,9 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
               <span className="absolute left-1.5 top-1 text-[9px] tabular-nums opacity-70">{Number(key.slice(8))}</span>
               {known ? (
                 <>
-                  <span className={`font-bold tabular-nums leading-none ${mode === "week" ? "text-2xl" : "text-lg"}`}>{d.r}</span>
+                  <span className={`font-bold tabular-nums leading-none ${mode === "week" ? "text-2xl" : "text-lg"}`}>
+                    {tone === "pending" && d.r + d.t === 0 ? "–" : d.r}
+                  </span>
                   {trials && (
                     <span className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium tabular-nums opacity-90">
                       <FlaskConical className="h-2.5 w-2.5" />
