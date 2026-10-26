@@ -17,7 +17,8 @@ import {
 } from "@/components/pipeline/analytics/sections";
 import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
 import { AccountBoard, type AccountTileData } from "@/components/pipeline/account-board";
-import { berlinDay, type Posting } from "@/components/pipeline/posting-calendar";
+import type { Posting } from "@/components/pipeline/posting-calendar";
+import { berlinDay } from "@/lib/berlin-day";
 
 /**
  * Accounts tab: the whole operation summarised, then one tile per account

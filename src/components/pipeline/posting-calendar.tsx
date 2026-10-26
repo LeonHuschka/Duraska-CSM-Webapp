@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, FlaskConical } from "lucide-react";
+import { berlinDay } from "@/lib/berlin-day";
 
 /**
  * What an account posted, day by day, against what it should: regular
@@ -22,8 +23,6 @@ export type Need = { r: number; t: number };
 type Tone = "green" | "yellow" | "red" | "plain" | "pending" | "none";
 
 const DAY = 86_400_000;
-const berlin = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
-export const berlinDay = (d: Date | string) => berlin.format(typeof d === "string" ? new Date(d) : d);
 
 // Plain calendar arithmetic on "YYYY-MM-DD", in UTC so no hour ever shifts a day.
 const toTime = (k: string) => Date.parse(`${k}T00:00:00Z`);

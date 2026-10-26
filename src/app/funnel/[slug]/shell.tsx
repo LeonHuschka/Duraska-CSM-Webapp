@@ -130,7 +130,7 @@ export function FunnelShell({
                     flex: "0 0 36%",
                     minHeight: 170,
                     maxHeight: 480,
-                    background: "#111",
+                    background: "#000",
                   }
                 : {
                     position: "relative",
