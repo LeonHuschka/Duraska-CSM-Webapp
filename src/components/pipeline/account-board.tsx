@@ -43,7 +43,11 @@ import {
 } from "@/components/pipeline/actions";
 import { createTrial } from "@/app/(app)/trials/actions";
 import { useWidth } from "@/components/pipeline/analytics/use-width";
-import { PostingCalendar, PostingStrip, type Posting } from "@/components/pipeline/posting-calendar";
+import {
+  PostingCalendar,
+  PostingStrip,
+  type Posting,
+} from "@/components/pipeline/posting-calendar";
 
 export type ReelTileData = {
   key: string;
@@ -626,7 +630,12 @@ function AccountTile({
         </span>
       </div>
 
-      {!a.disabled && <PostingStrip posting={a.posting} need={{ r: a.perDay, t: a.trialPerDay }} />}
+      {!a.disabled && (
+        <PostingStrip
+          posting={a.posting}
+          need={{ r: a.perDay, t: a.trialPerDay }}
+        />
+      )}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
         {a.disabled ? (
@@ -751,7 +760,15 @@ function AccountPanel({
   const [f, setF] = useState(initial);
   useEffect(
     () => setF(initial),
-    [a.id, a.displayName, a.handle, a.manager, a.perDay, a.trialPerDay, a.linkedId],
+    [
+      a.id,
+      a.displayName,
+      a.handle,
+      a.manager,
+      a.perDay,
+      a.trialPerDay,
+      a.linkedId,
+    ],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
   const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
@@ -948,27 +965,40 @@ function AccountPanel({
         </div>
       )}
 
-      <PostingCalendar posting={a.posting} need={{ r: a.perDay, t: a.trialPerDay }} />
+      {/* What went up, day by day, left of the reels themselves. */}
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
+        <PostingCalendar
+          posting={a.posting}
+          need={{ r: a.perDay, t: a.trialPerDay }}
+        />
 
-      <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        Reels{" "}
-        {a.reels.length > 0 && (
-          <span className="tabular-nums">· {a.reels.length}</span>
-        )}
-      </p>
-      {a.reels.length === 0 ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {a.lastSeen
-            ? "No reels on this account yet. A private account shows followers only."
-            : "Not read yet — the first read runs right after an account is added, then every morning."}
-        </p>
-      ) : (
-        <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-2">
-          {a.reels.map((r) => (
-            <ReelTile key={r.key} r={r} accountId={a.id} canEdit={canEdit} />
-          ))}
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Reels{" "}
+            {a.reels.length > 0 && (
+              <span className="tabular-nums">· {a.reels.length}</span>
+            )}
+          </p>
+          {a.reels.length === 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {a.lastSeen
+                ? "No reels on this account yet. A private account shows followers only."
+                : "Not read yet — the first read runs right after an account is added, then every morning."}
+            </p>
+          ) : (
+            <div className="-mx-1 mt-2 flex gap-3 overflow-x-auto px-1 pb-2">
+              {a.reels.map((r) => (
+                <ReelTile
+                  key={r.key}
+                  r={r}
+                  accountId={a.id}
+                  canEdit={canEdit}
+                />
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

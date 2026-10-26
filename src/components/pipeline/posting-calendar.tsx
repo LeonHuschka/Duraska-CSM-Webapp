@@ -112,10 +112,10 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
   );
 
   return (
-    <div className="mt-4 rounded-xl border border-border/40 bg-background/40 p-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="w-full shrink-0 rounded-xl border border-border/40 bg-background/40 p-2.5 sm:w-60">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Posting</p>
-        <div className="ml-2 inline-flex rounded-md border border-border/50 p-0.5 text-[11px]">
+        <div className="inline-flex rounded-md border border-border/50 p-0.5 text-[10px]">
           {(["week", "month"] as const).map((m) => (
             <button
               key={m}
@@ -124,7 +124,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
                 setMode(m);
                 setOffset(0);
               }}
-              className={`rounded px-2 py-0.5 capitalize transition-colors ${
+              className={`rounded px-1.5 py-px capitalize transition-colors ${
                 mode === m ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -132,39 +132,34 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setOffset((o) => o - 1)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Earlier"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setOffset(0)}
-            className="min-w-[7.5rem] text-center text-xs font-medium tabular-nums"
-            title="Back to now"
-          >
-            {view.label}
-          </button>
-          <button
-            type="button"
-            onClick={() => setOffset((o) => Math.min(0, o + 1))}
-            disabled={offset >= 0}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-            aria-label="Later"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setOffset((o) => o - 1)}
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Earlier"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" onClick={() => setOffset(0)} className="text-[11px] font-medium tabular-nums" title="Back to now">
+          {view.label}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOffset((o) => Math.min(0, o + 1))}
+          disabled={offset >= 0}
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+          aria-label="Later"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-7 gap-1.5">
-        {(mode === "week" ? view.cells.map((c) => fmt(c.key, { weekday: "short" })) : WEEKDAYS).map((w) => (
-          <span key={w} className="text-center text-[10px] text-muted-foreground">
-            {w}
+      <div className="mt-1.5 grid grid-cols-7 gap-1">
+        {(mode === "week" ? view.cells.map((c) => fmt(c.key, { weekday: "short" })) : WEEKDAYS).map((w, i) => (
+          <span key={i} className="text-center text-[9px] text-muted-foreground">
+            {w.slice(0, 2)}
           </span>
         ))}
         {view.cells.map(({ key, inMonth }) => {
@@ -185,19 +180,19 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
                       isToday ? " — today is read tomorrow morning" : ""
                     }`
               }
-              className={`relative flex flex-col items-center justify-center rounded-lg border ${TONE[tone]} ${
-                mode === "week" ? "h-20" : "h-14"
+              className={`relative flex flex-col items-center justify-end rounded-md border pb-0.5 ${TONE[tone]} ${
+                mode === "week" ? "h-11" : "h-9"
               } ${isToday ? "ring-1 ring-foreground/50" : ""}`}
             >
-              <span className="absolute left-1.5 top-1 text-[9px] tabular-nums opacity-70">{Number(key.slice(8))}</span>
+              <span className="absolute left-1 top-0.5 text-[7px] leading-none tabular-nums opacity-60">{Number(key.slice(8))}</span>
               {known ? (
                 <>
-                  <span className={`font-bold tabular-nums leading-none ${mode === "week" ? "text-2xl" : "text-lg"}`}>
+                  <span className={`font-bold tabular-nums leading-none ${mode === "week" ? "text-base" : "text-[13px]"}`}>
                     {tone === "pending" && d.r + d.t === 0 ? "–" : d.r}
                   </span>
                   {trials && (
-                    <span className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium tabular-nums opacity-90">
-                      <FlaskConical className="h-2.5 w-2.5" />
+                    <span className="inline-flex items-center text-[8px] font-medium leading-none tabular-nums opacity-90">
+                      <FlaskConical className="h-2 w-2" />
                       {d.t}
                     </span>
                   )}
@@ -208,40 +203,40 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-        {need.r + need.t > 0 && counted.length > 0 && (
-          <span className="text-foreground">
-            <b className="tabular-nums">{sum.full}</b> of {counted.length} days complete ·{" "}
-            <span className="tabular-nums">
-              {sum.r}/{need.r * counted.length}
-            </span>{" "}
-            reels
-            {trials && (
-              <>
-                {" "}
-                ·{" "}
-                <span className="tabular-nums">
-                  {sum.t}/{need.t * counted.length}
-                </span>{" "}
-                trial
-              </>
-            )}
+      {need.r + need.t > 0 && counted.length > 0 ? (
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          <b className="tabular-nums text-foreground">
+            {sum.full}/{counted.length}
+          </b>{" "}
+          days ·{" "}
+          <span className="tabular-nums text-foreground">
+            {sum.r}/{need.r * counted.length}
+          </span>{" "}
+          reels
+          {trials && (
+            <>
+              {" "}
+              ·{" "}
+              <span className="tabular-nums text-foreground">
+                {sum.t}/{need.t * counted.length}
+              </span>{" "}
+              trial
+            </>
+          )}
+        </p>
+      ) : need.r + need.t === 0 ? (
+        <p className="mt-2 text-[10px] text-muted-foreground">Set reels a day to colour the days.</p>
+      ) : null}
+      <p className="mt-1 flex items-center gap-2.5 text-[10px] text-muted-foreground">
+        <Legend tone="green" label="all" />
+        <Legend tone="yellow" label="some" />
+        <Legend tone="red" label="none" />
+        {trials && (
+          <span className="inline-flex items-center gap-0.5">
+            <FlaskConical className="h-2.5 w-2.5" /> trial
           </span>
         )}
-        <span className="ml-auto flex items-center gap-3">
-          <Legend tone="green" label="all posted" />
-          <Legend tone="yellow" label="some" />
-          <Legend tone="red" label="none" />
-          {trials && (
-            <span className="inline-flex items-center gap-1">
-              <FlaskConical className="h-3 w-3" /> trial reels
-            </span>
-          )}
-        </span>
-      </div>
-      {need.r + need.t === 0 && (
-        <p className="mt-2 text-[11px] text-muted-foreground">Set reels a day above to colour the days.</p>
-      )}
+      </p>
     </div>
   );
 }
