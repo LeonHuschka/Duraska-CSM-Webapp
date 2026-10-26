@@ -527,6 +527,9 @@ async function readFacebook(all: Account[], perPage: number): Promise<AccountRea
       includeVideoUrls: false,
       includeAudio: false,
       includeSubtitles: false,
+      // A page with nothing to read still answers, with its reason — so
+      // "no reels yet" is told apart from "could not read".
+      includeUnavailableRows: true,
     },
     { retry: true }
   );
@@ -543,8 +546,17 @@ async function readFacebook(all: Account[], perPage: number): Promise<AccountRea
   const out = new Map<string, AccountReading>();
   for (const r of run.rows) {
     const a = find(r);
+    if (!a) continue;
+    // A new page with no reels yet is an answer, not a failure: it does not
+    // go the dear way below, which would charge five cents to say the same.
+    if (r.status === "NO_REELS") {
+      if (!out.has(a.id)) {
+        out.set(a.id, { account: a, followers: null, follows: null, postsCount: null, posts: [], note: "no reels yet" });
+      }
+      continue;
+    }
     const shortcode = str(r.postId) ?? str(r.reelId);
-    if (!a || !shortcode || (r.status && r.status !== "SUCCESS")) continue;
+    if (!shortcode || (r.status && r.status !== "SUCCESS")) continue;
     const reading = out.get(a.id) ?? {
       account: a,
       followers: null,
