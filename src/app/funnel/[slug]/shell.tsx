@@ -31,7 +31,6 @@ export function FunnelShell({
   showBio = true,
   telegram = null,
   preview = false,
-  fit = false,
   children,
 }: {
   page: ShellPage;
@@ -50,56 +49,9 @@ export function FunnelShell({
   telegram?: ShellTelegram;
   /** In the editor: drawn, never acting. */
   preview?: boolean;
-  /**
-   * Page 2: the head and the page's own part share exactly one screen, so
-   * the card and both buttons are in view without scrolling. The header
-   * picture gives up height for it; the footer waits below.
-   */
-  fit?: boolean;
   children: React.ReactNode;
 }) {
   const nf = new Intl.NumberFormat("en-US");
-  const foot = (
-    <>
-      {/* Nothing a person can see or tap; only a crawler follows it. */}
-      <a
-        href={link ? `${base}/c?s=${encodeURIComponent(link)}` : `${base}/c`}
-        aria-hidden="true"
-        tabIndex={-1}
-        rel="nofollow"
-        style={{
-          position: "absolute",
-          left: -9999,
-          top: -9999,
-          width: 1,
-          height: 1,
-          opacity: 0,
-        }}
-      >
-        {" "}
-      </a>
-
-      <p
-        style={{
-          margin: "28px 0 0",
-          fontSize: 11,
-          color: "rgba(255,255,255,.55)",
-        }}
-      >
-        <a href={`${base}/privacy`} style={{ color: "inherit", textDecoration: "underline" }}>
-          Privacy Policy
-        </a>
-        <span style={{ margin: "0 6px" }}>|</span>
-        <a href={`${base}/privacy`} style={{ color: "inherit", textDecoration: "underline" }}>
-          Terms
-        </a>
-        <span style={{ margin: "0 6px" }}>|</span>
-        <a href={`${base}/report`} style={{ color: "inherit", textDecoration: "underline" }}>
-          Report
-        </a>
-      </p>
-    </>
-  );
   return (
     <main
       lang={lang}
@@ -112,155 +64,106 @@ export function FunnelShell({
         fontFamily: "Inter, ui-sans-serif, -apple-system, system-ui, Segoe UI, Roboto, sans-serif",
       }}
     >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 480,
-          minHeight: fill,
-          background: "#000",
-          position: "relative",
-        }}
-      >
-        <div style={fit ? { height: fill, display: "flex", flexDirection: "column" } : undefined}>
+      <div style={{ width: "100%", maxWidth: 480, minHeight: fill, background: "#000", position: "relative" }}>
+        <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#111" }}>
+          {coverSrc && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={coverSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          )}
           <div
-            style={
-              fit
-                ? {
-                    position: "relative",
-                    flex: "0 0 36%",
-                    minHeight: 170,
-                    maxHeight: 480,
-                    background: "#000",
-                  }
-                : {
-                    position: "relative",
-                    aspectRatio: "1 / 1",
-                    background: "#111",
-                  }
-            }
-          >
-            {coverSrc && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={coverSrc}
-                alt=""
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  objectPosition: fit ? "center 30%" : undefined,
-                  display: "block",
-                }}
-              />
-            )}
-            <div
+            style={{
+              position: "absolute",
+              inset: "auto 0 0 0",
+              height: "55%",
+              background: "linear-gradient(to top, #000 8%, rgba(0,0,0,.75) 45%, transparent)",
+            }}
+          />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 14, textAlign: "center" }}>
+            <h1
               style={{
-                position: "absolute",
-                inset: "auto 0 0 0",
-                height: "55%",
-                background: "linear-gradient(to top, #000 8%, rgba(0,0,0,.75) 45%, transparent)",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 14,
-                textAlign: "center",
+                margin: 0,
+                fontSize: 28,
+                fontWeight: 800,
+                letterSpacing: "-0.02em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
               }}
             >
-              <h1
-                style={{
-                  margin: 0,
-                  fontSize: 28,
-                  fontWeight: 800,
-                  letterSpacing: "-0.02em",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                {page.display_name}
-                {page.verified && <Badge />}
-              </h1>
-              {page.handle && (
-                <p
-                  style={{
-                    margin: "2px 0 0",
-                    fontSize: 13,
-                    color: "rgba(255,255,255,.65)",
-                  }}
-                >
-                  @{page.handle.replace(/^@/, "")}
-                </p>
-              )}
-              {(page.instagram_url || telegram) && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: "flex",
-                    justifyContent: "center",
-                    gap: 10,
-                  }}
-                >
-                  {page.instagram_url && (
-                    <a
-                      href={page.instagram_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="Instagram"
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 999,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "linear-gradient(45deg,#f9ce34,#ee2a7b,#6228d7)",
-                      }}
-                    >
-                      <InstagramGlyph />
-                    </a>
-                  )}
-                  {telegram &&
-                    ("href" in telegram ? (
-                      <TelegramIcon href={telegram.href} preview={preview} />
-                    ) : (
-                      <TelegramIcon base={telegram.base} slug={telegram.slug} preview={preview} />
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div
-            style={
-              fit
-                ? {
-                    flex: "1 1 auto",
-                    minHeight: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    padding: "0 12px 12px",
-                    textAlign: "center",
-                  }
-                : { padding: "12px 12px 28px", textAlign: "center" }
-            }
-          >
-            {stat === "followers" && page.show_followers && followers != null && (
-              <p style={{ margin: 0, fontSize: 15 }}>
-                <b>{nf.format(followers)}</b> <span style={{ color: "rgba(255,255,255,.8)" }}>Total Followers</span>
-              </p>
+              {page.display_name}
+              {page.verified && <Badge />}
+            </h1>
+            {page.handle && (
+              <p style={{ margin: "2px 0 0", fontSize: 13, color: "rgba(255,255,255,.65)" }}>@{page.handle.replace(/^@/, "")}</p>
             )}
-            {stat === "visitors" && <VisitorsToday initial={visitorsToday()} />}
-            {showBio && page.bio_line && <p style={{ margin: "14px 0 0", fontSize: 14 }}>{page.bio_line}</p>}
-
-            {children}
-            {!fit && foot}
+            {(page.instagram_url || telegram) && (
+              <div style={{ marginTop: 10, display: "flex", justifyContent: "center", gap: 10 }}>
+                {page.instagram_url && (
+                <a
+                  href={page.instagram_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Instagram"
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 999,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "linear-gradient(45deg,#f9ce34,#ee2a7b,#6228d7)",
+                  }}
+                >
+                  <InstagramGlyph />
+                </a>
+                )}
+                {telegram &&
+                  ("href" in telegram ? (
+                    <TelegramIcon href={telegram.href} preview={preview} />
+                  ) : (
+                    <TelegramIcon base={telegram.base} slug={telegram.slug} preview={preview} />
+                  ))}
+              </div>
+            )}
           </div>
         </div>
-        {fit && <div style={{ padding: "0 12px 28px", textAlign: "center" }}>{foot}</div>}
+
+        <div style={{ padding: "12px 12px 28px", textAlign: "center" }}>
+          {stat === "followers" && page.show_followers && followers != null && (
+            <p style={{ margin: 0, fontSize: 15 }}>
+              <b>{nf.format(followers)}</b> <span style={{ color: "rgba(255,255,255,.8)" }}>Total Followers</span>
+            </p>
+          )}
+          {stat === "visitors" && <VisitorsToday initial={visitorsToday()} />}
+          {showBio && page.bio_line && <p style={{ margin: "14px 0 0", fontSize: 14 }}>{page.bio_line}</p>}
+
+          {children}
+
+          {/* Nothing a person can see or tap; only a crawler follows it. */}
+          <a
+            href={link ? `${base}/c?s=${encodeURIComponent(link)}` : `${base}/c`}
+            aria-hidden="true"
+            tabIndex={-1}
+            rel="nofollow"
+            style={{ position: "absolute", left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}
+          >
+            {" "}
+          </a>
+
+          <p style={{ margin: "28px 0 0", fontSize: 11, color: "rgba(255,255,255,.55)" }}>
+            <a href={`${base}/privacy`} style={{ color: "inherit", textDecoration: "underline" }}>
+              Privacy Policy
+            </a>
+            <span style={{ margin: "0 6px" }}>|</span>
+            <a href={`${base}/privacy`} style={{ color: "inherit", textDecoration: "underline" }}>
+              Terms
+            </a>
+            <span style={{ margin: "0 6px" }}>|</span>
+            <a href={`${base}/report`} style={{ color: "inherit", textDecoration: "underline" }}>
+              Report
+            </a>
+          </p>
+        </div>
       </div>
     </main>
   );

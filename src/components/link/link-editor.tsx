@@ -324,7 +324,7 @@ export function LinkEditor({
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Status pill" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the pulsing green dot. Empty hides it." />
               <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Next to the OnlyFans mark." />
-              <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The second button, under the card." />
+              <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The button over the card." />
             </div>
             <div className="mt-3">
               <Field
@@ -401,7 +401,7 @@ export function LinkEditor({
           </div>
 
           <div className="mx-auto w-[375px] max-w-full overflow-hidden rounded-[44px] border-[10px] border-neutral-900 bg-black shadow-2xl">
-            <div className="h-[700px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
+            <div className="h-[720px] overflow-y-auto overscroll-contain [scrollbar-width:none]">
               {shown === 1 ? (
                 <FunnelShell
                   page={shellPage}
@@ -423,8 +423,7 @@ export function LinkEditor({
                   followers={followers}
                   lang={lang}
                   coverSrc={pics.open_cover ?? pics.cover}
-                  fill="700px"
-                  fit
+                  fill="100%"
                   stat={null}
                   showBio={false}
                   telegram={f.telegram_url ? { href: "#" } : null}
@@ -443,7 +442,6 @@ export function LinkEditor({
                     telegramUrl={f.telegram_url ? "#" : null}
                     telegramLabel={f.telegram_label}
                     preview
-                    fit
                   />
                 </FunnelShell>
               )}

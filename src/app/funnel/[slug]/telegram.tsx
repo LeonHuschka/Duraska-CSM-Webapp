@@ -62,7 +62,7 @@ export function TelegramIcon({ base, slug, href, preview = false }: { base?: str
   );
 }
 
-/** Page 2's second button, under the card. */
+/** Page 2's button over the card. */
 export function TelegramButton({ href, label, preview = false }: { href: string; label: string; preview?: boolean }) {
   const app = (() => {
     const m = href.match(/t\.me\/([A-Za-z0-9_]+)/);
@@ -80,8 +80,7 @@ export function TelegramButton({ href, label, preview = false }: { href: string;
       // The OnlyFans button's twin — same width, size, colour and shadow —
       // without its breathing and sweeping light.
       style={{
-        margin: "10px 14px 0",
-        flexShrink: 0,
+        margin: "14px 14px 0",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

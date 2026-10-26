@@ -32,7 +32,6 @@ export function FunnelClient({
   telegramUrl = null,
   telegramLabel = "",
   preview = false,
-  fit = false,
 }: {
   base: string;
   /** The address this page was reached through. */
@@ -47,13 +46,11 @@ export function FunnelClient({
   breakout: boolean;
   /** The real page's own address — what the app is asked to open outside. */
   openUrl: string;
-  /** The second button under the card, when the page has a Telegram. */
+  /** The button over the card, when the page has a Telegram. */
   telegramUrl?: string | null;
   telegramLabel?: string;
   /** In the editor: drawn, but never fetches the link or leaves. */
   preview?: boolean;
-  /** The card takes whatever height the screen has left, buttons in view. */
-  fit?: boolean;
 }) {
   const [target, setTarget] = useState<string | null>(null);
   const [env, setEnv] = useState<Env>("browser");
@@ -143,10 +140,10 @@ export function FunnelClient({
       aria-label={label}
       aria-disabled={!target}
       style={{
-        marginTop: fit ? 12 : 14,
+        marginTop: 14,
         display: "block",
         width: "100%",
-        ...(fit ? { flex: "1 1 auto", minHeight: 220 } : { aspectRatio: "16 / 11" }),
+        aspectRatio: "16 / 11",
         position: "relative",
         border: 0,
         padding: 0,
@@ -166,8 +163,8 @@ export function FunnelClient({
         style={{
           position: "absolute",
           inset: "auto 0 0 0",
-          height: fit ? 140 : "45%",
-          background: "linear-gradient(to top, rgba(0,0,0,.8), transparent)",
+          height: "45%",
+          background: "linear-gradient(to top, rgba(0,0,0,.85), transparent)",
         }}
       />
       <span
@@ -265,9 +262,9 @@ export function FunnelClient({
   }
 
   return (
-    <div style={fit ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
-      {card}
+    <div>
       {telegramUrl && <TelegramButton href={telegramUrl} label={telegramLabel || "Telegram"} preview={preview} />}
+      {card}
       {asked && env === "ios-app" && (
         <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(255,255,255,.6)" }}>
           Press and hold the picture, then choose <b>Open Link</b> — or tap <b>···</b> top right and <b>Open in browser</b>
