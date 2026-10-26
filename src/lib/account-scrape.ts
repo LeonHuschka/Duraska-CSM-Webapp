@@ -56,16 +56,28 @@ const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
  */
 const IG_REELS_ACTOR = "data-slayer~instagram-profile-reels";
 
+/**
+ * The reels with plays, since 2026-10-26, and fifty times cheaper than the
+ * one above: $0.05 per thousand reels, every account in one run. Measured
+ * on sarahpricexo against it: the same reels, the same Instagram plays —
+ * without the Facebook plays a cross-posted reel also collects, which the
+ * Facebook page's own reading counts already. The actor above stays as the
+ * fallback for an account this one gives nothing for. It refuses fewer
+ * than ten results per profile.
+ */
+const IG_CHEAP_REELS_ACTOR = "esdrasdw~instagram-reels-scrapy-low-cost";
+
 /** The same maker's by-URL actor, for the reels the Reels tab leaves out. */
 const IG_POST_ACTOR = "data-slayer~instagram-post-details";
-/** A brake: at $0.0015 a reel, sixty is nine cents. */
-const HIDDEN_REELS_MAX = 60;
+/** A brake: at $0.0025 a reel, twenty is five cents. */
+const HIDDEN_REELS_MAX = 20;
 /**
- * The daily window. Eight reels is four days at two a day — the days a
- * reel moves most; one that has left it keeps its last reading. Twelve
- * cost a third more and moved the month past the $5 the plan includes.
+ * The daily window: twelve days at two a day. With the cheap reels actor
+ * that is under a cent for every account together.
  */
-const IG_POSTS_PER_ACCOUNT = 8;
+const IG_POSTS_PER_ACCOUNT = 24;
+/** The dear fallback reads no more than this, at $0.0025 a reel. */
+const IG_FALLBACK_PER_ACCOUNT = 8;
 
 /**
  * A full read takes every reel the account has, not just the newest. Done
@@ -276,15 +288,63 @@ function reelFromProfileRow(r: Row): PostReading | null {
   };
 }
 
-/** Each account's Reels tab, one run per account, side by side. */
+/** One reel from the cheap reels actor. */
+function reelFromScrapyRow(r: Row): PostReading | null {
+  const shortcode = str(r.shortCode);
+  if (!shortcode) return null;
+  // UTC, written without the zone.
+  const ts = str(r.timestamp);
+  const postedAt = ts && !Number.isNaN(Date.parse(`${ts.replace(/Z$/, "")}Z`)) ? new Date(`${ts.replace(/Z$/, "")}Z`).toISOString() : null;
+  return {
+    shortcode,
+    url: str(r.url) ?? `https://www.instagram.com/reel/${shortcode}/`,
+    postedAt,
+    views: num(r.videoPlayCount),
+    likes: num(r.likesCount),
+    comments: num(r.commentsCount),
+    shares: null,
+    caption: str(r.title),
+    thumbnailUrl: str(r.displayUrl),
+  };
+}
+
+/**
+ * Each account's reels: every account in one run of the cheap actor, then
+ * the dear one, one run per account, for any account that came back with
+ * nothing or without plays.
+ */
 async function readInstagramReels(
   accounts: Account[],
   perAccount: number
 ): Promise<Map<string, { posts: PostReading[]; error: string | null }>> {
   const out = new Map<string, { posts: PostReading[]; error: string | null }>();
+  const cheap = await runActor(
+    IG_CHEAP_REELS_ACTOR,
+    {
+      directUrls: accounts.map((a) => `https://www.instagram.com/${igUsername(a.handle)}/`),
+      resultsType: "reels",
+      resultsLimit: Math.max(10, perAccount),
+    },
+    { memoryMb: 512, retry: true }
+  );
+  if (cheap.error) console.error("[scrape] instagram cheap reels:", cheap.error);
+  const byName = new Map(accounts.map((a) => [igUsername(a.handle).toLowerCase(), a]));
+  for (const r of cheap.rows) {
+    const a = byName.get((str(r.ownerUsername) ?? "").toLowerCase());
+    const post = reelFromScrapyRow(r);
+    if (!a || !post) continue;
+    const seen = out.get(a.id) ?? { posts: [], error: null };
+    seen.posts.push(post);
+    out.set(a.id, seen);
+  }
   // Two at a time and small: five at once with the Facebook runs beside
   // them went over the plan's memory and two starts were refused.
-  const queue = [...accounts];
+  const queue = accounts.filter((a) => {
+    const got = out.get(a.id)?.posts ?? [];
+    return got.length === 0 || got.every((p) => p.views == null);
+  });
+  // A full read of a new account takes its whole history either way.
+  if (perAccount <= IG_POSTS_PER_ACCOUNT) perAccount = Math.min(perAccount, IG_FALLBACK_PER_ACCOUNT);
   const lane = async () => {
     while (queue.length) {
       const a = queue.shift()!;
@@ -838,7 +898,7 @@ export async function scrapeAccounts(
   const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =
     ig.length * 0.0026 +
-    ig.length * (0.002 + perAccount * 0.0015) +
+    (ig.length ? 0.0001 + ig.length * perAccount * 0.00005 : 0) +
     fb.length * 0.012 +
     (fb.length ? 0.0005 + (fb.length - viaFeed) * perPage * 0.0003 : 0) +
     (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);
