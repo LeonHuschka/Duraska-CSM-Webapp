@@ -222,7 +222,7 @@ async function handleMessage(req: Request, msg: TgMessage) {
   // message there tells the bot which topic that is — no id to look up.
   const topic = msg.forum_topic_created?.name ?? msg.reply_to_message?.forum_topic_created?.name ?? "";
   if (msg.message_thread_id && /pattern\s*analys/i.test(topic)) {
-    await rememberPatternTopic(msg.chat.id, msg.message_thread_id);
+    await rememberPatternTopic(req, msg.chat.id, msg.message_thread_id);
   }
 
   // A screenshot in an account group → read the stats off it.
@@ -707,8 +707,12 @@ async function handleReaction(r: TgReactionUpdate) {
     .in("id", open);
 }
 
-/** Store the PATTERN ANALYSIS topic, once, and say so in it. */
-async function rememberPatternTopic(chatId: number, threadId: number) {
+/**
+ * Store the PATTERN ANALYSIS topic, once, and say so in it — then run the
+ * past week's analysis straight away, so the topic does not sit empty
+ * until the first Sunday.
+ */
+async function rememberPatternTopic(req: Request, chatId: number, threadId: number) {
   const supabase = createAdminClient();
   const { data: cfg } = await supabase
     .from("telegram_config")
@@ -720,6 +724,8 @@ async function rememberPatternTopic(chatId: number, threadId: number) {
   await sendMessage({
     chat_id: chatId,
     message_thread_id: threadId,
-    text: "✅ Got it — the weekly pattern analysis lands here every Sunday.",
+    text: "✅ Got it — the weekly pattern analysis lands here every Sunday. Here is the past week's, starting now.",
   });
+  const secret = process.env.CRON_SECRET;
+  if (secret) fire(req, "/api/pattern?all=1", secret, "pattern analysis");
 }
