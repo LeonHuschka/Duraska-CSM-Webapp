@@ -403,8 +403,13 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
     runActor(IG_PROFILE_ACTOR, { usernames }, { retry: true }),
     readInstagramReels(accounts, perAccount),
   ]);
-  // The cheap feed actor only for accounts the Reels tab gave nothing for.
-  const missing = accounts.filter((a) => (reelsTab.get(a.id)?.posts.length ?? 0) === 0);
+  // The feed actor only for accounts the reels actors gave nothing for and
+  // whose profile says there is something to read: it charges half a cent
+  // a run, and an account with no posts yet was asking it every morning.
+  const postsOn = new Map(profiles.rows.map((r) => [str(r.username)?.toLowerCase() ?? "", num(r.postsCount)]));
+  const missing = accounts.filter(
+    (a) => (reelsTab.get(a.id)?.posts.length ?? 0) === 0 && (postsOn.get(igUsername(a.handle).toLowerCase()) ?? 1) > 0
+  );
   const posts = missing.length
     ? await runActor(IG_POSTS_ACTOR, {
         usernames: missing.map((a) => igUsername(a.handle)),
@@ -489,7 +494,73 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
   return Array.from(out.values());
 }
 
+/**
+ * Every page's reels and its followers, all pages in one run, since
+ * 2026-10-26: $0.0015 a reel and nothing else to pay for. Checked against
+ * Lyza's and Ian's Reels tabs, the profile-made pages the cheap reels actor
+ * cannot read: the same plays, the same followers. Above a thousand it
+ * gives the plays rounded the way Facebook prints them — 74K for 74,380 —
+ * which was the price of a quarter of the cost. Pages it gives nothing for
+ * go the old way below.
+ */
+const FB_REELS_AND_FOLLOWERS_ACTOR = "coregent~facebook-reels-scraper";
+
 async function readFacebook(accounts: Account[], perPage: number): Promise<AccountReading[]> {
+  if (accounts.length === 0) return [];
+  const run = await runActor(
+    FB_REELS_AND_FOLLOWERS_ACTOR,
+    {
+      startUrls: accounts.map((a) => fbPageUrl(a.handle)),
+      resultsLimit: perPage,
+      includeVideoUrls: false,
+      includeAudio: false,
+      includeSubtitles: false,
+    },
+    { retry: true }
+  );
+  if (run.error) console.error("[scrape] facebook reels and followers:", run.error);
+  const byKey = new Map(accounts.map((a) => [fbKey(fbPageUrl(a.handle)), a]));
+  const find = (r: Row): Account | undefined => {
+    for (const k of ["inputUrl", "creatorUrl"]) {
+      const a = byKey.get(fbKey(str(r[k])));
+      if (a) return a;
+    }
+    const id = str(r.creatorId);
+    return id ? accounts.find((a) => a.handle.includes(id)) : undefined;
+  };
+  const out = new Map<string, AccountReading>();
+  for (const r of run.rows) {
+    const a = find(r);
+    const shortcode = str(r.postId) ?? str(r.reelId);
+    if (!a || !shortcode || (r.status && r.status !== "SUCCESS")) continue;
+    const reading = out.get(a.id) ?? {
+      account: a,
+      followers: null,
+      follows: null,
+      postsCount: null,
+      posts: [],
+      note: null,
+    };
+    reading.followers ??= num(r.creatorFollowersCount);
+    reading.posts.push({
+      shortcode,
+      url: str(r.reelUrl),
+      postedAt: str(r.publishedAt),
+      views: num(r.playsCount),
+      likes: num(r.reactionsCount),
+      comments: num(r.commentsCount),
+      shares: num(r.sharesCount),
+      caption: str(r.caption),
+      thumbnailUrl: usable(str(r.thumbnailUrl)),
+    });
+    out.set(a.id, reading);
+  }
+  const missing = accounts.filter((a) => !out.has(a.id));
+  return [...Array.from(out.values()), ...(await readFacebookDear(missing, perPage))];
+}
+
+/** The way before: followers, the cheap reels actor, the dear feed for what it misses. */
+async function readFacebookDear(accounts: Account[], perPage: number): Promise<AccountReading[]> {
   if (accounts.length === 0) return [];
   const byKey = new Map(accounts.map((a) => [fbKey(fbPageUrl(a.handle)), a]));
   const urls = accounts.map((a) => fbPageUrl(a.handle));
@@ -895,8 +966,7 @@ export async function scrapeAccounts(
   const estimatedUsd =
     ig.length * 0.0026 +
     (ig.length ? 0.0001 + ig.length * perAccount * 0.00099 : 0) +
-    fb.length * 0.012 +
-    (fb.length ? 0.0005 + (fb.length - viaFeed) * perPage * 0.0003 : 0) +
+    fb.length * perPage * 0.0015 +
     (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);
   console.log(
     `[scrape] persona ${personaId}: ${accounts.length} accounts, ${posts} posts, ${matched} matched, ~$${estimatedUsd.toFixed(3)}` +
