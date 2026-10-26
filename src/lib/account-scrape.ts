@@ -57,25 +57,27 @@ const IG_POSTS_ACTOR = "sones~instagram-posts-scraper-lowcost";
 const IG_REELS_ACTOR = "data-slayer~instagram-profile-reels";
 
 /**
- * The reels with plays, since 2026-10-26, and fifty times cheaper than the
- * one above: $0.05 per thousand reels, every account in one run. Measured
- * on sarahpricexo against it: the same reels, the same Instagram plays —
- * without the Facebook plays a cross-posted reel also collects, which the
- * Facebook page's own reading counts already. The actor above stays as the
- * fallback for an account this one gives nothing for. It refuses fewer
- * than ten results per profile.
+ * The reels with plays since 2026-10-26: $0.00099 a reel against the
+ * $0.0025 of the one above, every account in one run. Checked reel by reel
+ * against sarahpricexo's own grid: the same plays the profile shows — the
+ * Facebook plays of a cross-post included — and the reels the Reels tab
+ * hides from logged-out readers too. The actor above stays the fallback
+ * for an account this one gives nothing for.
+ *
+ * Not esdrasdw's actor at $0.00005: it returns Instagram's own plays only,
+ * 1,234 for a reel the grid shows at 2,441.
  */
-const IG_CHEAP_REELS_ACTOR = "esdrasdw~instagram-reels-scrapy-low-cost";
+const IG_CHEAP_REELS_ACTOR = "zaver.api~instagram-reel-scraper";
 
 /** The same maker's by-URL actor, for the reels the Reels tab leaves out. */
 const IG_POST_ACTOR = "data-slayer~instagram-post-details";
 /** A brake: at $0.0025 a reel, twenty is five cents. */
 const HIDDEN_REELS_MAX = 20;
 /**
- * The daily window: twelve days at two a day. With the cheap reels actor
- * that is under a cent for every account together.
+ * The daily window: six days at two a day, the days a reel moves most;
+ * one that has left it keeps its last reading. About 1.2 cents an account.
  */
-const IG_POSTS_PER_ACCOUNT = 24;
+const IG_POSTS_PER_ACCOUNT = 12;
 /** The dear fallback reads no more than this, at $0.0025 a reel. */
 const IG_FALLBACK_PER_ACCOUNT = 8;
 
@@ -288,23 +290,21 @@ function reelFromProfileRow(r: Row): PostReading | null {
   };
 }
 
-/** One reel from the cheap reels actor. */
-function reelFromScrapyRow(r: Row): PostReading | null {
-  const shortcode = str(r.shortCode);
+/** One reel from the cheap reels actor; it writes every number as text. */
+function reelFromCheapRow(r: Row): PostReading | null {
+  const shortcode = str(r.shortcode);
   if (!shortcode) return null;
-  // UTC, written without the zone.
-  const ts = str(r.timestamp);
-  const postedAt = ts && !Number.isNaN(Date.parse(`${ts.replace(/Z$/, "")}Z`)) ? new Date(`${ts.replace(/Z$/, "")}Z`).toISOString() : null;
+  const ts = str(r.taken_at);
   return {
     shortcode,
-    url: str(r.url) ?? `https://www.instagram.com/reel/${shortcode}/`,
-    postedAt,
-    views: num(r.videoPlayCount),
-    likes: num(r.likesCount),
-    comments: num(r.commentsCount),
+    url: `https://www.instagram.com/reel/${shortcode}/`,
+    postedAt: ts && !Number.isNaN(Date.parse(ts)) ? new Date(ts).toISOString() : null,
+    views: num(r.views),
+    likes: num(r.likes),
+    comments: num(r.comments_count),
     shares: null,
-    caption: str(r.title),
-    thumbnailUrl: str(r.displayUrl),
+    caption: str(r.caption),
+    thumbnailUrl: str(r.thumbnail_url),
   };
 }
 
@@ -320,18 +320,14 @@ async function readInstagramReels(
   const out = new Map<string, { posts: PostReading[]; error: string | null }>();
   const cheap = await runActor(
     IG_CHEAP_REELS_ACTOR,
-    {
-      directUrls: accounts.map((a) => `https://www.instagram.com/${igUsername(a.handle)}/`),
-      resultsType: "reels",
-      resultsLimit: Math.max(10, perAccount),
-    },
+    { directUrls: accounts.map((a) => igUsername(a.handle)), resultsLimit: perAccount },
     { memoryMb: 512, retry: true }
   );
   if (cheap.error) console.error("[scrape] instagram cheap reels:", cheap.error);
   const byName = new Map(accounts.map((a) => [igUsername(a.handle).toLowerCase(), a]));
   for (const r of cheap.rows) {
-    const a = byName.get((str(r.ownerUsername) ?? "").toLowerCase());
-    const post = reelFromScrapyRow(r);
+    const a = byName.get((str(r.username) ?? str(r.source) ?? "").toLowerCase());
+    const post = reelFromCheapRow(r);
     if (!a || !post) continue;
     const seen = out.get(a.id) ?? { posts: [], error: null };
     seen.posts.push(post);
@@ -898,7 +894,7 @@ export async function scrapeAccounts(
   const viaFeed = readings.filter((r) => r.viaFeed).length;
   const estimatedUsd =
     ig.length * 0.0026 +
-    (ig.length ? 0.0001 + ig.length * perAccount * 0.00005 : 0) +
+    (ig.length ? 0.0001 + ig.length * perAccount * 0.00099 : 0) +
     fb.length * 0.012 +
     (fb.length ? 0.0005 + (fb.length - viaFeed) * perPage * 0.0003 : 0) +
     (viaFeed ? 0.001 + viaFeed * perPage * 0.005 : 0);
