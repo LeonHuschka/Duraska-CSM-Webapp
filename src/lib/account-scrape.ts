@@ -446,10 +446,9 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
     reading.follows = num(r.followsCount);
     reading.postsCount = num(r.postsCount);
     reading.avatarUrl = str(r.profilePicUrlHD) ?? str(r.profilePicUrl);
-    reading.extraCodes = (Array.isArray(r.latestPosts) ? (r.latestPosts as Row[]) : [])
-      .filter((p) => p.type === "Video" || p.productType === "clips")
-      .map((p) => str(p.shortCode))
-      .filter((c): c is string => !!c);
+    // The profile's own list of latest posts is not asked about one by one
+    // any more: zaver's reels come with the ones the Reels tab hides, and
+    // the list reached back to reels a week and more old at $0.0028 each.
     if (r.private === true) reading.note = "private — posts not visible";
     else if (reading.followers == null && str(r.id)) hidden.add(a.id);
   }
@@ -505,8 +504,21 @@ async function readInstagram(accounts: Account[], perAccount: number): Promise<A
  */
 const FB_REELS_AND_FOLLOWERS_ACTOR = "coregent~facebook-reels-scraper";
 
-async function readFacebook(accounts: Account[], perPage: number): Promise<AccountReading[]> {
-  if (accounts.length === 0) return [];
+async function readFacebook(all: Account[], perPage: number): Promise<AccountReading[]> {
+  if (all.length === 0) return [];
+  // A share link (facebook.com/share/…) is not the page's address; no actor
+  // reads it, and the dear way below charged five cents a day for nothing.
+  const shareLink = (a: Account) => /facebook\.com\/share\//i.test(a.handle);
+  const skipped: AccountReading[] = all.filter(shareLink).map((a) => ({
+    account: a,
+    followers: null,
+    follows: null,
+    postsCount: null,
+    posts: [],
+    note: "a share link, not the page's address — put the page's own URL in",
+  }));
+  const accounts = all.filter((a) => !shareLink(a));
+  if (accounts.length === 0) return skipped;
   const run = await runActor(
     FB_REELS_AND_FOLLOWERS_ACTOR,
     {
@@ -556,7 +568,7 @@ async function readFacebook(accounts: Account[], perPage: number): Promise<Accou
     out.set(a.id, reading);
   }
   const missing = accounts.filter((a) => !out.has(a.id));
-  return [...Array.from(out.values()), ...(await readFacebookDear(missing, perPage))];
+  return [...Array.from(out.values()), ...(await readFacebookDear(missing, perPage)), ...skipped];
 }
 
 /** The way before: followers, the cheap reels actor, the dear feed for what it misses. */
