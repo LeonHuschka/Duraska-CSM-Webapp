@@ -302,7 +302,7 @@ export async function AccountsTab({
       hitsTotal: tiles.filter(isHit).length,
       goodWeek: tiles.filter((t) => isGood(t) && inWeek(t)).length,
       goodTotal: tiles.filter(isGood).length,
-      posting: { since, days } as Posting,
+      posting: { since, days, until: lastSeen ? berlinDay(lastSeen) : null } as Posting,
       profileUrl: /^https?:\/\//i.test(handle)
         ? handle
         : a.platform === "instagram"

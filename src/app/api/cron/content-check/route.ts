@@ -5,6 +5,7 @@ import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
 import { announceWinners } from "@/lib/winners";
+import { fetchInspoVideo, retryableVideoLinks } from "@/lib/inspo-video";
 import {
   checkInstagramAlive,
   deleteMessage,
@@ -92,6 +93,18 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await announceWinners(supabase, cfg.persona_id)] as const)
   );
   summary.winners = Object.fromEntries(winners);
+  // Inspo reels that could not be fetched when they were posted — most
+  // often Apify out of its monthly budget — get another go every morning.
+  const videos = await Promise.all(
+    (configs ?? []).map(async (cfg) => {
+      const results = [];
+      for (const id of await retryableVideoLinks(supabase, cfg.persona_id)) {
+        results.push(await fetchInspoVideo(supabase, id, null, true));
+      }
+      return [cfg.persona_id, results] as const;
+    })
+  );
+  summary.videos = Object.fromEntries(videos);
   if (only === "scrape") return NextResponse.json({ ok: true, summary });
 
   for (const cfg of configs ?? []) {

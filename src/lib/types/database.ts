@@ -715,6 +715,7 @@ export type Database = {
           video_fetched_at: string | null;
           video_error: string | null;
           video_message_id: number | null;
+          note: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -741,6 +742,7 @@ export type Database = {
           video_fetched_at?: string | null;
           video_error?: string | null;
           video_message_id?: number | null;
+          note?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -767,6 +769,7 @@ export type Database = {
           video_fetched_at?: string | null;
           video_error?: string | null;
           video_message_id?: number | null;
+          note?: string | null;
           created_at?: string;
           updated_at?: string;
         };

@@ -18,6 +18,11 @@ export type Posting = {
   since: string | null;
   /** "YYYY-MM-DD" → regular and trial reels posted that day. */
   days: Record<string, DayCount>;
+  /**
+   * The day of the last read. It and every day after are not complete yet —
+   * nothing there counts against anyone until a later read has seen them.
+   */
+  until: string | null;
 };
 export type Need = { r: number; t: number };
 type Tone = "green" | "yellow" | "red" | "plain" | "pending" | "none";
@@ -30,11 +35,12 @@ const toKey = (t: number) => new Date(t).toISOString().slice(0, 10);
 const addDays = (k: string, n: number) => toKey(toTime(k) + n * DAY);
 const mondayOf = (k: string) => addDays(k, -((new Date(toTime(k)).getUTCDay() + 6) % 7));
 
-function toneOf(key: string, today: string, since: string | null, d: DayCount, need: Need): Tone {
+function toneOf(key: string, today: string, posting: Posting, d: DayCount, need: Need): Tone {
+  const { since, until } = posting;
   if (key > today || !since || key < since) return "none";
   if (need.r + need.t === 0) return d.r + d.t > 0 ? "plain" : "none";
   if (d.r >= need.r && d.t >= need.t) return "green";
-  if (key === today) return "pending";
+  if (key === today || !until || key >= until) return "pending";
   return d.r + d.t === 0 ? "red" : "yellow";
 }
 
@@ -65,7 +71,7 @@ export function PostingStrip({ posting, need }: { posting: Posting; need: Need }
     <div className="mt-3 flex gap-1" title="The last 7 days: green all posted, yellow some, red none">
       {keys.map((k) => {
         const d = posting.days[k] ?? { r: 0, t: 0 };
-        return <span key={k} className={`h-1.5 flex-1 rounded-full ${DOT[toneOf(k, today, posting.since, d, need)]}`} />;
+        return <span key={k} className={`h-1.5 flex-1 rounded-full ${DOT[toneOf(k, today, posting, d, need)]}`} />;
       })}
     </div>
   );
@@ -102,7 +108,9 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
 
   // What the shown days add up to — only the days that are over and that
   // we can speak for.
-  const counted = view.cells.filter((c) => c.inMonth && c.key < today && posting.since && c.key >= posting.since);
+  const counted = view.cells.filter(
+    (c) => c.inMonth && c.key < today && posting.since && c.key >= posting.since && posting.until && c.key < posting.until,
+  );
   const sum = counted.reduce(
     (a, c) => {
       const d = posting.days[c.key] ?? { r: 0, t: 0 };
@@ -165,7 +173,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
         {view.cells.map(({ key, inMonth }) => {
           if (!inMonth) return <span key={key} />;
           const d = posting.days[key] ?? { r: 0, t: 0 };
-          const tone = toneOf(key, today, posting.since, d, need);
+          const tone = toneOf(key, today, posting, d, need);
           const known = tone !== "none" || (key <= today && posting.since != null && key >= posting.since);
           const isToday = key === today;
           return (
@@ -177,7 +185,7 @@ export function PostingCalendar({ posting, need }: { posting: Posting; need: Nee
                   : `${fmt(key, { weekday: "long", day: "numeric", month: "long" })}: ${d.r} reel${d.r === 1 ? "" : "s"}${
                       trials ? ` · ${d.t} trial` : ""
                     }${need.r + need.t > 0 ? ` (needs ${need.r}${trials ? ` + ${need.t} trial` : ""})` : ""}${
-                      isToday ? " — today is read tomorrow morning" : ""
+                      tone === "pending" ? " — not read yet, the scrape fills it in" : ""
                     }`
               }
               className={`relative flex flex-col items-center justify-end rounded-md border pb-0.5 ${TONE[tone]} ${

@@ -33,16 +33,26 @@ export async function fetchInspoVideo(
   supabase: Db,
   linkId: string,
   /** What the person wrote next to the link, if anything. */
-  note?: string | null
+  note?: string | null,
+  /**
+   * A later try, from the morning run: the original message is the only
+   * place an unstored note lives, so without one it stays.
+   */
+  retry = false
 ): Promise<VideoResult> {
   const { data: link } = await supabase
     .from("content_links")
     .select(
-      "id, persona_id, chat_id, message_thread_id, message_id, url, status, video_path, video_message_id"
+      "id, persona_id, chat_id, message_thread_id, message_id, url, status, video_path, video_message_id, note"
     )
     .eq("id", linkId)
     .maybeSingle();
   if (!link) return { linkId, ok: false, note: "no such link" };
+  // Kept with the link, so a later try still has what the sender wrote.
+  if (note?.trim() && note !== link.note) {
+    await supabase.from("content_links").update({ note }).eq("id", linkId);
+  }
+  const notes = note?.trim() ? note : link.note;
 
   const fail = async (note: string) => {
     await supabase
@@ -105,7 +115,7 @@ export async function fetchInspoVideo(
       message_thread_id: link.message_thread_id,
       video: bytes,
       filename: "inspo.mp4",
-      caption: caption(link.url, note ?? null),
+      caption: caption(link.url, notes ?? null),
       parse_mode: "HTML",
     });
     if (!sent.ok || !sent.result) return fail(`telegram: ${sent.error ?? "no message id"}`);
@@ -114,6 +124,7 @@ export async function fetchInspoVideo(
       .from("content_links")
       .update({ message_id: newId, video_message_id: newId, video_error: null })
       .eq("id", linkId);
+    if (retry && !notes?.trim()) return { linkId, ok: true, note: "posted; original kept, its note was never stored" };
     // The original had nothing the new message does not. Best effort —
     // Telegram refuses to delete what is older than two days.
     const gone = await deleteMessage({ chat_id: link.chat_id, message_id: Number(link.message_id) });
@@ -153,6 +164,25 @@ export async function pendingVideoLinks(
     .limit(opts.limit);
   if (opts.personaId) q = q.eq("persona_id", opts.personaId);
   const { data } = await q;
+  return (data ?? []).map((r) => r.id);
+}
+
+/**
+ * Open links whose reel could not be fetched for a reason that passes — the
+ * resolver out of budget or down, Telegram refusing the upload — from the
+ * last two weeks. A post that is gone, private or not a video stays failed.
+ */
+export async function retryableVideoLinks(supabase: Db, personaId: string, limit = 10): Promise<string[]> {
+  const { data } = await supabase
+    .from("content_links")
+    .select("id")
+    .eq("persona_id", personaId)
+    .eq("status", "open")
+    .is("video_path", null)
+    .or('video_error.like.resolver*,video_error.like.telegram:*,video_error.like."download failed*"')
+    .gte("posted_at", new Date(Date.now() - 14 * 86_400_000).toISOString())
+    .order("posted_at", { ascending: true })
+    .limit(limit);
   return (data ?? []).map((r) => r.id);
 }
 
