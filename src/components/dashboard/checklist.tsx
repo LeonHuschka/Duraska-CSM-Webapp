@@ -140,9 +140,6 @@ export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit
                 }`}
               >
                 {e.text}
-                {!canEdit && e.repeat !== "all" && (
-                  <span className="ml-1.5 text-[10px] text-muted-foreground">{e.repeat}</span>
-                )}
               </span>
             )}
             {canEdit && editing !== e.id && !e.id.startsWith("new-") && (
