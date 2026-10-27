@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { Upload, Loader2, X, Link as LinkIcon, Film, CheckCircle2, Plus, FileText } from "lucide-react";
+import { Upload, Loader2, X, Link as LinkIcon, CheckCircle2, Plus, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -66,6 +66,30 @@ type FileState = {
   status: "pending" | "uploading" | "done" | "error";
   pct: number;
 };
+
+/** What the model sees of a take: its first frame (or the photo). */
+function TakeThumb({ file }: { file: File }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  if (!url) return null;
+  return resolveMime(file).startsWith("image/") ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt="" className="h-full w-full object-cover" />
+  ) : (
+    // #t= makes iOS Safari paint a frame instead of a black box.
+    <video
+      src={`${url}#t=0.1`}
+      muted
+      playsInline
+      preload="metadata"
+      className="pointer-events-none h-full w-full object-cover"
+    />
+  );
+}
 
 /** Small circular progress ring shown per take while it uploads. */
 function ProgressRing({ pct }: { pct: number }) {
@@ -539,29 +563,26 @@ export function UploadView({ personaId }: { personaId: string }) {
                     : "border-border/40 bg-card"
                 }`}
               >
-                {/* Per-take status: ring with % while uploading, check when
-                    done — a single global spinner left her guessing. */}
-                <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+                {/* The take itself, so she knows which one she's marking;
+                    upload status sits on top of it. */}
+                <div className="relative h-16 w-11 shrink-0 overflow-hidden rounded-md bg-muted/50">
+                  <TakeThumb file={f} />
                   {st?.status === "uploading" ? (
-                    <>
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
                       <ProgressRing pct={st.pct} />
-                      <span className="absolute text-[9px] font-semibold tabular-nums">
+                      <span className="absolute text-[9px] font-semibold tabular-nums text-white">
                         {st.pct}
                       </span>
-                    </>
+                    </div>
                   ) : st?.status === "done" ? (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-green-500/15">
-                      <CheckCircle2 className="h-4 w-4 text-green-400" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                      <CheckCircle2 className="h-5 w-5 text-green-400" />
                     </div>
                   ) : st?.status === "error" ? (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-red-500/15">
-                      <X className="h-4 w-4 text-red-400" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+                      <X className="h-5 w-5 text-red-400" />
                     </div>
-                  ) : (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted/50">
-                      <Film className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  )}
+                  ) : null}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium">
@@ -579,7 +600,7 @@ export function UploadView({ personaId }: { personaId: string }) {
                     )}
                   </p>
                   <p className="truncate text-[10px] text-muted-foreground">
-                    {f.name} · {(f.size / (1024 * 1024)).toFixed(1)} MB
+                    {(f.size / (1024 * 1024)).toFixed(1)} MB
                   </p>
                   {f.size > MAX_UPLOAD_BYTES ? (
                     <p className="text-[10px] font-medium text-red-400">
