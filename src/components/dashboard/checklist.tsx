@@ -9,20 +9,42 @@ import {
   addChecklistItem,
   deleteChecklistItem,
   editChecklistItem,
+  setChecklistRepeat,
   toggleChecklistItem,
 } from "@/components/dashboard/checklist-actions";
+import { REPEATS, type RepeatKey } from "@/lib/checklist";
 
-export type ChecklistEntry = { id: string; text: string; done: boolean };
+export type ChecklistEntry = { id: string; text: string; done: boolean; repeat: RepeatKey };
+
+function RepeatSelect({ value, onChange }: { value: RepeatKey; onChange: (r: RepeatKey) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(ev) => onChange(ev.target.value as RepeatKey)}
+      className="h-7 shrink-0 self-center rounded-md border border-border/50 bg-card px-1.5 text-[11px]"
+      aria-label="Repeats"
+    >
+      {REPEATS.map((r) => (
+        <option key={r.key} value={r.key}>
+          {r.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 /**
  * The model's to-do list on her dashboard: boxes she ticks. Owners and
  * managers, looking at her dashboard, write, change and remove entries.
  * Open entries first, in the order they were written; ticked ones below.
+ * A tick holds for the entry's repeat (1d, 7d, 30d or all time), then the
+ * box is open again.
  */
 export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit: boolean }) {
   const router = useRouter();
   const [list, setList] = useState(items);
   const [draft, setDraft] = useState("");
+  const [draftRepeat, setDraftRepeat] = useState<RepeatKey>("1d");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [, start] = useTransition();
@@ -47,8 +69,8 @@ export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit
     const text = draft.trim();
     if (!text) return;
     setDraft("");
-    setList((l) => [...l, { id: `new-${Date.now()}`, text, done: false }]);
-    run(() => addChecklistItem(text));
+    setList((l) => [...l, { id: `new-${Date.now()}`, text, done: false, repeat: draftRepeat }]);
+    run(() => addChecklistItem(text, draftRepeat));
   };
   const save = (id: string) => {
     const text = editText.trim();
@@ -56,6 +78,11 @@ export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit
     if (!text) return;
     setList((l) => l.map((x) => (x.id === id ? { ...x, text } : x)));
     run(() => editChecklistItem(id, text));
+  };
+  const repeat = (id: string, r: RepeatKey) => {
+    const before = list;
+    setList((l) => l.map((x) => (x.id === id ? { ...x, repeat: r } : x)));
+    run(() => setChecklistRepeat(id, r), () => setList(before));
   };
   const remove = (id: string) => {
     const before = list;
@@ -113,10 +140,14 @@ export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit
                 }`}
               >
                 {e.text}
+                {!canEdit && e.repeat !== "all" && (
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">{e.repeat}</span>
+                )}
               </span>
             )}
             {canEdit && editing !== e.id && !e.id.startsWith("new-") && (
-              <span className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100">
+              <span className="flex shrink-0 items-center gap-0.5">
+                <RepeatSelect value={e.repeat} onChange={(r) => repeat(e.id, r)} />
                 <button
                   type="button"
                   onClick={() => {
@@ -161,6 +192,7 @@ export function Checklist({ items, canEdit }: { items: ChecklistEntry[]; canEdit
             className="h-9 text-sm"
             maxLength={300}
           />
+          <RepeatSelect value={draftRepeat} onChange={setDraftRepeat} />
           <button
             type="submit"
             disabled={!draft.trim()}

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { LinksDonut, TrialJobs, WeekVsMust } from "@/components/dashboard/model-home";
 import { Checklist } from "@/components/dashboard/checklist";
 import { listTrials } from "@/lib/trials";
+import { stillDone } from "@/lib/checklist";
 import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 
 // The "Scrape now" action on the accounts tab runs inside this route and
@@ -126,10 +127,17 @@ export default async function DashboardPage({
     // ── Her checklist: managers write it, she ticks it ──
     const { data: checklist } = await supabase
       .from("checklist_items")
-      .select("id, text, done")
+      .select("id, text, done, done_at, repeat")
       .eq("persona_id", personaId)
       .order("position")
       .order("created_at");
+    // A tick holds for the entry's repeat window, then the box is open again.
+    const checklistNow = (checklist ?? []).map((c) => ({
+      id: c.id,
+      text: c.text,
+      repeat: c.repeat,
+      done: stillDone(c.done, c.done_at, c.repeat),
+    }));
 
     return (
       <div className="mx-auto max-w-md space-y-5 pb-6">
@@ -149,7 +157,7 @@ export default async function DashboardPage({
           <p className="mt-1 text-sm text-muted-foreground">Here&apos;s where your reels stand.</p>
         </div>
 
-        <Checklist items={checklist ?? []} canEdit={!isModel} />
+        <Checklist items={checklistNow} canEdit={!isModel} />
 
         <LinksDonut open={openLinks} shot={shotLinks} topicHref={tgLink} />
 

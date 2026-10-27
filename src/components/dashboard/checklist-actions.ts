@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
+import { isRepeat, type RepeatKey } from "@/lib/checklist";
 
 /**
  * The model's checklist. Owners and managers write the entries; anyone on
@@ -24,7 +25,7 @@ async function who(supabase: Sb, personaId: string) {
   return { userId: user.id, staff, member: staff || !!membership };
 }
 
-export async function addChecklistItem(text: string) {
+export async function addChecklistItem(text: string, repeat: RepeatKey = "1d") {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
   const me = await who(supabase, personaId);
@@ -40,7 +41,7 @@ export async function addChecklistItem(text: string) {
     .maybeSingle();
   const { error } = await supabase
     .from("checklist_items")
-    .insert({ persona_id: personaId, text: clean, position: (last?.position ?? 0) + 1, created_by: me.userId });
+    .insert({ persona_id: personaId, text: clean, repeat: isRepeat(repeat) ? repeat : "1d", position: (last?.position ?? 0) + 1, created_by: me.userId });
   if (error) return { error: error.message };
   revalidatePath("/");
   return { error: null };
@@ -54,6 +55,18 @@ export async function editChecklistItem(id: string, text: string) {
   const clean = text.trim().slice(0, 300);
   if (!clean) return { error: "An entry needs words" };
   const { error } = await supabase.from("checklist_items").update({ text: clean }).eq("id", id).eq("persona_id", personaId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { error: null };
+}
+
+export async function setChecklistRepeat(id: string, repeat: RepeatKey) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers can change entries" };
+  if (!isRepeat(repeat)) return { error: "Unknown repeat" };
+  const { error } = await supabase.from("checklist_items").update({ repeat }).eq("id", id).eq("persona_id", personaId);
   if (error) return { error: error.message };
   revalidatePath("/");
   return { error: null };
