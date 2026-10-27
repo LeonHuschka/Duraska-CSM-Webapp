@@ -30,9 +30,12 @@ function isVideo(mimeType: string | null): boolean {
 interface AssetGalleryProps {
   assets: AssetWithUrl[];
   onDelete: (assetId: string) => void;
+  /** Raw takes only: move a take to the other pile when she marked it wrong. */
+  onToggleFansly?: (asset: AssetWithUrl) => void;
+  empty?: string;
 }
 
-export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
+export function AssetGallery({ assets, onDelete, onToggleFansly, empty }: AssetGalleryProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (assetId: string) => {
@@ -47,7 +50,7 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
   if (assets.length === 0) {
     return (
       <div className="flex items-center justify-center rounded-xl border border-border/30 bg-muted/20 p-8">
-        <p className="text-sm text-muted-foreground/60">No files uploaded yet</p>
+        <p className="text-sm text-muted-foreground/60">{empty ?? "No files uploaded yet"}</p>
       </div>
     );
   }
@@ -84,17 +87,33 @@ export function AssetGallery({ assets, onDelete }: AssetGalleryProps) {
               />
             )}
 
-            {/* Type indicator */}
-            <div className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5">
-              {isVideo(asset.mime_type) ? (
-                <Film className="h-3.5 w-3.5 text-white" />
-              ) : (
-                <ImageIcon className="h-3.5 w-3.5 text-white" />
+            {/* Type indicator, and which pile a raw take belongs to */}
+            <div className="absolute left-2 top-2 flex items-center gap-1">
+              <div className="rounded-md bg-black/60 px-1.5 py-0.5">
+                {isVideo(asset.mime_type) ? (
+                  <Film className="h-3.5 w-3.5 text-white" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5 text-white" />
+                )}
+              </div>
+              {asset.stage === "raw" && asset.fansly && (
+                <span className="rounded-md bg-sky-500 px-1.5 py-0.5 text-[10px] font-bold text-white">Fansly</span>
               )}
             </div>
 
             {/* Action buttons */}
             <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              {onToggleFansly && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-7 px-2 text-[10px]"
+                  onClick={() => onToggleFansly(asset)}
+                  title={asset.fansly ? "Move to the Instagram takes" : "Move to the Fansly takes"}
+                >
+                  {asset.fansly ? "→ IG" : "→ Fansly"}
+                </Button>
+              )}
               <a
                 href={asset.signedUrl}
                 download={asset.file_name}

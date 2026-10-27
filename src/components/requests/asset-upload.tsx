@@ -10,8 +10,10 @@ import { generateThumbnail, thumbnailPathFor, safeStorageName } from "@/lib/thum
 interface AssetUploadProps {
   requestId: string;
   personaId: string;
-  stage: "raw" | "edited";
+  stage: "raw" | "edited" | "fansly";
   onUploadComplete: () => void;
+  /** What the drop zone says, when it is one of several. */
+  label?: string;
 }
 
 export function AssetUpload({
@@ -19,6 +21,7 @@ export function AssetUpload({
   personaId,
   stage,
   onUploadComplete,
+  label,
 }: AssetUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -156,7 +159,9 @@ export function AssetUpload({
         className={`relative flex min-h-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 transition-all duration-200 ${
           dragOver
             ? "border-primary bg-primary/10"
-            : "border-border/50 hover:border-primary/50 hover:bg-accent/20"
+            : stage === "fansly"
+              ? "border-sky-400/40 bg-sky-400/5 hover:border-sky-400/70"
+              : "border-border/50 hover:border-primary/50 hover:bg-accent/20"
         } ${uploading ? "pointer-events-none opacity-60" : ""}`}
       >
         <Upload className="h-8 w-8 text-muted-foreground" />
@@ -164,7 +169,7 @@ export function AssetUpload({
           <p className="text-sm font-medium text-muted-foreground">
             {uploading
               ? `Uploading... ${progress}%`
-              : "Tap to upload or drag files here"}
+              : label ?? "Tap to upload or drag files here"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground/60">
             Photos and videos

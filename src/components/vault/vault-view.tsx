@@ -513,7 +513,9 @@ function VaultCard({
             </span>
           )}
         <div className="flex items-center gap-1.5 transition-opacity md:opacity-0 md:group-hover:opacity-100">
-          {/* Mark as posted */}
+          {/* Mark as posted — Instagram and Facebook accounts; a Fansly
+              cut goes out on Fansly, which has none here. */}
+          {asset.stage !== "fansly" && (
           <Popover open={postOpen} onOpenChange={setPostOpen}>
             <PopoverTrigger asChild>
               <button
@@ -592,6 +594,7 @@ function VaultCard({
               )}
             </PopoverContent>
           </Popover>
+          )}
 
           {/* Download — two-phase on iOS:
               1. First tap fetches the file (loader + %)
@@ -978,6 +981,7 @@ const STAGE_OPTIONS = [
   { value: "all",    label: "All" },
   { value: "raw",    label: "Raw" },
   { value: "edited", label: "Edited ✓" },
+  { value: "fansly", label: "Fansly reels" },
 ] as const;
 
 /**
@@ -1273,6 +1277,11 @@ export function VaultView({
     return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
   }, [localAssets, isFreshForViewer]);
 
+  const fanslyCuts = useMemo(() => {
+    const cuts = localAssets.filter((a) => a.stage === "fansly");
+    return { cuts: cuts.length, reels: new Set(cuts.map((a) => a.request_id)).size };
+  }, [localAssets]);
+
   // ── One card per reel ──
   //
   // A job yields several finished cuts. They used to sit in the grid as five
@@ -1464,6 +1473,37 @@ export function VaultView({
             </button>
           );
         })}
+        {/* Fansly reels: the cuts from the takes she shot in Fansly
+            outfits. Their own section — they never go on Instagram. */}
+        {(() => {
+          const active = stageFilter === "fansly" && nsfwFilter === "all" && platformFilter === "all";
+          return (
+            <button
+              title="Cuts made from the Fansly takes — these go on Fansly, never on Instagram"
+              onClick={() => {
+                if (active) {
+                  setStageFilter("all");
+                  return;
+                }
+                setStageFilter("fansly");
+                setNsfwFilter("all");
+                setPlatformFilter("all");
+              }}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? "border-sky-400 bg-sky-400/10 text-foreground"
+                  : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
+              Fansly reels
+              <span className="tabular-nums text-muted-foreground">
+                {fanslyCuts.reels} / {fanslyCuts.cuts}
+              </span>
+              <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
+            </button>
+          );
+        })()}
       </div>
 
       {/* Filters — tap-friendly dropdowns (no horizontal dragging on mobile) */}

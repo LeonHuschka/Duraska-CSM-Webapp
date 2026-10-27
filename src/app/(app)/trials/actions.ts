@@ -11,6 +11,8 @@ import {
   DIM_META,
   MAX_RESHOOTS,
   cellName,
+  decideProposal,
+  decideTrial,
   ensureTrial,
   loadTrial,
   notifyTrial,
@@ -81,7 +83,23 @@ export async function createTrial(input: { accountId: string; shortcode: string 
   const vals = Array.from(latest.values()).filter((v) => v > 0).sort((a, b) => a - b);
   const median = vals.length ? (vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2) : 0;
 
+  // The same rules as a winner: a reel goes in once; a busy account gets
+  // it as a proposal, decided on its page.
+  const decision = await decideTrial(supabase, {
+    personaId,
+    accountId: input.accountId,
+    shortcode: input.shortcode,
+    requestId: r.request_id,
+    coverPath: r.cover_path,
+    caption: r.caption,
+    views: r.views,
+  });
+  if (decision.kind === "family") {
+    return { error: `This reel is already in Trial-Maxxing (${decision.why})`, id: decision.trialId };
+  }
   const res = await ensureTrial(supabase, {
+    status: decision.kind === "open" ? "active" : "proposed",
+    replacesTrialId: decision.kind === "open" ? null : decision.currentId,
     personaId,
     accountId: input.accountId,
     platform: account?.platform ?? "instagram",
@@ -303,6 +321,18 @@ export async function advanceTrial(trialId: string) {
   await notifyTrial(trialId, next === "done" ? "done" : "round");
   touch(trialId);
   return { error: null };
+}
+
+/** Replace the running trial with a proposed one, or put the proposal away. */
+export async function decideTrialProposal(trialId: string, replace: boolean) {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", trialId).maybeSingle();
+  if (!t) return { error: "No such trial" };
+  const me = await who(supabase, t.persona_id);
+  if (!me?.staff) return { error: "Only owners and managers decide this" };
+  const res = await decideProposal(supabase, trialId, replace);
+  touch(trialId);
+  return res;
 }
 
 export async function archiveTrial(trialId: string) {

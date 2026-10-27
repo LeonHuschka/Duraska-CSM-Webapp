@@ -13,6 +13,8 @@ export interface EditJob {
   created_at: string;
   content_type_name: string | null;
   rawCount: number;
+  /** Of the raw takes, the ones shot in a Fansly outfit. */
+  fanslyCount: number;
   editedCount: number;
 }
 
@@ -48,23 +50,25 @@ export default async function EditingPage() {
   const typeName = Object.fromEntries((types ?? []).map((t) => [t.id, t.name]));
 
   // Asset counts per request (raw takes vs final cuts)
-  const countsByReq: Record<string, { raw: number; edited: number }> = {};
+  const countsByReq: Record<string, { raw: number; fansly: number; edited: number }> = {};
   if (reqIds.length > 0) {
     const { data: assets } = await supabase
       .from("content_assets")
-      .select("request_id, stage")
+      .select("request_id, stage, fansly")
       .in("request_id", reqIds)
       .is("deleted_at", null);
     for (const a of assets ?? []) {
-      const c = (countsByReq[a.request_id] ??= { raw: 0, edited: 0 });
-      if (a.stage === "raw") c.raw++;
-      else c.edited++;
+      const c = (countsByReq[a.request_id] ??= { raw: 0, fansly: 0, edited: 0 });
+      if (a.stage === "raw") {
+        c.raw++;
+        if (a.fansly) c.fansly++;
+      } else c.edited++;
     }
   }
 
   const jobs: EditJob[] = (requests ?? [])
     .map((r) => {
-      const counts = countsByReq[r.id] ?? { raw: 0, edited: 0 };
+      const counts = countsByReq[r.id] ?? { raw: 0, fansly: 0, edited: 0 };
       return {
         id: r.id,
         title: r.title,
@@ -76,6 +80,7 @@ export default async function EditingPage() {
         created_at: r.created_at,
         content_type_name: r.content_type_id ? typeName[r.content_type_id] ?? null : null,
         rawCount: counts.raw,
+        fanslyCount: counts.fansly,
         editedCount: counts.edited,
       };
     })

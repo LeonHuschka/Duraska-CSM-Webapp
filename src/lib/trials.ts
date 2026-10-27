@@ -1,4 +1,8 @@
 import "server-only";
+import Anthropic from "@anthropic-ai/sdk";
+import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import * as z from "zod/v4";
+import sharp from "sharp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -347,6 +351,9 @@ export async function ensureTrial(
     createdBy?: string | null;
     /** The video, when the caller already downloaded it. */
     videoBytes?: Uint8Array | null;
+    /** "proposed" waits for the team to decide whether it replaces the running trial. */
+    status?: "active" | "proposed";
+    replacesTrialId?: string | null;
   }
 ): Promise<{ id: string | null; created: boolean; error: string | null }> {
   const { data: existing } = await supabase
@@ -375,6 +382,8 @@ export async function ensureTrial(
       lift: input.lift == null ? null : Math.round(input.lift * 10) / 10,
       source_request_id: input.sourceRequestId,
       created_by: input.createdBy ?? null,
+      status: input.status ?? "active",
+      replaces_trial_id: input.replacesTrialId ?? null,
     })
     .select("id")
     .single();
@@ -495,5 +504,298 @@ export async function notifyTrial(trialId: string, kind: "round" | "done") {
     if (!res.ok) console.warn("[trials] telegram:", res.error);
   } catch (err) {
     console.warn("[trials] notify failed", err);
+  }
+}
+
+/* ─── One reel, one trial; one trial per account ─────────────────────────────
+ *
+ * A reel goes into Trial-Maxxing once, ever: not again when it goes viral on
+ * a second account, and not when one of its reshoots goes viral. An account
+ * runs one trial at a time. A later winner that is clearly bigger than the
+ * running trial is proposed in its place, and the team decides in Telegram.
+ */
+
+/** How much bigger a new winner must be before it is offered in place of the running trial. */
+export const REPLACE_FACTOR = 1.5;
+
+export type TrialDecision =
+  /** The reel is already in (or was): same post, same job, one of its reshoots, or the same video elsewhere. */
+  | { kind: "family"; trialId: string; why: string }
+  /** The account has no trial running. */
+  | { kind: "open" }
+  /** The account runs a trial, and this one is clearly bigger. */
+  | { kind: "propose"; currentId: string; currentViews: number }
+  /** The account runs a trial at least as big. */
+  | { kind: "busy"; currentId: string; currentViews: number };
+
+export async function decideTrial(
+  supabase: Sb,
+  input: {
+    personaId: string;
+    accountId: string;
+    shortcode: string;
+    requestId: string | null;
+    coverPath: string | null;
+    caption: string | null;
+    views: number | null;
+  }
+): Promise<TrialDecision> {
+  const { data: trials } = await supabase
+    .from("trials")
+    .select("id, account_id, shortcode, source_request_id, cover_path, caption, status, views, created_at")
+    .eq("persona_id", input.personaId)
+    .order("created_at", { ascending: false });
+  const all = trials ?? [];
+
+  const same = all.find((t) => t.shortcode === input.shortcode);
+  if (same) return { kind: "family", trialId: same.id, why: "same post" };
+  if (input.requestId) {
+    const src = all.find((t) => t.source_request_id === input.requestId);
+    if (src) return { kind: "family", trialId: src.id, why: "same job" };
+    const { data: cell } = await supabase
+      .from("trial_cells")
+      .select("trial_id")
+      .eq("request_id", input.requestId)
+      .limit(1)
+      .maybeSingle();
+    if (cell) return { kind: "family", trialId: cell.trial_id, why: "a reshoot of it" };
+  }
+  const look = await sameReelByCover(supabase, input, all);
+  if (look) return { kind: "family", trialId: look, why: "same video" };
+
+  // One trial per account. A pending proposal counts as running: a third
+  // winner has to beat that one too.
+  const running = all.filter((t) => t.account_id === input.accountId && (t.status === "active" || t.status === "proposed"));
+  if (running.length === 0) return { kind: "open" };
+  let biggest = { id: running[0].id, views: 0 };
+  for (const t of running) {
+    const v = await latestViews(supabase, input.accountId, t.shortcode, t.views);
+    if (v >= biggest.views) biggest = { id: t.id, views: v };
+  }
+  const current = running.find((t) => t.status === "active") ?? running[0];
+  const currentViews = current.id === biggest.id ? biggest.views : await latestViews(supabase, input.accountId, current.shortcode, current.views);
+  if (Number(input.views ?? 0) >= REPLACE_FACTOR * biggest.views) {
+    return { kind: "propose", currentId: current.id, currentViews };
+  }
+  return { kind: "busy", currentId: current.id, currentViews };
+}
+
+async function latestViews(supabase: Sb, accountId: string, shortcode: string, fallback: number | null): Promise<number> {
+  const { data } = await supabase
+    .from("reel_metrics")
+    .select("views")
+    .eq("account_id", accountId)
+    .eq("shortcode", shortcode)
+    .eq("source", "scrape")
+    .not("views", "is", null)
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return Number(data?.views ?? fallback ?? 0);
+}
+
+/**
+ * The same reel posted on another account carries another shortcode, no
+ * job and often another cover frame and caption — a picture hash of the
+ * covers called the tongue reel on two accounts as different as two
+ * unrelated reels. So Claude looks at the covers and says which, if any,
+ * shows the same reel or a reshoot of it.
+ */
+async function sameReelByCover(
+  supabase: Sb,
+  input: { coverPath: string | null; caption: string | null },
+  trials: { id: string; cover_path: string | null; caption: string | null }[]
+): Promise<string | null> {
+  const pool = trials.filter((t) => t.cover_path).slice(0, 12);
+  if (!input.coverPath || pool.length === 0 || !process.env.ANTHROPIC_API_KEY) return null;
+  const image = async (path: string) => {
+    const { data } = await supabase.storage.from("content-assets").download(path);
+    if (!data) return null;
+    const small = await sharp(Buffer.from(await data.arrayBuffer())).resize({ width: 400 }).jpeg({ quality: 80 }).toBuffer().catch(() => null);
+    return small ? small.toString("base64") : null;
+  };
+  const fresh = await image(input.coverPath);
+  if (!fresh) return null;
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  const labels = new Map<string, string>();
+  for (let i = 0; i < pool.length; i++) {
+    const t = pool[i];
+    const b64 = await image(t.cover_path!);
+    if (!b64) continue;
+    const label = `T${i + 1}`;
+    labels.set(label, t.id);
+    content.push({ type: "text", text: `${label} — caption: ${t.caption?.slice(0, 200) ?? "(none)"}` });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+  }
+  if (labels.size === 0) return null;
+  content.push({ type: "text", text: `NEW — caption: ${input.caption?.slice(0, 200) ?? "(none)"}` });
+  content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: fresh } });
+  content.push({
+    type: "text",
+    text: "Is NEW the same reel as one of the T reels, or a reshoot of one? Answer with that label, or null.",
+  });
+  try {
+    const res = await new Anthropic().beta.messages.parse({
+      model: "claude-opus-5-5",
+      max_tokens: 2000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "medium", format: betaZodOutputFormat(SameReel) },
+      system: SAME_REEL_SYSTEM,
+      messages: [{ role: "user", content }],
+    });
+    const label = res.parsed_output?.match ?? null;
+    return label ? labels.get(label) ?? null : null;
+  } catch (err) {
+    console.warn("[trials] same-reel check failed", err);
+    return null;
+  }
+}
+
+const SameReel = z.object({
+  match: z.string().nullable().describe("The label (T1, T2, …) of the reel NEW is the same as, or null"),
+  reason: z.string().describe("One short sentence"),
+});
+
+const SAME_REEL_SYSTEM = `Each image is the cover of a short vertical reel by the same creator, posted on one of several accounts she runs.
+The same video is often posted on more than one account: then the cover can be a different frame of it, cropped differently, with a different caption.
+She also reshoots a reel that did well: the same idea — same action, same framing, same joke or hook — with one thing changed, such as the outfit, the place or the opening line.
+Say NEW matches a T reel when it is the same video or such a reshoot of it: the same room seen from the same spot, the same pose or action, the same set-up.
+Do not match two different ideas just because they were filmed by the same woman, in the same room or in the same outfit. When unsure, answer null.`;
+
+/** Where the trial's Telegram messages go: the winners topic, under the reel's winner post. */
+async function winnerMessage(admin: Sb, personaId: string, shortcode: string): Promise<number | null> {
+  const { data } = await admin
+    .from("winners")
+    .select("message_id")
+    .eq("persona_id", personaId)
+    .eq("shortcode", shortcode)
+    .not("message_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  return data?.message_id ?? null;
+}
+
+/**
+ * A bigger winner on a busy account: an update under the running trial's
+ * winner post, with the choice as two buttons into the app.
+ */
+export async function notifyProposal(proposedId: string) {
+  try {
+    const admin = createAdminClient();
+    const { data: t } = await admin.from("trials").select("*").eq("id", proposedId).maybeSingle();
+    if (!t?.replaces_trial_id) return;
+    const { data: old } = await admin.from("trials").select("*").eq("id", t.replaces_trial_id).maybeSingle();
+    if (!old) return;
+    const target = await telegramTarget(admin, t.persona_id);
+    if (!target) return;
+    const { data: account } = await admin.from("accounts").select("handle, platform").eq("id", t.account_id ?? "").maybeSingle();
+    const acc = account ? `${accountLabel(account.handle)} (${account.platform === "facebook" ? "Facebook" : "IG"})` : "the account";
+    const nf = new Intl.NumberFormat("de-DE");
+    const oldViews = await latestViews(admin, old.account_id ?? "", old.shortcode, old.views);
+    const lines = [
+      `⚡️ <b>Bigger winner on ${esc(acc)}</b>`,
+      `${nf.format(Number(t.views ?? 0))} plays — the running Trial-Maxxing has ${nf.format(oldViews)}.`,
+      ``,
+      `Should the new one take over? What is already shot of the old one stays in editing and the vault and gets posted as normal.`,
+    ];
+    if (t.post_url) lines.push(`🔗 New: ${esc(t.post_url)}`);
+    const res = await sendMessage({
+      chat_id: target.chat,
+      message_thread_id: target.thread,
+      text: lines.join("\n"),
+      reply_to_message_id: await winnerMessage(admin, old.persona_id, old.shortcode),
+      buttons: [
+        { text: "✅ Replace", url: `${APP_URL}/trials/${t.id}?decide=replace` },
+        { text: "✋ Keep current", url: `${APP_URL}/trials/${t.id}?decide=keep` },
+      ],
+    });
+    if (!res.ok) console.warn("[trials] proposal telegram:", res.error);
+  } catch (err) {
+    console.warn("[trials] proposal notify failed", err);
+  }
+}
+
+/**
+ * The team's answer to a proposal. Replace: the old trial stops, its
+ * started boxes go to editing as they are — their takes become ordinary
+ * reels for the account — and the new one runs. Keep: the proposal is put
+ * away and the reel never comes back.
+ */
+export async function decideProposal(supabase: Sb, proposedId: string, replace: boolean): Promise<{ error: string | null }> {
+  const { data: t } = await supabase.from("trials").select("*").eq("id", proposedId).maybeSingle();
+  if (!t) return { error: "No such trial" };
+  if (t.status !== "proposed") return { error: "Already decided" };
+  const now = new Date().toISOString();
+  if (!replace) {
+    await supabase.from("trials").update({ status: "dismissed", status_note: "Kept the running trial", updated_at: now }).eq("id", t.id);
+    return { error: null };
+  }
+  if (t.replaces_trial_id) {
+    const { data: old } = await supabase.from("trials").select("id, status").eq("id", t.replaces_trial_id).maybeSingle();
+    if (old && old.status === "active") {
+      await supabase
+        .from("trials")
+        .update({ status: "replaced", status_note: `Replaced by a bigger winner (${t.shortcode})`, updated_at: now })
+        .eq("id", old.id);
+      // Boxes with takes in them are finished as they stand and go to editing.
+      const { data: started } = await supabase
+        .from("trial_cells")
+        .select("id, request_id")
+        .eq("trial_id", old.id)
+        .is("finished_at", null)
+        .not("request_id", "is", null);
+      const ids = (started ?? []).map((c) => c.request_id!);
+      if (ids.length) {
+        const { data: withTakes } = await supabase
+          .from("content_assets")
+          .select("request_id")
+          .in("request_id", ids)
+          .eq("stage", "raw")
+          .is("deleted_at", null);
+        const shot = Array.from(new Set((withTakes ?? []).map((a) => a.request_id)));
+        if (shot.length) {
+          await supabase.from("trial_cells").update({ finished_at: now }).eq("trial_id", old.id).in("request_id", shot);
+          await supabase.from("content_requests").update({ status: "shooted", shooted_at: now }).in("id", shot).eq("status", "requested");
+        }
+      }
+    }
+  }
+  // Any other proposal for the account is moot now.
+  if (t.account_id) {
+    await supabase
+      .from("trials")
+      .update({ status: "dismissed", status_note: "Another winner took the account", updated_at: now })
+      .eq("account_id", t.account_id)
+      .eq("status", "proposed")
+      .neq("id", t.id);
+  }
+  await supabase.from("trials").update({ status: "active", updated_at: now }).eq("id", t.id);
+  await notifySwitch(t.id);
+  return { error: null };
+}
+
+/** The switch, said once under the new trial's winner post. */
+async function notifySwitch(trialId: string) {
+  try {
+    const admin = createAdminClient();
+    const { data: t } = await admin.from("trials").select("*").eq("id", trialId).maybeSingle();
+    if (!t) return;
+    const target = await telegramTarget(admin, t.persona_id);
+    if (!target) return;
+    const res = await sendMessage({
+      chat_id: target.chat,
+      message_thread_id: target.thread,
+      text: [
+        `🔁 <b>Trial-Maxxing switched to this reel</b>`,
+        ``,
+        `${target.model ? `${target.model}, ` : ""}reshoot this one now — ${t.reshoots} ${DIM_META.outfit.many} first. What you already shot of the old one goes out as normal reels.`,
+      ].join("\n"),
+      reply_to_message_id: await winnerMessage(admin, t.persona_id, t.shortcode),
+      buttons: [{ text: "Direct Link Reshoot", url: `${APP_URL}/trials/${t.id}` }],
+    });
+    if (!res.ok) console.warn("[trials] switch telegram:", res.error);
+  } catch (err) {
+    console.warn("[trials] switch notify failed", err);
   }
 }

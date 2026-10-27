@@ -194,6 +194,11 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
                   <span>
                     {job.rawCount} take{job.rawCount === 1 ? "" : "s"}
                   </span>
+                  {job.fanslyCount > 0 && (
+                    <span className="rounded bg-sky-500/15 px-1 font-semibold text-sky-300">
+                      {job.fanslyCount} Fansly
+                    </span>
+                  )}
                   {job.editedCount > 0 && (
                     <>
                       <span>·</span>

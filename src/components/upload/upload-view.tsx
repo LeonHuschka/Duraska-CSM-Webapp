@@ -148,6 +148,8 @@ export function UploadView({ personaId }: { personaId: string }) {
   const [notes, setNotes] = useState("");
   const [isNsfw, setIsNsfw] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  // Per take: shot in a Fansly outfit. Same order as files.
+  const [fansly, setFansly] = useState<boolean[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [pct, setPct] = useState(0);
@@ -204,16 +206,19 @@ export function UploadView({ personaId }: { personaId: string }) {
       );
     }
     setFiles((prev) => [...prev, ...arr]);
+    setFansly((prev) => [...prev, ...arr.map(() => false)]);
   }, []);
 
   function removeFile(idx: number) {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setFansly((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function reset() {
     setInspoLink("");
     setIsNsfw(false);
     setFiles([]);
+    setFansly([]);
     setProgress({ done: 0, total: 0 });
     setPct(0);
     setFileStates([]);
@@ -312,6 +317,7 @@ export function UploadView({ personaId }: { personaId: string }) {
           mime_type: mime,
           size_bytes: file.size,
           thumbnail_path: null,
+          fansly: fansly[index] ?? false,
         });
         completed++;
         setFileState(index, { status: "done", pct: 100 });
@@ -512,6 +518,15 @@ export function UploadView({ personaId }: { personaId: string }) {
         />
 
         {files.length > 0 && (
+          <p className="pt-1 text-[11px] text-muted-foreground">
+            Tap <span className="font-semibold text-foreground">IG</span> on every take you shot in a Fansly
+            outfit — it turns <span className="font-semibold text-sky-300">Fansly</span>.
+            {fansly.some(Boolean) && (
+              <span className="ml-1 font-medium text-sky-300">{fansly.filter(Boolean).length} Fansly</span>
+            )}
+          </p>
+        )}
+        {files.length > 0 && (
           <ul className="space-y-1.5 pt-1">
             {files.map((f, i) => {
               const st = fileStates[i];
@@ -576,6 +591,20 @@ export function UploadView({ personaId }: { personaId: string }) {
                     </p>
                   ) : null}
                 </div>
+                {/* Instagram or Fansly: one tap per take, so the editor
+                    can tell the Fansly-outfit takes apart. */}
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => setFansly((prev) => prev.map((v, j) => (j === i ? !v : v)))}
+                  className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+                    fansly[i]
+                      ? "border-sky-400 bg-sky-500 text-white"
+                      : "border-border/60 bg-muted/40 text-muted-foreground"
+                  }`}
+                >
+                  {fansly[i] ? "Fansly" : "IG"}
+                </button>
                 {!uploading && (
                   <button
                     onClick={() => removeFile(i)}

@@ -4,7 +4,7 @@ import type { Database } from "@/lib/types/database";
 import { accountLabel } from "@/lib/account-analytics";
 import { downloadVideo, resolveFacebookVideoUrl, resolveVideoUrl } from "@/lib/inspo-video";
 import { deleteMessage, sendMessage, sendPhoto, sendVideo } from "@/lib/telegram";
-import { APP_URL, ensureTrial } from "@/lib/trials";
+import { APP_URL, decideTrial, ensureTrial, notifyProposal } from "@/lib/trials";
 
 /**
  * Winners: a reel on one of our accounts that took off.
@@ -140,15 +140,6 @@ export async function announceWinners(
     const title =
       (c.reel.request_id && titles.get(c.reel.request_id)) ||
       (c.reel.caption ? `"${c.reel.caption.slice(0, 60)}${c.reel.caption.length > 60 ? "…" : ""}"` : "this reel");
-    const text = message({
-      account: `${accountLabel(account.handle)} (${platformName(account.platform)})`,
-      title,
-      views: Number(c.reel.views),
-      lift: c.lift,
-      url: c.reel.post_url,
-      model: cfg.model_username,
-      postedAt: opts.includeOld ? c.reel.posted_at : null,
-    });
 
     // The reel itself: Instagram through the inspo-link resolver, Facebook
     // through its own. The cover when the video is out of reach, text alone
@@ -164,23 +155,54 @@ export async function announceWinners(
       if (!bytes) out.notes.push(`${c.reel.shortcode}: video not fetched — ${resolved.ok ? "download failed" : resolved.note}`);
     }
 
-    // Every winner opens its Trial-Maxxing straight away; the post carries
-    // the button into it.
-    const trial = await ensureTrial(supabase, {
+    // A winner opens its Trial-Maxxing straight away — unless the reel is
+    // already in one (here or on another account, or as a reshoot), or the
+    // account is busy with a trial at least as big. A clearly bigger winner
+    // on a busy account is proposed in its place; the team decides.
+    const decision = await decideTrial(supabase, {
       personaId,
       accountId: c.reel.account_id!,
-      platform: account.platform,
       shortcode: c.reel.shortcode!,
-      postUrl: c.reel.post_url,
-      caption: c.reel.caption,
+      requestId: c.reel.request_id,
       coverPath: c.reel.cover_path,
+      caption: c.reel.caption,
+      views: Number(c.reel.views),
+    });
+    let trialId: string | null = decision.kind === "family" ? decision.trialId : null;
+    if (decision.kind === "open" || decision.kind === "propose") {
+      const trial = await ensureTrial(supabase, {
+        personaId,
+        accountId: c.reel.account_id!,
+        platform: account.platform,
+        shortcode: c.reel.shortcode!,
+        postUrl: c.reel.post_url,
+        caption: c.reel.caption,
+        coverPath: c.reel.cover_path,
+        views: Number(c.reel.views),
+        lift: c.lift,
+        sourceRequestId: c.reel.request_id,
+        videoBytes: bytes,
+        status: decision.kind === "open" ? "active" : "proposed",
+        replacesTrialId: decision.kind === "propose" ? decision.currentId : null,
+      });
+      if (trial.error) out.notes.push(`${c.reel.shortcode}: trial not opened — ${trial.error}`);
+      trialId = trial.id;
+    }
+    if (decision.kind !== "open") out.notes.push(`${c.reel.shortcode}: trial ${decision.kind}${decision.kind === "family" ? ` (${decision.why})` : ""}`);
+    const text = message({
+      account: `${accountLabel(account.handle)} (${platformName(account.platform)})`,
+      title,
       views: Number(c.reel.views),
       lift: c.lift,
-      sourceRequestId: c.reel.request_id,
-      videoBytes: bytes,
+      url: c.reel.post_url,
+      model: cfg.model_username,
+      postedAt: opts.includeOld ? c.reel.posted_at : null,
+      trial: decision.kind,
     });
-    if (trial.error) out.notes.push(`${c.reel.shortcode}: trial not opened — ${trial.error}`);
-    const buttons = trial.id ? [{ text: "Direct Link Reshoot", url: `${APP_URL}/trials/${trial.id}` }] : undefined;
+    const buttons =
+      trialId && decision.kind !== "propose"
+        ? [{ text: decision.kind === "family" ? "Open its Trial-Maxxing" : "Direct Link Reshoot", url: `${APP_URL}/trials/${trialId}` }]
+        : undefined;
 
     if (c.reel.post_url) {
       if (bytes) {
@@ -238,6 +260,9 @@ export async function announceWinners(
     });
     if (error) out.notes.push(`${c.reel.shortcode}: not recorded — ${error.message}`);
     else out.announced++;
+    // The question goes under the running trial's post, after this winner
+    // is on record, so it can point at both.
+    if (decision.kind === "propose" && trialId) await notifyProposal(trialId);
   }
   return out;
 }
@@ -268,6 +293,8 @@ function message(x: {
   url: string | null;
   model: string | null;
   postedAt?: string | null;
+  /** What became of its Trial-Maxxing. */
+  trial?: "open" | "family" | "propose" | "busy";
 }): string {
   const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const nf = new Intl.NumberFormat("de-DE");
@@ -279,7 +306,13 @@ function message(x: {
     `🔥 <b>Winner on ${esc(x.account)}</b>`,
     `${esc(x.title)} · ${nf.format(x.views)} plays · ${x.lift.toFixed(0)}× the account's usual reach${when}`,
     ``,
-    `${at ? `${at}, ` : ""}this one hit — start shooting new versions of it following the Trial-Maxxing 💃🏻`,
+    x.trial === "family"
+      ? `Same reel as one already in Trial-Maxxing — no new trial for it.`
+      : x.trial === "busy"
+        ? `This account already runs a Trial-Maxxing on a reel at least as big — no new trial.`
+        : x.trial === "propose"
+          ? `Bigger than the Trial-Maxxing running on this account — the choice is under that trial's post.`
+          : `${at ? `${at}, ` : ""}this one hit — start shooting new versions of it following the Trial-Maxxing 💃🏻`,
   ];
   if (x.url) lines.push(`🔗 Link: ${esc(x.url)}`);
   return lines.join("\n");

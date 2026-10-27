@@ -245,6 +245,7 @@ export type Database = {
           uploaded_at: string;
           notes: string | null;
           deleted_at: string | null;
+          fansly: boolean;
           phash: string | null;
           orb_index: string | null;
           orb_count: number | null;
@@ -267,6 +268,7 @@ export type Database = {
           uploaded_at?: string;
           notes?: string | null;
           deleted_at?: string | null;
+          fansly?: boolean;
           phash?: string | null;
           orb_index?: string | null;
           orb_count?: number | null;
@@ -289,6 +291,7 @@ export type Database = {
           uploaded_at?: string;
           notes?: string | null;
           deleted_at?: string | null;
+          fansly?: boolean;
           phash?: string | null;
           orb_index?: string | null;
           orb_count?: number | null;
@@ -982,6 +985,8 @@ export type Database = {
           video_path: string | null;
           reshoots: number;
           created_by: string | null;
+          replaces_trial_id: string | null;
+          status_note: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1002,6 +1007,8 @@ export type Database = {
           video_path?: string | null;
           reshoots?: number;
           created_by?: string | null;
+          replaces_trial_id?: string | null;
+          status_note?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1022,6 +1029,8 @@ export type Database = {
           video_path?: string | null;
           reshoots?: number;
           created_by?: string | null;
+          replaces_trial_id?: string | null;
+          status_note?: string | null;
           created_at?: string;
           updated_at?: string;
         };

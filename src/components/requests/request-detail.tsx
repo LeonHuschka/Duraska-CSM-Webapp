@@ -36,6 +36,7 @@ import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
 import {
   deleteAsset,
+  setAssetFansly,
   updateRequestDetail,
 } from "@/app/(app)/requests/[id]/actions";
 import type { ContentRequest } from "@/lib/types/database";
@@ -103,7 +104,10 @@ export function RequestDetail({
   const [isTrial, setIsTrial] = useState(request.is_trial ?? false);
 
   const rawAssets = assets.filter((a) => a.stage === "raw");
+  const igTakes = rawAssets.filter((a) => !a.fansly);
+  const fanslyTakes = rawAssets.filter((a) => a.fansly);
   const editedAssets = assets.filter((a) => a.stage === "edited");
+  const fanslyCuts = assets.filter((a) => a.stage === "fansly");
 
   const handleEditSave = () => {
     startTransition(async () => {
@@ -138,6 +142,17 @@ export function RequestDetail({
         toast.error(
           err instanceof Error ? err.message : "Failed to delete file"
         );
+      }
+    });
+  };
+
+  const handleToggleFansly = (asset: AssetWithUrl) => {
+    startTransition(async () => {
+      try {
+        await setAssetFansly(asset.id, request.id, !asset.fansly);
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not move the take");
       }
     });
   };
@@ -275,15 +290,33 @@ export function RequestDetail({
             stage="raw"
             onUploadComplete={handleUploadComplete}
           />
-          <AssetGallery assets={rawAssets} onDelete={handleDeleteAsset} />
+          {/* Two piles: the takes for Instagram, and the same reel shot
+              again in a Fansly outfit — the model marks those on upload. */}
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">
+              Instagram takes <span className="font-normal text-muted-foreground">({igTakes.length})</span>
+            </h3>
+            <AssetGallery assets={igTakes} onDelete={handleDeleteAsset} onToggleFansly={handleToggleFansly} />
+          </div>
+          <div className="space-y-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3">
+            <h3 className="text-sm font-semibold text-sky-300">
+              Fansly takes <span className="font-normal text-muted-foreground">({fanslyTakes.length})</span>
+            </h3>
+            <AssetGallery
+              assets={fanslyTakes}
+              onDelete={handleDeleteAsset}
+              onToggleFansly={handleToggleFansly}
+              empty="No Fansly takes for this reel"
+            />
+          </div>
         </div>
 
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold">
-              Final Cuts {editedAssets.length > 0 && (
+              Final Cuts {editedAssets.length + fanslyCuts.length > 0 && (
                 <span className="text-sm font-normal text-muted-foreground">
-                  ({editedAssets.length})
+                  ({editedAssets.length + fanslyCuts.length})
                 </span>
               )}
             </h2>
@@ -291,13 +324,32 @@ export function RequestDetail({
               Upload the finished cut(s) — one or more variations
             </p>
           </div>
-          <AssetUpload
-            requestId={request.id}
-            personaId={personaId}
-            stage="edited"
-            onUploadComplete={handleUploadComplete}
-          />
-          <AssetGallery assets={editedAssets} onDelete={handleDeleteAsset} />
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">
+              Instagram <span className="font-normal text-muted-foreground">({editedAssets.length})</span>
+            </h3>
+            <AssetUpload
+              requestId={request.id}
+              personaId={personaId}
+              stage="edited"
+              label="Drop the Instagram cuts here"
+              onUploadComplete={handleUploadComplete}
+            />
+            <AssetGallery assets={editedAssets} onDelete={handleDeleteAsset} />
+          </div>
+          <div className="space-y-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3">
+            <h3 className="text-sm font-semibold text-sky-300">
+              Fansly <span className="font-normal text-muted-foreground">({fanslyCuts.length})</span>
+            </h3>
+            <AssetUpload
+              requestId={request.id}
+              personaId={personaId}
+              stage="fansly"
+              label="Drop the Fansly cuts here"
+              onUploadComplete={handleUploadComplete}
+            />
+            <AssetGallery assets={fanslyCuts} onDelete={handleDeleteAsset} empty="No Fansly cut yet" />
+          </div>
         </div>
       </div>
 

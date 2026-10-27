@@ -1144,11 +1144,14 @@ function ReelTile({
                   accountId,
                   shortcode: r.shortcode!,
                 });
+                if (res.error && res.id) {
+                  // Already in Trial-Maxxing: say so and open that one.
+                  toast.message(res.error);
+                  return router.push(`/trials/${res.id}`);
+                }
                 if (res.error || !res.id)
                   return void toast.error(res.error ?? "Could not start");
-                toast.success(
-                  "Trial-Maxxing started — the model got a message",
-                );
+                toast.success("Trial-Maxxing opened");
                 router.push(`/trials/${res.id}`);
               });
             }}

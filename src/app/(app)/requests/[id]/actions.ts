@@ -13,6 +13,8 @@ export async function createAssetRecord(data: {
   mime_type: string;
   size_bytes: number;
   thumbnail_path?: string | null;
+  /** A raw take shot in a Fansly outfit. */
+  fansly?: boolean;
 }) {
   const supabase = await createClient();
 
@@ -29,6 +31,7 @@ export async function createAssetRecord(data: {
     mime_type: data.mime_type,
     size_bytes: data.size_bytes,
     thumbnail_path: data.thumbnail_path ?? null,
+    fansly: data.fansly ?? false,
     uploaded_by: user.id,
   });
 
@@ -46,6 +49,15 @@ export async function createAssetRecord(data: {
 
   revalidatePath(`/requests/${data.request_id}`);
   revalidatePath("/requests");
+  revalidatePath("/editing");
+}
+
+/** Move a raw take between the Instagram and the Fansly pile. */
+export async function setAssetFansly(assetId: string, requestId: string, fansly: boolean) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("content_assets").update({ fansly }).eq("id", assetId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/requests/${requestId}`);
   revalidatePath("/editing");
 }
 

@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { DIMENSIONS, loadTrial, roundBrief, winnersOf, type Dimension } from "@/lib/trials";
 import { TrialMatrix } from "@/components/trials/trial-matrix";
+import { TrialStatus } from "@/components/trials/trial-status";
+import { accountLabel } from "@/lib/account-analytics";
 
 /**
  * One trial: the outlier on top, the three rounds under it. The model
@@ -10,8 +12,15 @@ import { TrialMatrix } from "@/components/trials/trial-matrix";
  */
 export const dynamic = "force-dynamic";
 
-export default async function TrialPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TrialPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{ decide?: string }>;
+}) {
   const { id } = await params;
+  const sp = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -26,9 +35,33 @@ export default async function TrialPage({ params }: { params: Promise<{ id: stri
   ]);
   const staff = profile?.global_role === "owner" || membership?.role === "owner" || membership?.role === "manager";
   const w = winnersOf(t);
+
+  // Why it is not simply running, and for a proposal: what it would replace.
+  const { data: row } = await supabase.from("trials").select("status_note, replaces_trial_id").eq("id", t.id).maybeSingle();
+  let replaces: { id: string; label: string; views: number | null } | null = null;
+  if (row?.replaces_trial_id) {
+    const { data: old } = await supabase
+      .from("trials")
+      .select("id, shortcode, views, accounts(handle)")
+      .eq("id", row.replaces_trial_id)
+      .maybeSingle();
+    if (old) {
+      const handle = (old as unknown as { accounts: { handle: string } | null }).accounts?.handle;
+      replaces = { id: old.id, label: handle ? `${accountLabel(handle)} · ${old.shortcode}` : old.shortcode, views: old.views };
+    }
+  }
   const briefs = Object.fromEntries(DIMENSIONS.map((d) => [d, roundBrief(d, w, t.reshoots)])) as Record<Dimension, string>;
 
   return (
+    <div className="space-y-4">
+    <TrialStatus
+      trialId={t.id}
+      status={t.status}
+      note={row?.status_note ?? null}
+      replaces={replaces}
+      staff={staff}
+      decide={sp.decide === "keep" ? "keep" : sp.decide === "replace" ? "replace" : null}
+    />
     <TrialMatrix
       trial={{
         id: t.id,
@@ -50,5 +83,6 @@ export default async function TrialPage({ params }: { params: Promise<{ id: stri
       staff={staff}
       backHref={staff ? "/?tab=accounts" : "/"}
     />
+    </div>
   );
 }

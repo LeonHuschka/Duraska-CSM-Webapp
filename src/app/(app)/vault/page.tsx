@@ -256,9 +256,10 @@ export default async function VaultPage() {
   // make "2 of 5" mean something different on every card.
   const variantByAsset: Record<string, { no: number; of: number }> = {};
   const cutsByRequest: Record<string, typeof assets> = {};
+  // Instagram cuts and Fansly cuts are numbered apart: they are two sets.
   for (const a of assets) {
-    if (a.stage !== "edited") continue;
-    (cutsByRequest[a.request_id] ??= []).push(a);
+    if (a.stage !== "edited" && a.stage !== "fansly") continue;
+    (cutsByRequest[`${a.request_id}|${a.stage}`] ??= []).push(a);
   }
   for (const cuts of Object.values(cutsByRequest)) {
     cuts.sort((x, y) => x.uploaded_at.localeCompare(y.uploaded_at));
