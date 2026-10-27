@@ -2,12 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
 import { announceShoot } from "@/lib/shoot-notice";
 import { getNextReelTitle } from "@/app/(app)/vault/actions";
 import {
   DIMENSIONS,
   DIM_META,
+  MAX_RESHOOTS,
   cellName,
   ensureTrial,
   loadTrial,
@@ -132,7 +134,7 @@ export async function openCellJob(cellId: string) {
     : { data: null };
   const acc = account ? account.display_name || accountLabel(account.handle) : "the outlier's account";
   const name = cellName({ dimension: cell.dimension as Dimension, slot: cell.slot, label: cell.label });
-  const brief = view ? roundBrief(cell.dimension as Dimension, winnersOf(view)) : "";
+  const brief = view ? roundBrief(cell.dimension as Dimension, winnersOf(view), view.reshoots) : "";
   const { title } = await getNextReelTitle();
   const { data: maxRow } = await supabase
     .from("content_requests")
@@ -309,6 +311,46 @@ export async function archiveTrial(trialId: string) {
   const me = await who(supabase, personaId);
   if (!me?.staff) return { error: "Only owners and managers can stop a trial" };
   await supabase.from("trials").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", trialId);
+  touch(trialId);
+  return { error: null };
+}
+
+/**
+ * How many reshoots each round of a trial has. More adds empty boxes;
+ * fewer takes away only boxes nothing has gone into yet. The choice is
+ * also what the persona's next trials start with.
+ */
+export async function setTrialReshoots(trialId: string, count: number) {
+  const supabase = await createClient();
+  const view = await loadTrial(supabase, trialId);
+  if (!view) return { error: "No such trial" };
+  const me = await who(supabase, view.personaId);
+  if (!me?.staff) return { error: "Only owners and managers can change this" };
+  const n = Math.round(count);
+  if (!Number.isFinite(n) || n < 1 || n > MAX_RESHOOTS) return { error: `Between 1 and ${MAX_RESHOOTS}` };
+
+  const beyond = view.cells.filter((c) => c.slot > n);
+  const inUse = beyond.filter((c) => c.requestId || c.winner || c.state !== "empty");
+  if (inUse.length) {
+    return { error: `${inUse.map((c) => cellName(c)).join(", ")} already ${inUse.length === 1 ? "has" : "have"} takes — keep at least ${Math.max(...inUse.map((c) => c.slot))}` };
+  }
+  if (beyond.length) {
+    const { error } = await supabase.from("trial_cells").delete().in("id", beyond.map((c) => c.id));
+    if (error) return { error: error.message };
+  }
+  const missing = DIMENSIONS.flatMap((d) =>
+    Array.from({ length: n }, (_, i) => i + 1)
+      .filter((slot) => !view.cells.some((c) => c.dimension === d && c.slot === slot))
+      .map((slot) => ({ trial_id: trialId, dimension: d, slot }))
+  );
+  if (missing.length) {
+    const { error } = await supabase.from("trial_cells").insert(missing);
+    if (error) return { error: error.message };
+  }
+  await supabase.from("trials").update({ reshoots: n, updated_at: new Date().toISOString() }).eq("id", trialId);
+  // Personas are written by owners only under RLS; a manager's choice is
+  // checked above and saved with the service key.
+  await createAdminClient().from("personas").update({ trial_reshoots: n }).eq("id", view.personaId);
   touch(trialId);
   return { error: null };
 }

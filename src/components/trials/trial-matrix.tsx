@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Film, Loader2, Lock, Play, Plus, Trophy } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Film, Loader2, Lock, Minus, Play, Plus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -22,6 +22,7 @@ import {
   recordTake,
   setCellLabel,
   setCellThumb,
+  setTrialReshoots,
   toggleWinner,
 } from "@/app/(app)/trials/actions";
 
@@ -57,6 +58,8 @@ export type MatrixTrial = {
   sourceTitle: string | null;
   phase: Phase;
   status: string;
+  /** Reshoots per round. */
+  reshoots: number;
   cells: MatrixCell[];
   briefs: Record<Dimension, string>;
 };
@@ -113,6 +116,8 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
         )}
       </div>
 
+      {staff && <ReshootCount trialId={trial.id} value={trial.reshoots} onChanged={refresh} />}
+
       {/* ── Phone ── */}
       <div className="space-y-3 md:hidden">
         <OutlierCard trial={trial} />
@@ -148,9 +153,11 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
               return (
                 <tr key={d} className={`border-b border-border/50 last:border-0 ${state === "locked" ? "opacity-50" : ""}`}>
                   <th className="w-44 p-4 text-left align-top">
-                    <p className="text-sm font-medium">6 {META[d].title}</p>
+                    <p className="text-sm font-medium">
+                      {rows[i].length} {META[d].title}
+                    </p>
                     <p className="mt-1 text-[11px] font-normal text-muted-foreground">
-                      {state === "decided" ? "Decided" : state === "now" ? `${doneCount(rows[i])} of 6 shot` : "After the round above"}
+                      {state === "decided" ? "Decided" : state === "now" ? `${doneCount(rows[i])} of ${rows[i].length} shot` : "After the round above"}
                     </p>
                     {state === "decided" && winners(d).length > 0 && (
                       <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-normal text-amber-300">
@@ -161,7 +168,10 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
                   </th>
                   <td className="p-4">
                     {state === "now" && <p className="mb-3 text-xs text-muted-foreground">{trial.briefs[d]}</p>}
-                    <div className="grid grid-cols-6 gap-3">
+                    <div
+                      className="grid gap-3"
+                      style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(rows[i].length, 1), 6)}, minmax(0, 1fr))` }}
+                    >
                       {rows[i].map((c) => (
                         <CellTile key={c.id} c={c} locked={state === "locked"} onOpen={() => state !== "locked" && setOpenId(c.id)} />
                       ))}
@@ -336,7 +346,7 @@ function MobileRound({
               ? `Winner: ${winners.join(", ")}`
               : "Decided"
             : state === "now"
-              ? `${shot} of 6 shot`
+              ? `${shot} of ${row.length} shot`
               : "Opens after the round before"}
         </p>
       </div>
@@ -717,5 +727,49 @@ function CellSheet({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** Staff only: how many reshoots each round has — also what new trials start with. */
+function ReshootCount({ trialId, value, onChanged }: { trialId: string; value: number; onChanged: () => void }) {
+  const [pending, start] = useTransition();
+  const change = (n: number) =>
+    start(async () => {
+      const res = await setTrialReshoots(trialId, n);
+      if (res.error) toast.error(res.error);
+      else onChanged();
+    });
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-card px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs font-medium">Reshoots per round</p>
+        <p className="text-[10px] text-muted-foreground">For this trial and every new one</p>
+      </div>
+      <div className="flex items-center gap-1">
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-7 w-7"
+          disabled={pending || value <= 1}
+          onClick={() => change(value - 1)}
+          aria-label="Fewer reshoots"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </Button>
+        <span className="w-7 text-center text-sm font-semibold tabular-nums">
+          {pending ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : value}
+        </span>
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-7 w-7"
+          disabled={pending || value >= 12}
+          onClick={() => change(value + 1)}
+          aria-label="More reshoots"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
   );
 }

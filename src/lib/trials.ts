@@ -71,6 +71,8 @@ export type TrialView = {
   phase: Phase;
   status: string;
   createdAt: string;
+  /** Reshoots per round. */
+  reshoots: number;
   cells: CellView[];
 };
 
@@ -79,17 +81,20 @@ export const phaseIndex = (p: Phase) => (p === "done" ? 3 : DIMENSIONS.indexOf(p
 export const rowOpen = (phase: Phase, d: Dimension) => DIMENSIONS.indexOf(d) <= phaseIndex(phase);
 
 /** What she is asked to do in a round, given what won before it. */
-export function roundBrief(d: Dimension, winners: { outfit: string[]; location: string[] }): string {
+export function roundBrief(d: Dimension, winners: { outfit: string[]; location: string[] }, n = 6): string {
   const list = (xs: string[]) => xs.join(" or ");
-  if (d === "outfit") return "Same location, same hook as the outlier — only the outfit changes. Six different outfits.";
+  if (d === "outfit") return `Same location, same hook as the outlier — only the outfit changes. ${n} different outfits.`;
   if (d === "location") {
     const o = winners.outfit.length ? `Wear ${list(winners.outfit)}` : "Wear the winning outfit";
-    return `${o}, same hook — only the location changes. Six different places.`;
+    return `${o}, same hook — only the location changes. ${n} different places.`;
   }
   const o = winners.outfit.length ? list(winners.outfit) : "the winning outfit";
   const l = winners.location.length ? list(winners.location) : "the winning location";
-  return `${o} at ${l} — only the hook changes: the first second and the text on screen. Six different hooks.`;
+  return `${o} at ${l} — only the hook changes: the first second and the text on screen. ${n} different hooks.`;
 }
+
+/** Reshoots a round may have. */
+export const MAX_RESHOOTS = 12;
 
 export function cellName(c: { dimension: Dimension; slot: number; label: string | null }): string {
   return c.label?.trim() ? c.label.trim() : `${DIM_META[c.dimension].one} ${c.slot}`;
@@ -152,6 +157,7 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
     phase: t.phase as Phase,
     status: t.status,
     createdAt: t.created_at,
+    reshoots: t.reshoots ?? 6,
     cells: views,
   };
 }
@@ -273,6 +279,8 @@ export type TrialSummary = {
   posted: number;
   started: number;
   toShoot: number;
+  /** Reshoots in the current round. */
+  total: number;
   brief: string;
   createdAt: string;
 };
@@ -302,7 +310,8 @@ export async function listTrials(supabase: Sb, personaId: string, includeDone = 
       posted: row.filter((c) => c.state === "posted").length,
       started: row.filter((c) => c.state === "takes").length,
       toShoot: row.filter((c) => c.state === "empty" || c.state === "takes").length,
-      brief: t.phase === "done" ? "Pattern found" : roundBrief(dim, winners),
+      total: row.length,
+      brief: t.phase === "done" ? "Pattern found" : roundBrief(dim, winners, t.reshoots),
       createdAt: t.createdAt,
     });
   }
@@ -348,9 +357,14 @@ export async function ensureTrial(
     .maybeSingle();
   if (existing) return { id: existing.id, created: false, error: null };
 
+  // As many reshoots a round as the persona last chose.
+  const { data: persona } = await supabase.from("personas").select("trial_reshoots").eq("id", input.personaId).maybeSingle();
+  const reshoots = Math.min(MAX_RESHOOTS, Math.max(1, persona?.trial_reshoots ?? 6));
+
   const { data: trial, error } = await supabase
     .from("trials")
     .insert({
+      reshoots,
       persona_id: input.personaId,
       account_id: input.accountId,
       shortcode: input.shortcode,
@@ -365,7 +379,9 @@ export async function ensureTrial(
     .select("id")
     .single();
   if (error || !trial) return { id: null, created: false, error: error?.message ?? "could not start" };
-  const cells = DIMENSIONS.flatMap((d) => [1, 2, 3, 4, 5, 6].map((slot) => ({ trial_id: trial.id, dimension: d, slot })));
+  const cells = DIMENSIONS.flatMap((d) =>
+    Array.from({ length: reshoots }, (_, i) => ({ trial_id: trial.id, dimension: d, slot: i + 1 }))
+  );
   const { error: cellErr } = await supabase.from("trial_cells").insert(cells);
   if (cellErr) return { id: trial.id, created: true, error: cellErr.message };
   await storeOutlierVideo(supabase, trial.id, { bytes: input.videoBytes ?? null, platform: input.platform });
@@ -466,7 +482,7 @@ export async function notifyTrial(trialId: string, kind: "round" | "done") {
             return [
               `🏆 <b>${DIM_META[prev ?? "outfit"].title} decided on ${esc(acc)}</b>${won.length ? ` · ${esc(won.join(", "))}` : ""}`,
               ``,
-              `${target.model ? `${target.model}, ` : ""}next up: 6 ${DIM_META[d].many} — ${esc(roundBrief(d, w))}`,
+              `${target.model ? `${target.model}, ` : ""}next up: ${view.reshoots} ${DIM_META[d].many} — ${esc(roundBrief(d, w, view.reshoots))}`,
             ];
           })();
     const res = await sendMessage({

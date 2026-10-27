@@ -54,6 +54,7 @@ export type Database = {
           slug: string;
           avatar_url: string | null;
           brand_color: string;
+          trial_reshoots: number;
           platforms: Json;
           created_at: string;
           updated_at: string;
@@ -64,6 +65,7 @@ export type Database = {
           slug: string;
           avatar_url?: string | null;
           brand_color?: string;
+          trial_reshoots?: number;
           platforms?: Json;
           created_at?: string;
           updated_at?: string;
@@ -74,6 +76,7 @@ export type Database = {
           slug?: string;
           avatar_url?: string | null;
           brand_color?: string;
+          trial_reshoots?: number;
           platforms?: Json;
           created_at?: string;
           updated_at?: string;
@@ -519,6 +522,12 @@ export type Database = {
         Row: { id: string; persona_id: string; account_id: string; week_start: string; analysis: Json; model: string | null; created_at: string; sent_at: string | null };
         Insert: { id?: string; persona_id: string; account_id: string; week_start: string; analysis: Json; model?: string | null; created_at?: string; sent_at?: string | null };
         Update: { id?: string; persona_id?: string; account_id?: string; week_start?: string; analysis?: Json; model?: string | null; created_at?: string; sent_at?: string | null };
+        Relationships: [];
+      };
+      checklist_items: {
+        Row: { id: string; persona_id: string; text: string; done: boolean; done_at: string | null; done_by: string | null; position: number; created_by: string | null; created_at: string };
+        Insert: { id?: string; persona_id: string; text: string; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
+        Update: { id?: string; persona_id?: string; text?: string; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
         Relationships: [];
       };
       reel_metrics: {
@@ -971,6 +980,7 @@ export type Database = {
           status: string;
           message_id: number | null;
           video_path: string | null;
+          reshoots: number;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -990,6 +1000,7 @@ export type Database = {
           status?: string;
           message_id?: number | null;
           video_path?: string | null;
+          reshoots?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -1009,6 +1020,7 @@ export type Database = {
           status?: string;
           message_id?: number | null;
           video_path?: string | null;
+          reshoots?: number;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;

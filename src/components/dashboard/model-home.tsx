@@ -173,13 +173,15 @@ export type TrialCard = {
   posted: number;
   started: number;
   toShoot: number;
+  /** Reshoots in the current round. */
+  total: number;
   brief: string;
 };
 
 const ROUND: Record<TrialCard["phase"], { n: number; label: string; emoji: string }> = {
-  outfit: { n: 1, label: "6 outfits", emoji: "👗" },
-  location: { n: 2, label: "6 locations", emoji: "📍" },
-  hook: { n: 3, label: "6 hooks", emoji: "🪝" },
+  outfit: { n: 1, label: "outfits", emoji: "👗" },
+  location: { n: 2, label: "locations", emoji: "📍" },
+  hook: { n: 3, label: "hooks", emoji: "🪝" },
   done: { n: 3, label: "Pattern found", emoji: "🏁" },
 };
 
@@ -200,7 +202,7 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
       ) : (
         trials.map((t) => {
           const r = ROUND[t.phase];
-          const pct = Math.round((t.shot / 6) * 100);
+          const pct = t.total ? Math.round((t.shot / t.total) * 100) : 0;
           return (
             <Link
               key={t.id}
@@ -219,11 +221,11 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
                   <span className="truncate text-xs font-medium">{t.accountLabel}</span>
                 </div>
                 <p className="mt-1.5 text-sm font-medium leading-tight">
-                  Round {r.n} of 3 · {r.label}
+                  Round {r.n} of 3 · {t.phase === "done" ? r.label : `${t.total} ${r.label}`}
                 </p>
                 <div className="mt-auto pt-2">
                   <div className="flex gap-1">
-                    {Array.from({ length: 6 }, (_, i) => (
+                    {Array.from({ length: t.total }, (_, i) => (
                       <span
                         key={i}
                         className={`h-1.5 flex-1 rounded-full ${
@@ -234,7 +236,7 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
                   </div>
                   <p className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
                     <span>
-                      {t.phase === "done" ? "All rounds decided" : `${t.shot}/6 shot · ${pct}%`}
+                      {t.phase === "done" ? "All rounds decided" : `${t.shot}/${t.total} shot · ${pct}%`}
                     </span>
                     <span className="flex items-center font-medium text-foreground">
                       {t.toShoot > 0 && t.phase !== "done" ? "Shoot" : "Open"} <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />

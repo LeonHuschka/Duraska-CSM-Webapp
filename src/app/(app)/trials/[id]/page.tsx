@@ -26,7 +26,7 @@ export default async function TrialPage({ params }: { params: Promise<{ id: stri
   ]);
   const staff = profile?.global_role === "owner" || membership?.role === "owner" || membership?.role === "manager";
   const w = winnersOf(t);
-  const briefs = Object.fromEntries(DIMENSIONS.map((d) => [d, roundBrief(d, w)])) as Record<Dimension, string>;
+  const briefs = Object.fromEntries(DIMENSIONS.map((d) => [d, roundBrief(d, w, t.reshoots)])) as Record<Dimension, string>;
 
   return (
     <TrialMatrix
@@ -43,6 +43,7 @@ export default async function TrialPage({ params }: { params: Promise<{ id: stri
         sourceTitle: t.sourceTitle,
         phase: t.phase,
         status: t.status,
+        reshoots: t.reshoots,
         cells: t.cells,
         briefs,
       }}

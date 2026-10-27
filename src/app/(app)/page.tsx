@@ -5,6 +5,7 @@ import { CreatePersonaCard } from "@/components/personas/create-persona-card";
 import { Upload, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { LinksDonut, TrialJobs, WeekVsMust } from "@/components/dashboard/model-home";
+import { Checklist } from "@/components/dashboard/checklist";
 import { listTrials } from "@/lib/trials";
 import { PipelineTab } from "@/components/pipeline/pipeline-tab";
 
@@ -122,6 +123,14 @@ export default async function DashboardPage({
     // ── Trial-Maxxing waiting for her ──
     const trials = await listTrials(supabase, personaId);
 
+    // ── Her checklist: managers write it, she ticks it ──
+    const { data: checklist } = await supabase
+      .from("checklist_items")
+      .select("id, text, done")
+      .eq("persona_id", personaId)
+      .order("position")
+      .order("created_at");
+
     return (
       <div className="mx-auto max-w-md space-y-5 pb-6">
         {previewingModel && (
@@ -139,6 +148,8 @@ export default async function DashboardPage({
           <h1 className="text-2xl font-semibold tracking-tight">Hey{persona?.name ? ` ${persona.name}` : ""} 👋</h1>
           <p className="mt-1 text-sm text-muted-foreground">Here&apos;s where your reels stand.</p>
         </div>
+
+        <Checklist items={checklist ?? []} canEdit={!isModel} />
 
         <LinksDonut open={openLinks} shot={shotLinks} topicHref={tgLink} />
 
