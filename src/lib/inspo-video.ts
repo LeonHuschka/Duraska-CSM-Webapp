@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
-import { deleteMessage, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
+import { deleteMessage, instagramKey, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
 import { apifyRunSync } from "@/lib/apify";
 
 /**
@@ -137,6 +137,53 @@ export async function fetchInspoVideo(
   }
 
   return { linkId, ok: true, note: "already had its video" };
+}
+
+/**
+ * The same for a job the model started herself with an inspo link: no
+ * Telegram message, so the copy is stored on the job and nothing is posted.
+ * Skipped when the topic already holds a copy of that post.
+ */
+export async function fetchRequestInspo(
+  supabase: Db,
+  requestId: string
+): Promise<{ ok: boolean; note: string }> {
+  const { data: r } = await supabase
+    .from("content_requests")
+    .select("id, persona_id, inspo_link, inspo_video_path")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (!r?.inspo_link) return { ok: false, note: "no inspo link" };
+  if (r.inspo_video_path) return { ok: true, note: "already had its video" };
+  const key = instagramKey(r.inspo_link);
+  if (key) {
+    const { data: copy } = await supabase
+      .from("content_links")
+      .select("id")
+      .eq("persona_id", r.persona_id)
+      .eq("url_key", key)
+      .not("video_path", "is", null)
+      .limit(1);
+    if (copy?.length) return { ok: true, note: "the topic has a copy" };
+  }
+  const fail = async (note: string) => {
+    await supabase.from("content_requests").update({ inspo_video_error: note }).eq("id", requestId);
+    return { ok: false, note };
+  };
+  const resolved = await resolveVideoUrl(r.inspo_link);
+  if (!resolved.ok) return fail(resolved.note);
+  const bytes = await downloadVideo(resolved.url);
+  if (!bytes) return fail("download failed");
+  const path = `personas/${r.persona_id}/inspo/request-${requestId}.mp4`;
+  const { error } = await supabase.storage
+    .from("content-assets")
+    .upload(path, bytes, { contentType: "video/mp4", upsert: true });
+  if (error) return fail(`storage: ${error.message}`);
+  await supabase
+    .from("content_requests")
+    .update({ inspo_video_path: path, inspo_video_error: null })
+    .eq("id", requestId);
+  return { ok: true, note: "stored" };
 }
 
 /**

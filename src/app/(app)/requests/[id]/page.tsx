@@ -66,6 +66,7 @@ export default async function RequestDetailPage({
   const inspoVideoPath =
     inspoLinks?.find((l) => l.request_id === id)?.video_path ??
     inspoLinks?.[0]?.video_path ??
+    request.inspo_video_path ??
     null;
 
   // Generate signed URLs for all assets (originals + thumbnails) in one batch

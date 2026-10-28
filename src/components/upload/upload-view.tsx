@@ -370,6 +370,12 @@ export function UploadView({ personaId }: { personaId: string }) {
         toast.error(created.error ?? "Failed to create job");
         return;
       }
+      // Keep the inspo reel with the job — runs on its own, she doesn't wait.
+      if (inspoLink.trim()) {
+        void fetch(`/api/links/request-video?id=${created.request_id}`, { method: "POST", keepalive: true }).catch(
+          () => null
+        );
+      }
       let saved = 0;
       for (const t of ready) {
         try {

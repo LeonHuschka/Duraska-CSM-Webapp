@@ -159,6 +159,8 @@ export type Database = {
           description: string | null;
           inspo_links: string[] | null;
           inspo_link: string | null;
+          inspo_video_path: string | null;
+          inspo_video_error: string | null;
           reference_image_urls: string[] | null;
           content_type_id: string | null;
           is_nsfw: boolean;
@@ -181,6 +183,8 @@ export type Database = {
           description?: string | null;
           inspo_links?: string[] | null;
           inspo_link?: string | null;
+          inspo_video_path?: string | null;
+          inspo_video_error?: string | null;
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
@@ -203,6 +207,8 @@ export type Database = {
           description?: string | null;
           inspo_links?: string[] | null;
           inspo_link?: string | null;
+          inspo_video_path?: string | null;
+          inspo_video_error?: string | null;
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
