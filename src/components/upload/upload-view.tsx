@@ -62,10 +62,19 @@ const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 // enough on a phone that she deserves a heads-up.
 const SLOW_UPLOAD_BYTES = 300 * 1024 * 1024;
 
-type FileState = {
-  status: "pending" | "uploading" | "done" | "error";
+/** A picked take. It starts uploading the moment she picks it, so by the
+ *  time she has filled in the rest the big files are already on their way. */
+type Take = {
+  id: string;
+  file: File;
+  fansly: boolean;
+  status: "waiting" | "uploading" | "done" | "error";
   pct: number;
+  path: string;
 };
+
+// Upload a few takes side by side, not all at once.
+const CONCURRENCY = 3;
 
 // Phones decode one video at a time well; several at once stall them all.
 let thumbQueue: Promise<unknown> = Promise.resolve();
@@ -129,10 +138,12 @@ function putWithProgress(
   signedUrl: string,
   file: File,
   mime: string,
-  onProgress: (loadedBytes: number) => void
+  onProgress: (loadedBytes: number) => void,
+  onStart?: (xhr: XMLHttpRequest) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    onStart?.(xhr);
     xhr.open("PUT", signedUrl, true);
     xhr.setRequestHeader("content-type", mime);
     xhr.setRequestHeader("x-upsert", "true");
@@ -149,6 +160,7 @@ function putWithProgress(
     };
     xhr.onerror = () => reject(new Error("network error during upload"));
     xhr.ontimeout = () => reject(new Error("upload timed out"));
+    xhr.onabort = () => reject(new Error("removed"));
     xhr.send(file);
   });
 }
@@ -160,25 +172,24 @@ export function UploadView({ personaId }: { personaId: string }) {
   const [inspoLink, setInspoLink] = useState("");
   const [notes, setNotes] = useState("");
   const [isNsfw, setIsNsfw] = useState(false);
-  const [files, setFiles] = useState<File[]>([]);
-  // Per take: shot in a Fansly outfit. Same order as files.
-  const [fansly, setFansly] = useState<boolean[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [pct, setPct] = useState(0);
-  const [fileStates, setFileStates] = useState<FileState[]>([]);
-
-  function setFileState(index: number, patch: Partial<FileState>) {
-    setFileStates((prev) => {
-      const next = [...prev];
-      next[index] = { ...(next[index] ?? { status: "pending", pct: 0 }), ...patch };
-      return next;
-    });
-  }
+  const [takes, setTakes] = useState<Take[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [previewTitle, setPreviewTitle] = useState("…");
   const [doneInfo, setDoneInfo] = useState<{ title: string; count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Upload bookkeeping that must not wait for a render.
+  const queueRef = useRef<Take[]>([]);
+  const activeRef = useRef(0);
+  const xhrRef = useRef(new Map<string, XMLHttpRequest>());
+  // id → uploaded or not, set the moment an upload stops
+  const resultRef = useRef(new Map<string, boolean>());
+  const finishedRef = useRef(new Map<string, () => void>());
+
+  const patchTake = useCallback((id: string, patch: Partial<Take>) => {
+    setTakes((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,180 +202,213 @@ export function UploadView({ personaId }: { personaId: string }) {
     // Re-fetch after a successful upload resets doneInfo → back to form
   }, [doneInfo]);
 
-  const handleFiles = useCallback((picked: FileList | File[]) => {
-    const all = Array.from(picked);
-    if (all.length === 0) return;
-    const arr = all.filter(isMediaFile);
-    if (arr.length === 0) {
-      toast.error("Those files aren't photos or videos");
-      return;
-    }
-    if (arr.length < all.length) {
-      toast.warning(`${all.length - arr.length} file(s) skipped — not media`);
-    }
-    const tooBig = arr.filter((f) => f.size > MAX_UPLOAD_BYTES);
-    if (tooBig.length > 0) {
-      toast.error(
-        `${tooBig.length} take(s) are over the ${MAX_UPLOAD_MB} MB limit and will fail — send those via Telegram`,
-        { duration: 8000 }
-      );
-    }
-    const slow = arr.filter(
-      (f) => f.size <= MAX_UPLOAD_BYTES && f.size > SLOW_UPLOAD_BYTES
-    );
-    if (slow.length > 0) {
-      toast.warning(
-        `${slow.length} big take(s) — keep this page open while they upload`,
-        { duration: 6000 }
-      );
-    }
-    setFiles((prev) => [...prev, ...arr]);
-    setFansly((prev) => [...prev, ...arr.map(() => false)]);
-  }, []);
+  // Leaving mid-upload loses the takes — ask first.
+  const busy = takes.some((t) => t.status === "uploading" || t.status === "waiting");
+  useEffect(() => {
+    if (!busy) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [busy]);
 
-  function removeFile(idx: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
-    setFansly((prev) => prev.filter((_, i) => i !== idx));
+  const uploadOne = useCallback(
+    async (take: Take) => {
+      const supabase = createClient();
+      patchTake(take.id, { status: "uploading", pct: 0 });
+      let ok = false;
+      try {
+        // Signed upload URL + XHR so we get real byte progress. Falls back
+        // to the SDK upload if anything about the signed path misbehaves.
+        const { data: signed } = await supabase.storage
+          .from("content-assets")
+          .createSignedUploadUrl(take.path);
+        if (signed?.signedUrl) {
+          await putWithProgress(
+            signed.signedUrl,
+            take.file,
+            resolveMime(take.file),
+            (loaded) => patchTake(take.id, { pct: Math.round((loaded / (take.file.size || 1)) * 100) }),
+            (xhr) => xhrRef.current.set(take.id, xhr)
+          );
+        } else {
+          const { error } = await supabase.storage
+            .from("content-assets")
+            .upload(take.path, take.file, { contentType: resolveMime(take.file), upsert: true });
+          if (error) throw new Error(error.message);
+        }
+        ok = true;
+        patchTake(take.id, { status: "done", pct: 100 });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "upload failed";
+        if (msg !== "removed") {
+          patchTake(take.id, { status: "error" });
+          toast.error(`A take did not upload: ${msg} — tap it to try again`);
+        }
+      } finally {
+        resultRef.current.set(take.id, ok);
+        xhrRef.current.delete(take.id);
+        finishedRef.current.get(take.id)?.();
+        finishedRef.current.delete(take.id);
+      }
+      return ok;
+    },
+    [patchTake]
+  );
+
+  const pump = useCallback(() => {
+    while (activeRef.current < CONCURRENCY && queueRef.current.length > 0) {
+      const next = queueRef.current.shift()!;
+      activeRef.current++;
+      void uploadOne(next).finally(() => {
+        activeRef.current--;
+        pump();
+      });
+    }
+  }, [uploadOne]);
+
+  const enqueue = useCallback(
+    (list: Take[]) => {
+      queueRef.current.push(...list);
+      pump();
+    },
+    [pump]
+  );
+
+  const handleFiles = useCallback(
+    (picked: FileList | File[]) => {
+      const all = Array.from(picked);
+      if (all.length === 0) return;
+      const arr = all.filter(isMediaFile);
+      if (arr.length === 0) {
+        toast.error("Those files aren't photos or videos");
+        return;
+      }
+      if (arr.length < all.length) {
+        toast.warning(`${all.length - arr.length} file(s) skipped — not media`);
+      }
+      const tooBig = arr.filter((f) => f.size > MAX_UPLOAD_BYTES);
+      if (tooBig.length > 0) {
+        toast.error(
+          `${tooBig.length} take(s) are over the ${MAX_UPLOAD_MB} MB limit — send those via Telegram`,
+          { duration: 8000 }
+        );
+      }
+      if (arr.some((f) => f.size <= MAX_UPLOAD_BYTES && f.size > SLOW_UPLOAD_BYTES)) {
+        toast.warning("Big take — keep this page open while it uploads", { duration: 6000 });
+      }
+      const fresh: Take[] = arr.map((file) => {
+        const id = crypto.randomUUID();
+        return {
+          id,
+          file,
+          fansly: false,
+          status: file.size > MAX_UPLOAD_BYTES ? "error" : "waiting",
+          pct: 0,
+          // Not under a job yet — the job is made on Send. Nothing reads
+          // the folder layout, the path is stored on the asset as is.
+          path: `personas/${personaId}/takes/${id}_${safeStorageName(file.name)}`,
+        };
+      });
+      setTakes((prev) => [...prev, ...fresh]);
+      enqueue(fresh.filter((t) => t.status === "waiting"));
+    },
+    [enqueue, personaId]
+  );
+
+  function retry(take: Take) {
+    if (take.file.size > MAX_UPLOAD_BYTES) return;
+    resultRef.current.delete(take.id);
+    patchTake(take.id, { status: "waiting", pct: 0 });
+    enqueue([take]);
+  }
+
+  function removeTake(take: Take) {
+    queueRef.current = queueRef.current.filter((t) => t.id !== take.id);
+    xhrRef.current.get(take.id)?.abort();
+    if (take.status === "done") {
+      void createClient().storage.from("content-assets").remove([take.path]);
+    }
+    setTakes((prev) => prev.filter((t) => t.id !== take.id));
+  }
+
+  /** Resolves once every take has stopped uploading, one way or the other. */
+  function allSettled(list: Take[]) {
+    return Promise.all(
+      list
+        .filter((t) => t.file.size <= MAX_UPLOAD_BYTES && !resultRef.current.has(t.id))
+        .map((t) => new Promise<void>((res) => finishedRef.current.set(t.id, res)))
+    );
   }
 
   function reset() {
     setInspoLink("");
+    setNotes("");
     setIsNsfw(false);
-    setFiles([]);
-    setFansly([]);
-    setProgress({ done: 0, total: 0 });
-    setPct(0);
-    setFileStates([]);
+    setTakes([]);
+    resultRef.current.clear();
   }
 
   async function handleSubmit() {
-    if (files.length === 0) {
+    if (takes.length === 0) {
       toast.error("Add at least one take");
       return;
     }
-    setUploading(true);
-    setProgress({ done: 0, total: files.length });
-    setPct(0);
-    setFileStates(files.map(() => ({ status: "pending", pct: 0 })));
+    setSubmitting(true);
     try {
-      await runUpload();
+      await allSettled(takes);
+      const ready = takes.filter((t) => resultRef.current.get(t.id) === true);
+      if (ready.length === 0) {
+        toast.error("No take finished uploading — tap the failed ones to retry");
+        return;
+      }
+      const created = await createSelfProducedRequest({
+        inspo_link: inspoLink.trim() || null,
+        notes: source === "own" ? notes.trim() || null : null,
+        is_nsfw: isNsfw,
+      });
+      if (created.error || !created.request_id) {
+        toast.error(created.error ?? "Failed to create job");
+        return;
+      }
+      let saved = 0;
+      for (const t of ready) {
+        try {
+          // No thumbnail here on purpose — the Vault backfills them later.
+          await createAssetRecord({
+            request_id: created.request_id,
+            stage: "raw",
+            file_path: t.path,
+            file_name: t.file.name,
+            mime_type: resolveMime(t.file),
+            size_bytes: t.file.size,
+            thumbnail_path: null,
+            fansly: t.fansly,
+          });
+          saved++;
+        } catch (err) {
+          toast.error(`A take could not be saved: ${err instanceof Error ? err.message : "error"}`);
+        }
+      }
+      if (ready.length < takes.length) {
+        toast.warning(`${takes.length - ready.length} take(s) failed and were left out`);
+      }
+      setDoneInfo({ title: created.title ?? "", count: saved });
+      reset();
     } catch (err) {
       console.error("[upload] failed", err);
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       // Never leave the button spinning — a stuck spinner is what made the
       // page look frozen with no way to retry.
-      setUploading(false);
+      setSubmitting(false);
     }
   }
 
-  async function runUpload() {
-    const created = await createSelfProducedRequest({
-      inspo_link: inspoLink.trim() || null,
-      notes: source === "own" ? notes.trim() || null : null,
-      is_nsfw: isNsfw,
-    });
-    if (created.error || !created.request_id) {
-      toast.error(created.error ?? "Failed to create job");
-      return;
-    }
-    const requestId = created.request_id;
-    const finalTitle = created.title ?? "";
-    const supabase = createClient();
-    let completed = 0;
-
-    const sent = new Array<number>(files.length).fill(0);
-    const pushPct = () => {
-      const total = files.reduce((a, f) => a + f.size, 0) || 1;
-      const done = sent.reduce((a, b) => a + b, 0);
-      setPct(Math.min(99, Math.round((done / total) * 100)));
-    };
-
-    async function uploadOne(file: File, index: number) {
-      const uuid = crypto.randomUUID();
-      const mime = resolveMime(file);
-      const filePath = `personas/${personaId}/requests/${requestId}/raw/${uuid}_${safeStorageName(file.name)}`;
-      setFileState(index, { status: "uploading", pct: 0 });
-
-      try {
-        // Signed upload URL + XHR so we get real byte progress. Falls back
-        // to the SDK upload if anything about the signed path misbehaves.
-        const { data: signed } = await supabase.storage
-          .from("content-assets")
-          .createSignedUploadUrl(filePath);
-
-        if (signed?.signedUrl) {
-          await putWithProgress(signed.signedUrl, file, mime, (loaded) => {
-            sent[index] = loaded;
-            setFileState(index, {
-              pct: Math.round((loaded / (file.size || 1)) * 100),
-            });
-            pushPct();
-          });
-        } else {
-          const { error } = await supabase.storage
-            .from("content-assets")
-            .upload(filePath, file, { contentType: mime, upsert: true });
-          if (error) throw new Error(error.message);
-          sent[index] = file.size;
-          setFileState(index, { pct: 100 });
-          pushPct();
-        }
-      } catch (err) {
-        setFileState(index, { status: "error" });
-        toast.error(
-          `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`
-        );
-        return;
-      }
-
-      try {
-        // No thumbnail here on purpose. Generating one means decoding the
-        // whole video on her phone (tens of seconds per take) — the Vault
-        // backfills thumbnails later instead, so she never waits for it.
-        await createAssetRecord({
-          request_id: requestId,
-          stage: "raw",
-          file_path: filePath,
-          file_name: file.name,
-          mime_type: mime,
-          size_bytes: file.size,
-          thumbnail_path: null,
-          fansly: fansly[index] ?? false,
-        });
-        completed++;
-        setFileState(index, { status: "done", pct: 100 });
-        setProgress({ done: completed, total: files.length });
-      } catch (err) {
-        setFileState(index, { status: "error" });
-        await supabase.storage.from("content-assets").remove([filePath]);
-        toast.error(
-          `${file.name}: ${err instanceof Error ? err.message : "could not be saved"}`
-        );
-      }
-    }
-
-    // Upload several takes at once instead of one after another.
-    const queue = files.map((f, i) => ({ f, i }));
-    const CONCURRENCY = 3;
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-        for (;;) {
-          const next = queue.shift();
-          if (!next) return;
-          await uploadOne(next.f, next.i);
-        }
-      })
-    );
-    setPct(100);
-
-    if (completed === 0) {
-      toast.error("Nothing was uploaded — see the errors above");
-      return;
-    }
-    setDoneInfo({ title: finalTitle, count: completed });
-    reset();
-  }
+  const totalBytes = takes.reduce((a, t) => a + t.file.size, 0) || 1;
+  const sentBytes = takes.reduce((a, t) => a + (t.file.size * t.pct) / 100, 0);
+  const pct = Math.round((sentBytes / totalBytes) * 100);
+  const doneCount = takes.filter((t) => t.status === "done").length;
+  const fanslyCount = takes.filter((t) => t.fansly).length;
 
   // ── Success state ──
   if (doneInfo) {
@@ -423,7 +467,7 @@ export function UploadView({ personaId }: { personaId: string }) {
             key={opt.key}
             type="button"
             onClick={() => setSource(opt.key)}
-            disabled={uploading}
+            disabled={submitting}
             className={`rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
               source === opt.key
                 ? "border-primary bg-primary/10 text-foreground"
@@ -447,7 +491,7 @@ export function UploadView({ personaId }: { personaId: string }) {
           value={inspoLink}
           onChange={(e) => setInspoLink(e.target.value)}
           placeholder="https://instagram.com/reel/…"
-          disabled={uploading}
+          disabled={submitting}
           className="h-11"
           inputMode="url"
         />
@@ -463,7 +507,7 @@ export function UploadView({ personaId }: { personaId: string }) {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="What should this reel be? Music, text on screen, the vibe, where to cut…"
-            disabled={uploading}
+            disabled={submitting}
             rows={4}
             className="text-sm"
           />
@@ -477,7 +521,7 @@ export function UploadView({ personaId }: { personaId: string }) {
       <button
         type="button"
         onClick={() => setIsNsfw((v) => !v)}
-        disabled={uploading}
+        disabled={submitting}
         className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
           isNsfw
             ? "border-blue-500/40 bg-blue-500/10 text-blue-400"
@@ -518,85 +562,82 @@ export function UploadView({ personaId }: { personaId: string }) {
           }}
         />
 
-        {files.length > 0 && (
+        {takes.length > 0 && (
           <p className="text-[11px] text-muted-foreground">
             Tap <span className="font-semibold text-foreground">IG</span> on every take you shot in a Fansly
             outfit — it turns <span className="font-semibold text-sky-300">Fansly</span>.
-            {fansly.some(Boolean) && (
-              <span className="ml-1 font-medium text-sky-300">{fansly.filter(Boolean).length} Fansly</span>
-            )}
+            {fanslyCount > 0 && <span className="ml-1 font-medium text-sky-300">{fanslyCount} Fansly</span>}
           </p>
         )}
         <div className="grid grid-cols-3 gap-2">
-          {files.map((f, i) => {
-            const st = fileStates[i];
-            const tooBig = f.size > MAX_UPLOAD_BYTES;
+          {takes.map((t, i) => {
+            const tooBig = t.file.size > MAX_UPLOAD_BYTES;
             return (
               <div
-                key={i}
+                key={t.id}
                 className={`relative flex aspect-[9/16] items-center justify-center overflow-hidden rounded-xl border-2 bg-muted/40 ${
-                  tooBig ? "border-red-500" : fansly[i] ? "border-sky-400" : "border-transparent"
+                  tooBig ? "border-red-500" : t.fansly ? "border-sky-400" : "border-transparent"
                 }`}
               >
-                <TakeThumb file={f} />
+                <TakeThumb file={t.file} />
                 <span className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                   Take {i + 1}
                 </span>
-                {!uploading && (
+                {!submitting && (
                   <button
                     type="button"
-                    onClick={() => removeFile(i)}
-                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white"
+                    onClick={() => removeTake(t)}
+                    className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
-                {st?.status === "uploading" || st?.status === "pending" ? (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 px-3">
-                    <span className="text-sm font-semibold tabular-nums text-white">
-                      {st.status === "pending" ? "waiting" : `${st.pct}%`}
+                {t.status === "done" ? (
+                  <span className="absolute bottom-10 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60">
+                    <CheckCircle2 className="h-4 w-4 text-green-400" />
+                  </span>
+                ) : t.status === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => retry(t)}
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-white"
+                  >
+                    <X className="h-7 w-7 text-red-400" />
+                    <span className="px-2 text-center text-[10px] font-semibold">
+                      {tooBig ? `Too large — max ${MAX_UPLOAD_MB} MB` : "Failed — tap to retry"}
                     </span>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20">
+                  </button>
+                ) : (
+                  // Upload progress of the whole file, from the moment she picks it.
+                  <div className="absolute inset-x-1.5 bottom-10 rounded-md bg-black/60 px-1.5 py-1">
+                    <div className="flex justify-between text-[9px] font-semibold tabular-nums text-white">
+                      <span>{t.status === "waiting" ? "waiting" : "uploading"}</span>
+                      <span>{t.pct}%</span>
+                    </div>
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/20">
                       <div
                         className="h-full rounded-full bg-primary transition-all duration-300"
-                        style={{ width: `${st.pct}%` }}
+                        style={{ width: `${t.pct}%` }}
                       />
                     </div>
                   </div>
-                ) : st?.status === "done" ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                    <CheckCircle2 className="h-7 w-7 text-green-400" />
-                  </div>
-                ) : st?.status === "error" ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/55">
-                    <X className="h-7 w-7 text-red-400" />
-                  </div>
-                ) : null}
-                {tooBig ? (
-                  <span className="absolute inset-x-1.5 bottom-10 rounded-md bg-red-500/90 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
-                    Too large — max {MAX_UPLOAD_MB} MB
-                  </span>
-                ) : f.size > SLOW_UPLOAD_BYTES ? (
-                  <span className="absolute inset-x-1.5 bottom-10 rounded-md bg-amber-500/90 px-1 py-0.5 text-center text-[9px] font-semibold text-black">
-                    Big — takes a while
-                  </span>
-                ) : null}
+                )}
                 {/* Instagram or Fansly: one tap per take, so the editor
                     can tell the Fansly-outfit takes apart. */}
                 <button
                   type="button"
-                  disabled={uploading}
-                  onClick={() => setFansly((prev) => prev.map((v, j) => (j === i ? !v : v)))}
+                  disabled={submitting}
+                  onClick={() => patchTake(t.id, { fansly: !t.fansly })}
                   className={`absolute inset-x-1.5 bottom-1.5 rounded-lg py-1.5 text-[11px] font-semibold backdrop-blur ${
-                    fansly[i] ? "bg-sky-500 text-white" : "bg-black/60 text-white/90"
+                    t.fansly ? "bg-sky-500 text-white" : "bg-black/60 text-white/90"
                   }`}
                 >
-                  {fansly[i] ? "Fansly" : "IG"}
+                  {t.fansly ? "Fansly" : "IG"}
                 </button>
               </div>
             );
           })}
-          {!uploading && (
+          {!submitting && (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -607,7 +648,7 @@ export function UploadView({ personaId }: { personaId: string }) {
               }`}
             >
               <Plus className="h-8 w-8" />
-              {files.length === 0 && <span className="text-[11px] font-medium">Add takes</span>}
+              {takes.length === 0 && <span className="text-[11px] font-medium">Add takes</span>}
             </button>
           )}
         </div>
@@ -616,7 +657,7 @@ export function UploadView({ personaId }: { personaId: string }) {
       {/* Sticky submit on mobile */}
       <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border/50 bg-background/95 p-3 backdrop-blur-md md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
         <div className="mx-auto max-w-md space-y-2">
-          {uploading && (
+          {busy && (
             <div className="space-y-1">
               <div className="h-2 overflow-hidden rounded-full bg-muted">
                 <div
@@ -625,22 +666,22 @@ export function UploadView({ personaId }: { personaId: string }) {
                 />
               </div>
               <p className="text-center text-[11px] text-muted-foreground">
-                {pct}% · {progress.done}/{progress.total} takes done — keep this
-                page open
+                {pct}% · {doneCount}/{takes.length} takes uploaded — keep this page open
               </p>
             </div>
           )}
           <Button
             onClick={handleSubmit}
-            disabled={uploading || files.length === 0}
+            disabled={submitting || takes.length === 0}
             className="h-12 w-full text-base"
           >
-            {uploading ? (
+            {submitting ? (
               <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Uploading… {pct}%
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                {busy ? `Finishing uploads… ${pct}%` : "Sending…"}
               </>
             ) : (
-              `Send ${files.length || ""} take${files.length === 1 ? "" : "s"} to editing`
+              `Send ${takes.length || ""} take${takes.length === 1 ? "" : "s"} to editing`
             )}
           </Button>
         </div>
