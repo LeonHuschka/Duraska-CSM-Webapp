@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { Upload, Loader2, X, Link as LinkIcon, CheckCircle2, Plus, FileText } from "lucide-react";
+import { Film, Loader2, X, Link as LinkIcon, CheckCircle2, Plus, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -10,7 +10,7 @@ import {
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { safeStorageName } from "@/lib/thumbnails";
+import { generateThumbnail, safeStorageName } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,28 +67,29 @@ type FileState = {
   pct: number;
 };
 
-/** What the model sees of a take: its first frame (or the photo). */
+/** What the model sees of a take: a frame grabbed onto a canvas (iOS
+ *  never paints a bare <video> that hasn't played), or the photo. */
 function TakeThumb({ file }: { file: File }) {
+  // null while grabbing, "" when the frame could not be read
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    const u = URL.createObjectURL(file);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
+    let cancelled = false;
+    let made: string | null = null;
+    generateThumbnail(file, resolveMime(file)).then((blob) => {
+      if (cancelled) return;
+      if (!blob) return setUrl("");
+      made = URL.createObjectURL(blob);
+      setUrl(made);
+    });
+    return () => {
+      cancelled = true;
+      if (made) URL.revokeObjectURL(made);
+    };
   }, [file]);
-  if (!url) return null;
-  return resolveMime(file).startsWith("image/") ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt="" className="h-full w-full object-cover" />
-  ) : (
-    // #t= makes iOS Safari paint a frame instead of a black box.
-    <video
-      src={`${url}#t=0.1`}
-      muted
-      playsInline
-      preload="metadata"
-      className="pointer-events-none h-full w-full object-cover"
-    />
-  );
+  if (url === null) return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
+  if (!url) return <Film className="h-6 w-6 text-muted-foreground" />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover" />;
 }
 
 /** Small circular progress ring shown per take while it uploads. */
@@ -499,36 +500,24 @@ export function UploadView({ personaId }: { personaId: string }) {
         <span className="text-[11px] uppercase tracking-wider opacity-70">tap to switch</span>
       </button>
 
-      {/* Files / takes */}
-      <div className="space-y-2">
+      {/* Takes: one card each, the last card adds more */}
+      <div
+        className="space-y-2"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          handleFiles(e.dataTransfer.files);
+        }}
+      >
         <Label>Takes</Label>
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            handleFiles(e.dataTransfer.files);
-          }}
-          className={`flex min-h-[130px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
-            dragOver
-              ? "border-primary bg-primary/10 text-primary"
-              : "border-border/50 text-muted-foreground hover:border-primary/40 hover:bg-accent/20"
-          } ${uploading ? "pointer-events-none opacity-60" : ""}`}
-        >
-          <Upload className="h-7 w-7" />
-          <p className="text-sm font-medium">Tap to add takes</p>
-          <p className="text-[11px] text-muted-foreground/70">
-            Add all your takes for this one reel
-          </p>
-        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -542,7 +531,7 @@ export function UploadView({ personaId }: { personaId: string }) {
         />
 
         {files.length > 0 && (
-          <p className="pt-1 text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground">
             Tap <span className="font-semibold text-foreground">IG</span> on every take you shot in a Fansly
             outfit — it turns <span className="font-semibold text-sky-300">Fansly</span>.
             {fansly.some(Boolean) && (
@@ -550,95 +539,83 @@ export function UploadView({ personaId }: { personaId: string }) {
             )}
           </p>
         )}
-        {files.length > 0 && (
-          <ul className="space-y-1.5 pt-1">
-            {files.map((f, i) => {
-              const st = fileStates[i];
-              return (
-              <li
+        <div className="grid grid-cols-3 gap-2">
+          {files.map((f, i) => {
+            const st = fileStates[i];
+            const tooBig = f.size > MAX_UPLOAD_BYTES;
+            return (
+              <div
                 key={i}
-                className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
-                  f.size > MAX_UPLOAD_BYTES
-                    ? "border-red-500/50 bg-red-500/5"
-                    : "border-border/40 bg-card"
+                className={`relative flex aspect-[9/16] items-center justify-center overflow-hidden rounded-xl border-2 bg-muted/40 ${
+                  tooBig ? "border-red-500" : fansly[i] ? "border-sky-400" : "border-transparent"
                 }`}
               >
-                {/* The take itself, so she knows which one she's marking;
-                    upload status sits on top of it. */}
-                <div className="relative h-16 w-11 shrink-0 overflow-hidden rounded-md bg-muted/50">
-                  <TakeThumb file={f} />
-                  {st?.status === "uploading" ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
-                      <ProgressRing pct={st.pct} />
-                      <span className="absolute text-[9px] font-semibold tabular-nums text-white">
-                        {st.pct}
-                      </span>
-                    </div>
-                  ) : st?.status === "done" ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                      <CheckCircle2 className="h-5 w-5 text-green-400" />
-                    </div>
-                  ) : st?.status === "error" ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/55">
-                      <X className="h-5 w-5 text-red-400" />
-                    </div>
-                  ) : null}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">
-                    Take {i + 1}
-                    {st?.status === "uploading" && (
-                      <span className="ml-1.5 font-normal text-muted-foreground">
-                        uploading…
-                      </span>
-                    )}
-                    {st?.status === "done" && (
-                      <span className="ml-1.5 font-normal text-green-400">sent</span>
-                    )}
-                    {st?.status === "error" && (
-                      <span className="ml-1.5 font-normal text-red-400">failed</span>
-                    )}
-                  </p>
-                  <p className="truncate text-[10px] text-muted-foreground">
-                    {(f.size / (1024 * 1024)).toFixed(1)} MB
-                  </p>
-                  {f.size > MAX_UPLOAD_BYTES ? (
-                    <p className="text-[10px] font-medium text-red-400">
-                      Too large — max {MAX_UPLOAD_MB} MB
-                    </p>
-                  ) : f.size > SLOW_UPLOAD_BYTES ? (
-                    <p className="text-[10px] font-medium text-amber-400">
-                      Big file — this one takes a while
-                    </p>
-                  ) : null}
-                </div>
+                <TakeThumb file={f} />
+                <span className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                  Take {i + 1}
+                </span>
+                {!uploading && (
+                  <button
+                    type="button"
+                    onClick={() => removeFile(i)}
+                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {st?.status === "uploading" ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+                    <ProgressRing pct={st.pct} />
+                    <span className="absolute text-[9px] font-semibold tabular-nums text-white">{st.pct}</span>
+                  </div>
+                ) : st?.status === "done" ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                    <CheckCircle2 className="h-7 w-7 text-green-400" />
+                  </div>
+                ) : st?.status === "error" ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/55">
+                    <X className="h-7 w-7 text-red-400" />
+                  </div>
+                ) : null}
+                {tooBig ? (
+                  <span className="absolute inset-x-1.5 bottom-10 rounded-md bg-red-500/90 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                    Too large — max {MAX_UPLOAD_MB} MB
+                  </span>
+                ) : f.size > SLOW_UPLOAD_BYTES ? (
+                  <span className="absolute inset-x-1.5 bottom-10 rounded-md bg-amber-500/90 px-1 py-0.5 text-center text-[9px] font-semibold text-black">
+                    Big — takes a while
+                  </span>
+                ) : null}
                 {/* Instagram or Fansly: one tap per take, so the editor
                     can tell the Fansly-outfit takes apart. */}
                 <button
                   type="button"
                   disabled={uploading}
                   onClick={() => setFansly((prev) => prev.map((v, j) => (j === i ? !v : v)))}
-                  className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
-                    fansly[i]
-                      ? "border-sky-400 bg-sky-500 text-white"
-                      : "border-border/60 bg-muted/40 text-muted-foreground"
+                  className={`absolute inset-x-1.5 bottom-1.5 rounded-lg py-1.5 text-[11px] font-semibold backdrop-blur ${
+                    fansly[i] ? "bg-sky-500 text-white" : "bg-black/60 text-white/90"
                   }`}
                 >
                   {fansly[i] ? "Fansly" : "IG"}
                 </button>
-                {!uploading && (
-                  <button
-                    onClick={() => removeFile(i)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </li>
-              );
-            })}
-          </ul>
-        )}
+              </div>
+            );
+          })}
+          {!uploading && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={`flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed transition-colors ${
+                dragOver
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border/60 text-muted-foreground hover:border-primary/40"
+              }`}
+            >
+              <Plus className="h-8 w-8" />
+              {files.length === 0 && <span className="text-[11px] font-medium">Add takes</span>}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Sticky submit on mobile */}
