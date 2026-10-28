@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireActivePersonaId } from "@/lib/persona";
 import { linkInspoToRequest } from "@/lib/content-links";
+import { announceShoot } from "@/lib/shoot-notice";
 
 // Cookie when valid, otherwise the user's first membership. Mobile users
 // never get the cookie set (no persona switcher on phones), so relying on
@@ -399,4 +400,9 @@ async function syncRequestStatus(
       updated_at: new Date().toISOString(),
     })
     .eq("id", requestId);
+}
+
+/** The upload tab sent a job: today's "shot new content" line in TALK. */
+export async function announceUpload() {
+  await announceShoot(await getPersonaId());
 }

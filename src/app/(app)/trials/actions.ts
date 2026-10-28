@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
-import { announceShoot } from "@/lib/shoot-notice";
 import { getNextReelTitle } from "@/app/(app)/vault/actions";
 import {
   DIMENSIONS,
@@ -217,10 +216,7 @@ export async function recordTake(input: {
     uploaded_by: user.id,
   });
   if (error) return { error: error.message };
-  // A take after finish is more material for a job already in editing —
-  // say so in TALK the way any upload does.
-  const { data: cell } = await supabase.from("trial_cells").select("trial_id, finished_at").eq("id", input.cellId).maybeSingle();
-  if (cell?.finished_at) await announceShoot(input.requestId);
+  const { data: cell } = await supabase.from("trial_cells").select("trial_id").eq("id", input.cellId).maybeSingle();
   if (cell) touch(cell.trial_id);
   return { error: null };
 }
@@ -259,7 +255,6 @@ export async function finishCell(cellId: string) {
     .eq("status", "requested");
   if (error) return { error: error.message };
   await supabase.from("trial_cells").update({ finished_at: now, updated_at: now }).eq("id", cellId);
-  await announceShoot(cell.request_id);
   touch(cell.trial_id);
   return { error: null };
 }

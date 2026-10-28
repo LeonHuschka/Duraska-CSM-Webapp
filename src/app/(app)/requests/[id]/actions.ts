@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { markInspoEdited } from "@/lib/content-links";
-import { announceShoot } from "@/lib/shoot-notice";
 
 export async function createAssetRecord(data: {
   request_id: string;
@@ -40,11 +39,6 @@ export async function createAssetRecord(data: {
   // A final cut landing means the job is edited — tell the Telegram group.
   if (data.stage === "edited" || data.stage === "final") {
     await markInspoEdited(data.request_id);
-  }
-  // A raw take landing means the model is shooting — one line for the VA
-  // in TALK, kept up to date as the session goes on.
-  if (data.stage === "raw") {
-    await announceShoot(data.request_id);
   }
 
   revalidatePath(`/requests/${data.request_id}`);

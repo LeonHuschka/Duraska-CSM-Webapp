@@ -1,83 +1,44 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { berlinDay } from "@/lib/berlin-day";
 import { editMessageText, sendMessage } from "@/lib/telegram";
 
 /**
  * "New content shot" — one line in TALK for the VA, so she knows there is
  * something to cut without opening the app.
  *
- * A shoot is many uploads over an hour or two, so this is one message per
- * session, not one per take: the first take posts it, every further take
- * edits the number in place. A new message starts only after an hour with
- * nothing uploaded — the date does not matter, a session that runs past
- * midnight is still one session.
+ * Only jobs the model sends from the upload tab count: a take added to an
+ * older job, or by the team, is not a new shoot. One message per Berlin
+ * day — the first upload posts it, every later one that day edits the
+ * numbers in place.
  */
-const SESSION_GAP_MS = 60 * 60 * 1000;
-
-export async function announceShoot(requestId: string) {
+export async function announceShoot(personaId: string) {
   try {
     const supabase = createAdminClient();
-    const { data: req } = await supabase
-      .from("content_requests")
-      .select("persona_id")
-      .eq("id", requestId)
-      .maybeSingle();
-    if (!req?.persona_id) return;
-
     const { data: cfg } = await supabase
       .from("telegram_config")
-      .select(
-        "chat_id, talk_thread_id, model_username, va_username, shoot_notice_message_id, shoot_notice_started_at, shoot_notice_last_at"
-      )
-      .eq("persona_id", req.persona_id)
+      .select("chat_id, talk_thread_id, model_username, va_username, shoot_notice_message_id, shoot_notice_started_at")
+      .eq("persona_id", personaId)
       .maybeSingle();
     if (!cfg?.chat_id) return;
 
-    const now = Date.now();
-    const last = cfg.shoot_notice_last_at ? new Date(cfg.shoot_notice_last_at).getTime() : 0;
-    const continuing = cfg.shoot_notice_message_id != null && now - last < SESSION_GAP_MS;
-
-    // Takes land three at a time, so the count is read from the table
-    // rather than kept in a counter that two uploads would both bump.
-    const startedAt = continuing && cfg.shoot_notice_started_at
-      ? cfg.shoot_notice_started_at
-      : new Date(now - 60_000).toISOString();
-    const count = await countTakes(supabase, req.persona_id, startedAt);
-    const text = notice(cfg.model_username, cfg.va_username, count);
+    const today = berlinDay(new Date());
+    const count = await countToday(supabase, personaId, today);
     if (count.files === 0) return;
+    const text = notice(cfg.model_username, cfg.va_username, count);
 
-    if (continuing) {
-      await editMessageText({
+    const todays =
+      cfg.shoot_notice_message_id != null &&
+      cfg.shoot_notice_started_at != null &&
+      berlinDay(cfg.shoot_notice_started_at) === today;
+    if (todays) {
+      const res = await editMessageText({
         chat_id: cfg.chat_id,
         message_id: Number(cfg.shoot_notice_message_id),
         text,
       });
-      await supabase
-        .from("telegram_config")
-        .update({ shoot_notice_last_at: new Date(now).toISOString() })
-        .eq("persona_id", req.persona_id);
-      return;
-    }
-
-    // Claim the new session before sending, so a second take arriving in
-    // the same second edits this message instead of posting its own.
-    const { data: claimed } = await supabase
-      .from("telegram_config")
-      .update({
-        shoot_notice_started_at: startedAt,
-        shoot_notice_last_at: new Date(now).toISOString(),
-        shoot_notice_message_id: null,
-      })
-      .eq("persona_id", req.persona_id)
-      .or(
-        `shoot_notice_last_at.is.null,shoot_notice_last_at.lt.${new Date(now - SESSION_GAP_MS).toISOString()}`
-      )
-      .select("persona_id");
-    if (!claimed || claimed.length === 0) {
-      // Somebody else just opened the session; give their message a moment
-      // to exist, then fall through to the edit path.
-      await new Promise((r) => setTimeout(r, 1500));
-      return announceShoot(requestId);
+      // Gone (deleted by hand) is the only reason to post a fresh one.
+      if (res.ok || !/not found|to edit/i.test(res.error ?? "")) return;
     }
 
     const res = await sendMessage({
@@ -87,34 +48,37 @@ export async function announceShoot(requestId: string) {
     });
     const messageId = (res.result as { message_id?: number } | undefined)?.message_id;
     if (res.ok && messageId) {
+      const now = new Date().toISOString();
       await supabase
         .from("telegram_config")
-        .update({ shoot_notice_message_id: messageId })
-        .eq("persona_id", req.persona_id);
+        .update({ shoot_notice_message_id: messageId, shoot_notice_started_at: now, shoot_notice_last_at: now })
+        .eq("persona_id", personaId);
     }
   } catch (err) {
     console.warn("[shoot-notice] failed", err);
   }
 }
 
-async function countTakes(
+/** Upload-tab jobs made today (they are the only shooted, non-trial jobs born that day) and their takes. */
+async function countToday(
   supabase: ReturnType<typeof createAdminClient>,
   personaId: string,
-  since: string
+  today: string
 ): Promise<{ files: number; reels: number }> {
   const { data: reqs } = await supabase
     .from("content_requests")
-    .select("id")
-    .eq("persona_id", personaId);
-  const ids = (reqs ?? []).map((r) => r.id);
+    .select("id, created_at")
+    .eq("persona_id", personaId)
+    .eq("is_trial", false)
+    .gte("created_at", new Date(Date.now() - 36 * 3600_000).toISOString());
+  const ids = (reqs ?? []).filter((r) => berlinDay(r.created_at) === today).map((r) => r.id);
   if (ids.length === 0) return { files: 0, reels: 0 };
   const { data } = await supabase
     .from("content_assets")
     .select("request_id")
     .in("request_id", ids)
     .eq("stage", "raw")
-    .is("deleted_at", null)
-    .gte("uploaded_at", since);
+    .is("deleted_at", null);
   const rows = data ?? [];
   return { files: rows.length, reels: new Set(rows.map((r) => r.request_id)).size };
 }

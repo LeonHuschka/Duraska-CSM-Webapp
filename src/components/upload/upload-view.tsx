@@ -6,6 +6,7 @@ import { Film, Loader2, X, Link as LinkIcon, CheckCircle2, Plus, FileText } from
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
+  announceUpload,
   createSelfProducedRequest,
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
@@ -398,6 +399,8 @@ export function UploadView({ personaId }: { personaId: string }) {
       if (ready.length < takes.length) {
         toast.warning(`${takes.length - ready.length} take(s) failed and were left out`);
       }
+      // Today's "shot new content" line in TALK — never holds up her upload.
+      if (saved > 0) await announceUpload().catch(() => null);
       setDoneInfo({ title: created.title ?? "", count: saved });
       reset();
     } catch (err) {
