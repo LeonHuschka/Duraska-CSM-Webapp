@@ -60,7 +60,11 @@ export function AssetGallery({ assets, onDelete, onToggleFansly, empty }: AssetG
       {assets.map((asset) => (
         <div
           key={asset.id}
-          className="group relative overflow-hidden rounded-xl border border-border/50 bg-card transition-all duration-200 hover:border-border"
+          className={`group relative overflow-hidden rounded-xl border bg-card transition-all duration-200 ${
+            asset.stage === "raw" && asset.fansly
+              ? "border-2 border-sky-400"
+              : "border-border/50 hover:border-border"
+          }`}
         >
           {/* Preview */}
           <div className={`relative bg-muted/30 ${isVideo(asset.mime_type) ? "aspect-[9/16]" : "aspect-video"}`}>
@@ -109,9 +113,9 @@ export function AssetGallery({ assets, onDelete, onToggleFansly, empty }: AssetG
                   size="sm"
                   className="h-7 px-2 text-[10px]"
                   onClick={() => onToggleFansly(asset)}
-                  title={asset.fansly ? "Move to the Instagram takes" : "Move to the Fansly takes"}
+                  title={asset.fansly ? "Mark as an Instagram take" : "Mark as a Fansly take"}
                 >
-                  {asset.fansly ? "→ IG" : "→ Fansly"}
+                  {asset.fansly ? "Mark IG" : "Mark Fansly"}
                 </Button>
               )}
               <a

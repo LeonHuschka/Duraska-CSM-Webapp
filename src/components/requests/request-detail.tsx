@@ -104,8 +104,6 @@ export function RequestDetail({
   const [isTrial, setIsTrial] = useState(request.is_trial ?? false);
 
   const rawAssets = assets.filter((a) => a.stage === "raw");
-  const igTakes = rawAssets.filter((a) => !a.fansly);
-  const fanslyTakes = rawAssets.filter((a) => a.fansly);
   const editedAssets = assets.filter((a) => a.stage === "edited");
   const fanslyCuts = assets.filter((a) => a.stage === "fansly");
 
@@ -290,25 +288,9 @@ export function RequestDetail({
             stage="raw"
             onUploadComplete={handleUploadComplete}
           />
-          {/* Two piles: the takes for Instagram, and the same reel shot
-              again in a Fansly outfit — the model marks those on upload. */}
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold">
-              Instagram takes <span className="font-normal text-muted-foreground">({igTakes.length})</span>
-            </h3>
-            <AssetGallery assets={igTakes} onDelete={handleDeleteAsset} onToggleFansly={handleToggleFansly} />
-          </div>
-          <div className="space-y-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3">
-            <h3 className="text-sm font-semibold text-sky-300">
-              Fansly takes <span className="font-normal text-muted-foreground">({fanslyTakes.length})</span>
-            </h3>
-            <AssetGallery
-              assets={fanslyTakes}
-              onDelete={handleDeleteAsset}
-              onToggleFansly={handleToggleFansly}
-              empty="No Fansly takes for this reel"
-            />
-          </div>
+          {/* One pile; the takes she shot again in a Fansly outfit carry a
+              blue frame and tag — the model marks those on upload. */}
+          <AssetGallery assets={rawAssets} onDelete={handleDeleteAsset} onToggleFansly={handleToggleFansly} />
         </div>
 
         <div className="space-y-4">
