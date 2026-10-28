@@ -10,7 +10,7 @@ import {
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { generateThumbnail, safeStorageName } from "@/lib/thumbnails";
+import { quickVideoFrame, safeStorageName } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,20 +67,30 @@ type FileState = {
   pct: number;
 };
 
-/** What the model sees of a take: a frame grabbed onto a canvas (iOS
- *  never paints a bare <video> that hasn't played), or the photo. */
+// Phones decode one video at a time well; several at once stall them all.
+let thumbQueue: Promise<unknown> = Promise.resolve();
+
+/** What the model sees of a take: the photo itself, or a video's first
+ *  frame grabbed onto a canvas. */
 function TakeThumb({ file }: { file: File }) {
   // null while grabbing, "" when the frame could not be read
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     let made: string | null = null;
-    generateThumbnail(file, resolveMime(file)).then((blob) => {
-      if (cancelled) return;
-      if (!blob) return setUrl("");
-      made = URL.createObjectURL(blob);
+    if (resolveMime(file).startsWith("image/")) {
+      made = URL.createObjectURL(file);
       setUrl(made);
-    });
+    } else {
+      const job = thumbQueue.then(() => (cancelled ? null : quickVideoFrame(file)));
+      thumbQueue = job.catch(() => null);
+      job.then((blob) => {
+        if (cancelled) return;
+        if (!blob) return setUrl("");
+        made = URL.createObjectURL(blob);
+        setUrl(made);
+      });
+    }
     return () => {
       cancelled = true;
       if (made) URL.revokeObjectURL(made);

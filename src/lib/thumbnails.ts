@@ -166,6 +166,63 @@ async function thumbnailFromVideo(blob: Blob): Promise<Blob | null> {
   }
 }
 
+/**
+ * One quick frame for the upload preview. On iPhones a detached, paused
+ * <video> often never hands out a frame (seeks hang until the timeout), so
+ * this one sits invisibly in the page and plays muted for an instant —
+ * the first painted frame is what we draw.
+ */
+export async function quickVideoFrame(file: Blob): Promise<Blob | null> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.preload = "auto";
+  video.style.cssText =
+    "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1";
+  document.body.appendChild(video);
+  video.src = url;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("frame timeout")), 8000);
+      const done = () => {
+        clearTimeout(timer);
+        video.pause();
+        resolve();
+      };
+      const onTime = () => {
+        if (video.currentTime > 0.05) {
+          video.removeEventListener("timeupdate", onTime);
+          done();
+        }
+      };
+      video.addEventListener("timeupdate", onTime);
+      video.addEventListener("error", () => {
+        clearTimeout(timer);
+        reject(new Error("video load failed"));
+      });
+      video.play().catch(() => {
+        // Autoplay refused (Low Power Mode): a seek still paints a frame.
+        video.removeEventListener("timeupdate", onTime);
+        video.addEventListener("seeked", done, { once: true });
+        video.addEventListener("loadedmetadata", () => (video.currentTime = 0.1), { once: true });
+        if (video.readyState >= 1) video.currentTime = 0.1;
+      });
+    });
+    return await drawToBlob(video, video.videoWidth, video.videoHeight);
+  } catch {
+    return null;
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    video.remove();
+    URL.revokeObjectURL(url);
+  }
+}
+
 // ─── Robust video frame capture (avoids black frames) ───────────────────────
 // Fade-ins / black intros used to produce all-black thumbnails. We try a few
 // timestamps and pick the first non-dark frame, waiting for the frame to be
