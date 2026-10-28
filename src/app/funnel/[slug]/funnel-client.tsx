@@ -24,7 +24,6 @@ export function FunnelClient({
   slug,
   k,
   label,
-  status,
   image,
   ageGate,
   breakout,
@@ -39,8 +38,6 @@ export function FunnelClient({
   /** The key the page was opened with; the config wants it, or the pass cookie. */
   k: string | null;
   label: string;
-  /** The line in the green-dot pill — "Available now"; empty hides it. */
-  status: string;
   image: string | null;
   ageGate: boolean;
   breakout: boolean;
@@ -179,28 +176,6 @@ export function FunnelClient({
           gap: 10,
         }}
       >
-        {status && (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 14px",
-              borderRadius: 999,
-              background: "rgba(255,255,255,.92)",
-              color: "#111",
-              fontSize: 14,
-              fontWeight: 600,
-              backdropFilter: "blur(6px)",
-            }}
-          >
-            <span style={{ position: "relative", width: 10, height: 10 }}>
-              <span className="fnl-ping" style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
-              <span style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
-            </span>
-            {status}
-          </span>
-        )}
         <span
           className="fnl-cta"
           style={{

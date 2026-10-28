@@ -322,7 +322,7 @@ export function LinkEditor({
               wide
             />
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Status pill" value={f.status_text} onChange={(v) => set("status_text", v)} hint="With the pulsing green dot. Empty hides it." />
+              <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="Under the name on page 2, with the pulsing green dot. Empty hides it." />
               <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Next to the OnlyFans mark." />
               <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The button over the card." />
             </div>
@@ -426,6 +426,7 @@ export function LinkEditor({
                   fill="100%"
                   stat={null}
                   showBio={false}
+                  status={f.status_text}
                   telegram={f.telegram_url ? { href: "#" } : null}
                   preview
                 >
@@ -434,7 +435,6 @@ export function LinkEditor({
                     slug={f.slug || "ig"}
                     k={null}
                     label={f.button_label}
-                    status={f.status_text}
                     image={cardImage}
                     ageGate={f.age_gate}
                     breakout={f.breakout}

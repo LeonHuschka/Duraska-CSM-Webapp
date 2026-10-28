@@ -29,6 +29,7 @@ export function FunnelShell({
   link = null,
   stat = "followers",
   showBio = true,
+  status = "",
   telegram = null,
   preview = false,
   children,
@@ -46,6 +47,8 @@ export function FunnelShell({
   /** The line under the head: followers, the visitors counter, or nothing. */
   stat?: "followers" | "visitors" | null;
   showBio?: boolean;
+  /** "Available now" with a pulsing green dot under the name; empty hides it. */
+  status?: string;
   telegram?: ShellTelegram;
   /** In the editor: drawn, never acting. */
   preview?: boolean;
@@ -93,8 +96,26 @@ export function FunnelShell({
               {page.display_name}
               {page.verified && <Badge />}
             </h1>
+            {status && (
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 14,
+                  color: "rgba(255,255,255,.85)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                }}
+              >
+                <span style={{ position: "relative", width: 8, height: 8 }}>
+                  <span className="fnl-ping" style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
+                  <span style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#22c55e" }} />
+                </span>
+                {status}
+              </p>
+            )}
             {page.handle && (
-              <p style={{ margin: "2px 0 0", fontSize: 13, color: "rgba(255,255,255,.65)" }}>@{page.handle.replace(/^@/, "")}</p>
+              <p style={{ margin: status ? "0" : "2px 0 0", fontSize: 13, color: "rgba(255,255,255,.65)" }}>@{page.handle.replace(/^@/, "")}</p>
             )}
             {(page.instagram_url || telegram) && (
               <div style={{ marginTop: 10, display: "flex", justifyContent: "center", gap: 10 }}>

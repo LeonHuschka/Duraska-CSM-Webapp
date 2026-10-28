@@ -79,6 +79,7 @@ export default async function OpenPage({
       link={page.link}
       stat={null}
       showBio={false}
+      status={page.status_text}
       telegram={page.telegram_url ? { href: page.telegram_url } : null}
     >
       <FunnelClient
@@ -86,7 +87,6 @@ export default async function OpenPage({
         slug={page.link}
         k={k}
         label={page.button_label}
-        status={page.status_text}
         image={
           page.button_image_path
             ? pictureUrl(base, "button", page.button_image_path)
