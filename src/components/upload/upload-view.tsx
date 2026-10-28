@@ -102,28 +102,6 @@ function TakeThumb({ file }: { file: File }) {
   return <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover" />;
 }
 
-/** Small circular progress ring shown per take while it uploads. */
-function ProgressRing({ pct }: { pct: number }) {
-  const r = 13;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg viewBox="0 0 32 32" className="h-9 w-9 -rotate-90">
-      <circle cx="16" cy="16" r={r} fill="none" strokeWidth="3" className="stroke-muted" />
-      <circle
-        cx="16"
-        cy="16"
-        r={r}
-        fill="none"
-        strokeWidth="3"
-        strokeLinecap="round"
-        className="stroke-primary transition-all duration-300"
-        strokeDasharray={c}
-        strokeDashoffset={c - (Math.min(100, Math.max(0, pct)) / 100) * c}
-      />
-    </svg>
-  );
-}
-
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
   return i > 0 ? name.slice(i + 1).toLowerCase() : "";
@@ -573,10 +551,17 @@ export function UploadView({ personaId }: { personaId: string }) {
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
-                {st?.status === "uploading" ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/55">
-                    <ProgressRing pct={st.pct} />
-                    <span className="absolute text-[9px] font-semibold tabular-nums text-white">{st.pct}</span>
+                {st?.status === "uploading" || st?.status === "pending" ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 px-3">
+                    <span className="text-sm font-semibold tabular-nums text-white">
+                      {st.status === "pending" ? "waiting" : `${st.pct}%`}
+                    </span>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-300"
+                        style={{ width: `${st.pct}%` }}
+                      />
+                    </div>
                   </div>
                 ) : st?.status === "done" ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/45">
