@@ -322,7 +322,7 @@ export function LinkEditor({
               wide
             />
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="Under the name on page 2, with the pulsing green dot. Empty hides it." />
+              <Field label="Status line" value={f.status_text} onChange={(v) => set("status_text", v)} hint="Page 2: replaces the handle under the name, with the pulsing green dot. Empty shows the handle." />
               <Field label="Button text" value={f.button_label} onChange={(v) => set("button_label", v)} hint="Next to the OnlyFans mark." />
               <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The button over the card." />
             </div>
