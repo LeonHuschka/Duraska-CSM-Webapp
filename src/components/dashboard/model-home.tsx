@@ -67,21 +67,12 @@ export function LinksDonut({ open, shot, topicHref }: { open: number; shot: numb
  * accounts run. Rounded down — half a day of reels is not a day.
  */
 export function StockDays({ toEdit, fresh, perDay }: { toEdit: number; fresh: number; perDay: number }) {
-  const stock = toEdit + fresh;
-  const days = Math.floor(stock / perDay);
-  const tone = days <= 1 ? "text-rose-400" : days <= 3 ? "text-amber-300" : "text-emerald-400";
+  const days = Math.floor((toEdit + fresh) / perDay);
+  const tone = days <= 3 ? "text-rose-400" : days <= 7 ? "text-amber-300" : "text-emerald-400";
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/50 bg-card p-5">
-      <div className="min-w-0">
-        <h2 className="text-sm font-semibold">Reels in stock</h2>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {toEdit} in editing · {fresh} ready to post · {perDay} posted a day
-        </p>
-      </div>
-      <div className="shrink-0 text-right">
-        <p className={`text-3xl font-semibold tabular-nums leading-none ${tone}`}>{days}</p>
-        <p className="mt-1 text-[10px] text-muted-foreground">{days === 1 ? "day" : "days"} left</p>
-      </div>
+    <div className="flex items-baseline gap-3 rounded-2xl border border-border/50 bg-card px-5 py-4">
+      <span className={`text-5xl font-bold tabular-nums leading-none ${tone}`}>{days}</span>
+      <span className="text-base font-semibold">{days === 1 ? "day" : "days"} covered</span>
     </div>
   );
 }
