@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,8 +32,8 @@ const PLATFORMS = [
 ];
 
 /**
- * Today's numbers without waiting for the morning run. Adding an account
- * is the last tile in the grid.
+ * Today's numbers without waiting for the morning run, and the way to
+ * Research & Pattern. Adding an account is the last tile in the grid.
  */
 export function AccountsActionsBar() {
   const router = useRouter();
@@ -57,6 +57,15 @@ export function AccountsActionsBar() {
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      <a
+        href="/research"
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Research &amp; Pattern
+      </a>
       <Button variant="outline" size="sm" className="gap-1.5" onClick={scrapeNow} disabled={scraping}>
         {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         {scraping ? "Reading accounts…" : "Scrape now"}

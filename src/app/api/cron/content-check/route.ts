@@ -115,6 +115,12 @@ export async function GET(req: Request) {
         .then((res) => console.log("[cron] pattern analysis started", res.status))
         .catch((err) => console.error("[cron] pattern analysis not started", err))
     );
+    // And Analysis: newly mature winners, losers and controls watched, everything counted again.
+    waitUntil(
+      fetch(new URL("/api/analysis?all=1", req.url), { method: "POST", headers: { "x-link-check-secret": secret } })
+        .then((res) => console.log("[cron] analysis started", res.status))
+        .catch((err) => console.error("[cron] analysis not started", err))
+    );
     summary.pattern = "started";
   }
   if (only === "scrape") return NextResponse.json({ ok: true, summary });

@@ -46,6 +46,6 @@ export const config = {
     // authenticates itself: the webhook by Telegram's secret-token header,
     // the crons by x-vercel-cron or CRON_SECRET, the link check by
     // CRON_SECRET. Anything new under /api that a machine calls belongs here.
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/telegram|api/cron|api/links|api/pattern|api/cover|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/telegram|api/cron|api/links|api/pattern|api/analysis|api/cover|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
