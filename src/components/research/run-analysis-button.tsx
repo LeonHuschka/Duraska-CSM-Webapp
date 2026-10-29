@@ -23,12 +23,18 @@ export function RunAnalysisButton({ personaId, running }: { personaId: string; r
   function run() {
     start(async () => {
       const res = await fetch(`/api/analysis?persona=${personaId}`, { method: "POST" }).catch(() => null);
-      const body = (await res?.json().catch(() => null)) as { error?: string; already?: string; counts?: Record<string, number> } | null;
+      const body = (await res?.json().catch(() => null)) as {
+        error?: string;
+        already?: string;
+        resumed?: string;
+        counts?: Record<string, number>;
+      } | null;
       if (!res?.ok) {
         toast.error(body?.error ?? "Could not start the analysis");
         return;
       }
       if (body?.already) toast.message("A run is already going");
+      else if (body?.resumed) toast.success("Picked the run up again");
       else if (body?.counts)
         toast.success(
           `${body.counts.winners} winners · ${body.counts.losers} losers · ${body.counts.controls} control · ${body.counts.added} new to watch`

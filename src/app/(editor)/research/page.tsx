@@ -54,8 +54,11 @@ export default async function ResearchPage({
   ]);
   const isOwner = profile?.global_role === "owner";
   // A run older than three hours that never finished died on the way.
-  const running = lastRun?.status === "running" && Date.now() - new Date(lastRun.started_at).getTime() < 3 * 3600_000;
   const counts = (lastRun?.counts ?? {}) as Record<string, number>;
+  const open = lastRun?.status === "running" && Date.now() - new Date(lastRun.started_at).getTime() < 3 * 3600_000;
+  // No batch for six minutes: the chain broke; Run picks it up again.
+  const stalled = open && Date.now() - Number(counts.beat ?? new Date(lastRun.started_at).getTime()) > 6 * 60_000;
+  const running = open && !stalled;
   const watched = (queue ?? []).filter((q) => q.status === "done").length;
   const failed = (queue ?? []).filter((q) => q.status === "failed");
   const lastFailure = failed.find((f) => f.note)?.note;
@@ -102,7 +105,7 @@ export default async function ResearchPage({
               {lastRun ? (
                 <>
                   <span className="text-foreground">
-                    {running ? "Running" : lastRun.status === "failed" ? "Last run failed" : "Last run"}
+                    {running ? "Running" : stalled ? "Stalled — run again to resume" : lastRun.status === "failed" ? "Last run failed" : "Last run"}
                   </span>{" "}
                   · {when(lastRun.started_at)}
                   {counts.winners != null && (

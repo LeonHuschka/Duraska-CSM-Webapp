@@ -25,6 +25,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const BATCH = 4;
+/** One reel may take this long; the batch has to finish well inside maxDuration. */
+const REEL_DEADLINE_MS = 200_000;
+/** A running run whose last batch is older than this has lost its chain. */
+const STALL_MS = 6 * 60_000;
 
 async function allowed(req: Request): Promise<boolean> {
   const secret = process.env.CRON_SECRET;
@@ -76,13 +80,20 @@ async function handle(req: Request) {
     if (!personaId) return NextResponse.json({ error: "persona missing" }, { status: 400 });
     const { data: running } = await supabase
       .from("analysis_runs")
-      .select("id, started_at")
+      .select("id, started_at, counts")
       .eq("persona_id", personaId)
       .eq("status", "running")
       .gte("started_at", new Date(Date.now() - 3 * 3600_000).toISOString())
       .limit(1)
       .maybeSingle();
-    if (running) return NextResponse.json({ ok: true, already: running.id });
+    if (running) {
+      // An invocation that died takes the chain with it: pick the run up again.
+      const beat = Number((running.counts as Record<string, number> | null)?.beat ?? new Date(running.started_at).getTime());
+      if (Date.now() - beat < STALL_MS) return NextResponse.json({ ok: true, already: running.id });
+      await supabase.from("reel_analyses").update({ status: "pending" }).eq("persona_id", personaId).eq("status", "working");
+      waitUntil(next(url.origin, { step: "work", run: running.id, persona: personaId }));
+      return NextResponse.json({ ok: true, resumed: running.id }, { status: 202 });
+    }
 
     const cohorts = await selectCohorts(supabase, personaId);
     const sync = await syncCohorts(supabase, personaId, cohorts);
@@ -117,26 +128,48 @@ async function handle(req: Request) {
   if (step === "work") {
     waitUntil(
       (async () => {
-        const rows = await claimRows(supabase, personaId, BATCH);
-        const results = await Promise.all(rows.map((r) => watchReel(supabase, r)));
-        const usd = results.reduce((s, r) => s + r.usd, 0);
-        const { data: run } = await supabase.from("analysis_runs").select("counts").eq("id", runId).maybeSingle();
-        const counts = (run?.counts ?? {}) as Record<string, number>;
-        await supabase
-          .from("analysis_runs")
-          .update({
-            counts: {
-              ...counts,
-              usd: (counts.usd ?? 0) + usd,
-              watched: (counts.watched ?? 0) + results.filter((r) => r.ok).length,
-              failed: (counts.failed ?? 0) + results.filter((r) => !r.ok).length,
-            } as unknown as Json,
-          })
-          .eq("id", runId);
-        results.forEach((r, i) => {
-          if (!r.ok) console.warn("[analysis]", rows[i].shortcode, r.note);
-        });
-        const left = rows.length ? await openCount(supabase, personaId) : 0;
+        const { data: current } = await supabase.from("analysis_runs").select("status").eq("id", runId).maybeSingle();
+        if (current?.status !== "running") return; // stopped or finished meanwhile
+        let left = 0;
+        try {
+          const rows = await claimRows(supabase, personaId, BATCH);
+          // A hung download or Apify run must not take the whole invocation down with it.
+          const results = await Promise.all(
+            rows.map((r) =>
+              Promise.race([
+                watchReel(supabase, r),
+                new Promise<{ ok: boolean; note: string; usd: number }>((resolve) =>
+                  setTimeout(async () => {
+                    await supabase.from("reel_analyses").update({ status: "failed", note: "timed out" }).eq("id", r.id);
+                    resolve({ ok: false, note: "timed out", usd: 0 });
+                  }, REEL_DEADLINE_MS)
+                ),
+              ])
+            )
+          );
+          const usd = results.reduce((s, r) => s + r.usd, 0);
+          const { data: run } = await supabase.from("analysis_runs").select("counts").eq("id", runId).maybeSingle();
+          const counts = (run?.counts ?? {}) as Record<string, number>;
+          await supabase
+            .from("analysis_runs")
+            .update({
+              counts: {
+                ...counts,
+                usd: (counts.usd ?? 0) + usd,
+                watched: (counts.watched ?? 0) + results.filter((r) => r.ok).length,
+                failed: (counts.failed ?? 0) + results.filter((r) => !r.ok).length,
+                beat: Date.now(),
+              } as unknown as Json,
+            })
+            .eq("id", runId);
+          results.forEach((r, i) => {
+            if (!r.ok) console.warn("[analysis]", rows[i].shortcode, r.note);
+          });
+          left = rows.length ? await openCount(supabase, personaId) : 0;
+        } catch (err) {
+          console.error("[analysis] batch failed", err);
+          left = await openCount(supabase, personaId);
+        }
         await next(url.origin, { step: left > 0 ? "work" : "finish", run: runId, persona: personaId });
       })()
     );
