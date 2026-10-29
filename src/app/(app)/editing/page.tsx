@@ -51,13 +51,17 @@ export default async function EditingPage() {
 
   // Asset counts per request (raw takes vs final cuts)
   const countsByReq: Record<string, { raw: number; fansly: number; edited: number }> = {};
+  // Jobs that ever had a take, deleted ones included — emptying a job to
+  // reshoot it must not make it vanish.
+  const hadTakes = new Set<string>();
   if (reqIds.length > 0) {
     const { data: assets } = await supabase
       .from("content_assets")
-      .select("request_id, stage, fansly")
-      .in("request_id", reqIds)
-      .is("deleted_at", null);
+      .select("request_id, stage, fansly, deleted_at")
+      .in("request_id", reqIds);
     for (const a of assets ?? []) {
+      if (a.stage === "raw") hadTakes.add(a.request_id);
+      if (a.deleted_at) continue;
       const c = (countsByReq[a.request_id] ??= { raw: 0, fansly: 0, edited: 0 });
       if (a.stage === "raw") {
         c.raw++;
@@ -84,9 +88,9 @@ export default async function EditingPage() {
         editedCount: counts.edited,
       };
     })
-    // Only real edit jobs — must have raw takes to cut. Skips empty/legacy
-    // requests that never got content uploaded.
-    .filter((j) => j.rawCount > 0);
+    // Only real edit jobs — skips empty/legacy requests that never got a
+    // take uploaded.
+    .filter((j) => hadTakes.has(j.id));
 
   return <EditingView jobs={jobs} />;
 }
