@@ -240,7 +240,8 @@ export function caption(url: string, note: string | null): string {
     t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return [
     `🔗 <b>Link:</b> ${esc(url)}`,
-    `📝 <b>Notes:</b> ${note?.trim() ? note.trim() : "—"}`,
+    // The note starts on its own line under the label.
+    note?.trim() ? `📝 <b>Notes:</b>\n${note.trim()}` : `📝 <b>Notes:</b> —`,
   ].join("\n");
 }
 
