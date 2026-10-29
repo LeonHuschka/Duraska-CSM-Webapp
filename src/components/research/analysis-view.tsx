@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { describeKey } from "@/lib/analysis/codebook";
-import type { Finding, Pattern, ScopeStats } from "@/lib/analysis/stats";
-import type { AnalysisBriefing, AnalysisStats } from "@/lib/analysis/report";
+import type { Finding, Pattern, ScopeStats, Shared } from "@/lib/analysis/stats";
+import { SMALL, type AnalysisBriefing, type AnalysisStats } from "@/lib/analysis/report";
+
+/** Per reel id: its cover (signed) and what Gemini saw in its first seconds. */
+export type ReelMedia = Record<string, { cover: string | null; hook: string | null }>;
 
 /**
  * Analysis: what winners have in common, per account, across accounts and
@@ -49,19 +52,181 @@ function Lines({ items, empty }: { items: string[]; empty?: string }) {
   );
 }
 
+/** Covers of the reels that show a feature, each opening the reel. */
+function Thumbs({ ids, reels, media, size = "sm" }: { ids: string[]; reels: AnalysisStats["reels"]; media: ReelMedia; size?: "sm" | "lg" }) {
+  const byId = new Map(reels.map((r) => [r.id, r]));
+  const box = size === "lg" ? "h-40 w-[90px]" : "h-12 w-[27px]";
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {ids.map((id) => {
+        const r = byId.get(id);
+        if (!r) return null;
+        const cover = media[id]?.cover;
+        return (
+          <a
+            key={id}
+            href={r.url ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            title={r.summary}
+            className={`relative ${box} shrink-0 overflow-hidden rounded-md bg-muted/60 hover:ring-1 hover:ring-primary`}
+          >
+            {cover ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
+            ) : null}
+            <span className="absolute inset-x-0 bottom-0 bg-black/60 px-0.5 text-center text-[9px] tabular-nums text-white">
+              {r.lift?.toFixed(size === "lg" ? 1 : 0)}×
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * One card per pattern: the reels it rests on, what they share in plain
+ * words with the counts behind it, and what each reel actually shows.
+ */
+function PatternCards({ stats, reels, media }: { stats: ScopeStats; reels: AnalysisStats["reels"]; media: ReelMedia }) {
+  const patterns = (stats.patterns ?? []).filter((p) => p.winners.length >= 2).slice(0, 3);
+  if (!patterns.length) return null;
+  const byId = new Map(reels.map((r) => [r.id, r]));
+  const all = [...stats.positive, ...stats.combos];
+  return (
+    <Section
+      title="What it looks like"
+      hint="Each look is a group of winners that share these features. Open a reel to see it; the counts say how much the look stands out."
+    >
+      <div className="space-y-5">
+        {patterns.map((p) => {
+          const findings = all.filter((f) => f.pattern === p.label).sort((a, b) => a.p - b.p);
+          const singles = Array.from(new Set(findings.flatMap((f) => f.key.split(" + "))));
+          const lead = findings[0];
+          const shown = p.winners
+            .map((id) => byId.get(id))
+            .filter((r): r is NonNullable<typeof r> => !!r)
+            .sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))
+            .slice(0, 3);
+          return (
+            <div key={p.label} className="grid gap-4 border-t border-border/30 pt-4 first:border-0 first:pt-0 md:grid-cols-[auto_1fr]">
+              <Thumbs ids={shown.map((r) => r.id)} reels={reels} media={media} size="lg" />
+              <div className="space-y-2 text-xs">
+                <p className="text-sm font-medium">
+                  Look {p.label} · {p.winners.length} winners
+                </p>
+                <p className="text-muted-foreground">
+                  {singles.map(describeKey).join(" · ")}
+                </p>
+                {lead && (
+                  <p>
+                    Strongest sign: <span className="font-medium">{label(lead.key)}</span> — {lead.winners.k} of {lead.winners.n}{" "}
+                    winners, {lead.rest.k} of {lead.rest.n} other reels. Reels with it run at a median {lead.liftWith?.toFixed(1)}×,
+                    without it {lead.liftWithout?.toFixed(1)}×.{" "}
+                    <span className="text-muted-foreground">
+                      ({lead.confidence ?? "no"} evidence{lead.accounts ? `, ${lead.accounts.agree}/${lead.accounts.total} accounts agree` : ""})
+                    </span>
+                  </p>
+                )}
+                <ul className="space-y-1.5 pt-1">
+                  {shown.map((r) => (
+                    <li key={r.id} className="leading-relaxed">
+                      <span className="tabular-nums text-emerald-300">{r.lift?.toFixed(1)}×</span> {r.summary}
+                      {media[r.id]?.hook && <span className="text-muted-foreground"> Opening: {media[r.id]?.hook}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
+/** For an account with too few winners to test: what they share, and which cross-account findings they match. */
+function SmallAccount({
+  stats,
+  across,
+  reels,
+  media,
+}: {
+  stats: ScopeStats;
+  across: Finding[];
+  reels: AnalysisStats["reels"];
+  media: ReelMedia;
+}) {
+  const shared: Shared[] = stats.shared ?? [];
+  const winnerIds = new Set(reels.filter((r) => r.cohort === "winner").map((r) => r.id));
+  return (
+    <Section
+      title="What its winners share so far"
+      hint={`Only ${stats.winners} winner${stats.winners === 1 ? "" : "s"} yet — too few to test, so this describes them rather than proves anything. It firms up with every new winner.`}
+    >
+      <div className="space-y-4">
+        <Thumbs ids={Array.from(winnerIds)} reels={reels} media={media} size="lg" />
+        {shared.length ? (
+          <table className="w-full text-left text-xs">
+            <thead className="text-[11px] text-muted-foreground">
+              <tr className="border-b border-border/50">
+                <th className="py-2 pr-3 font-normal">Feature</th>
+                <th className="py-2 pr-3 font-normal">Winners</th>
+                <th className="py-2 font-normal">Rest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shared.map((x) => (
+                <tr key={x.key} className="border-b border-border/30">
+                  <td className="py-2 pr-3 font-medium">{describeKey(x.key)}</td>
+                  <td className="py-2 pr-3 tabular-nums">
+                    {x.winners.k}/{x.winners.n}
+                  </td>
+                  <td className="py-2 tabular-nums">
+                    {x.rest.k}/{x.rest.n}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="text-xs text-muted-foreground">Its winners have nothing clearly in common yet.</p>
+        )}
+        {!!across.length && (
+          <div className="text-xs">
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-emerald-300">Matches what works across accounts</p>
+            <ul className="space-y-1">
+              {across.map((f) => (
+                <li key={f.key}>
+                  {label(f.key)}{" "}
+                  <span className="text-muted-foreground">
+                    — {f.winners.k}/{f.winners.n} winners overall, {f.rest.k}/{f.rest.n} other reels
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 function FindingsTable({
   rows,
   cross,
   reels,
   patterns,
+  media,
 }: {
   rows: Finding[];
   cross?: boolean;
   reels: AnalysisStats["reels"];
   patterns?: Pattern[];
+  media: ReelMedia;
 }) {
   if (!rows.length) return <p className="text-xs text-muted-foreground">Nothing clear yet.</p>;
-  const byId = new Map(reels.map((r) => [r.id, r]));
   const size = new Map((patterns ?? []).map((p) => [p.label, p.winners.length]));
   return (
     <div className="overflow-x-auto">
@@ -120,16 +285,7 @@ function FindingsTable({
                 </td>
               )}
               <td className="py-2">
-                <div className="flex flex-wrap gap-1">
-                  {f.examples.slice(0, 4).map((id) => {
-                    const r = byId.get(id);
-                    return r?.url ? (
-                      <a key={id} href={r.url} target="_blank" rel="noreferrer" className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] hover:text-foreground">
-                        {r.lift?.toFixed(1)}×
-                      </a>
-                    ) : null;
-                  })}
-                </div>
+                <Thumbs ids={f.examples.slice(0, 5)} reels={reels} media={media} />
               </td>
             </tr>
           ))}
@@ -143,13 +299,19 @@ function ScopeView({
   stats,
   cross,
   reels,
+  media,
+  across,
   brief,
 }: {
   stats: ScopeStats;
   cross?: boolean;
   reels: AnalysisStats["reels"];
+  media: ReelMedia;
+  /** For one account: the cross-account findings its winners show. */
+  across?: Finding[];
   brief?: { pattern: string; tell: string[]; avoid?: string[]; testing?: string[] } | null;
 }) {
+  const small = !cross && stats.winners < SMALL;
   return (
     <div className="space-y-4">
       <p className="text-[11px] text-muted-foreground">
@@ -179,6 +341,8 @@ function ScopeView({
           </div>
         </Section>
       )}
+      <PatternCards stats={stats} reels={reels} media={media} />
+      {small && stats.winners > 0 && <SmallAccount stats={stats} across={across ?? []} reels={reels} media={media} />}
       <Section
         title="What winners have more often"
         hint="Winners against the rest (losers and control). Strong: survives the correction for testing many features. Medium: p < 0.05. Weak: a hint."
@@ -190,13 +354,13 @@ function ScopeView({
             one group are one look that worked, not separate evidence.
           </p>
         )}
-        <FindingsTable rows={stats.positive.slice(0, 30)} cross={cross} reels={reels} patterns={stats.patterns} />
+        <FindingsTable rows={stats.positive.slice(0, 30)} cross={cross} reels={reels} patterns={stats.patterns} media={media} />
       </Section>
       <Section title="Combinations" hint="Two features together, corrected for every pair that could have been tried.">
-        <FindingsTable rows={stats.combos} cross={cross} reels={reels} patterns={stats.patterns} />
+        <FindingsTable rows={stats.combos} cross={cross} reels={reels} patterns={stats.patterns} media={media} />
       </Section>
       <Section title="What winners avoid" hint="Clearly more common in the rest than in winners.">
-        <FindingsTable rows={stats.negative.slice(0, 15)} cross={cross} reels={reels} />
+        <FindingsTable rows={stats.negative.slice(0, 15)} cross={cross} reels={reels} media={media} />
       </Section>
     </div>
   );
@@ -206,10 +370,12 @@ export function AnalysisView({
   stats,
   briefing,
   scope,
+  media,
 }: {
   stats: AnalysisStats | null;
   briefing: AnalysisBriefing | null;
   scope: string;
+  media: ReelMedia;
 }) {
   if (!stats) {
     return (
@@ -226,6 +392,9 @@ export function AnalysisView({
   ];
   const account = stats.accounts.find((a) => a.id === scope);
   const accountBrief = account ? briefing?.accounts.find((b) => b.account === account.label) : null;
+  const accountReels = account ? stats.reels.filter((r) => r.accountId === account.id) : [];
+  const accountWinners = new Set(accountReels.filter((r) => r.cohort === "winner").map((r) => r.id));
+  const across = account ? stats.all.positive.filter((f) => f.examples.some((id) => accountWinners.has(id))).slice(0, 8) : [];
 
   return (
     <div className="space-y-4">
@@ -248,7 +417,9 @@ export function AnalysisView({
       {account ? (
         <ScopeView
           stats={account.stats}
-          reels={stats.reels}
+          reels={accountReels}
+          media={media}
+          across={across}
           brief={
             accountBrief
               ? { pattern: accountBrief.winning_pattern, tell: accountBrief.tell_the_model, avoid: accountBrief.avoid, testing: accountBrief.worth_testing }
@@ -308,6 +479,7 @@ export function AnalysisView({
           <ul className="divide-y divide-border/30">
             {stats.reels.map((r) => (
               <li key={r.id} className="flex items-start gap-3 py-2 text-xs">
+                <Thumbs ids={[r.id]} reels={stats.reels} media={media} />
                 <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${COHORT[r.cohort]}`}>{r.cohort}</span>
                 <span className="w-14 shrink-0 tabular-nums">{r.lift?.toFixed(1)}×</span>
                 <span className="w-20 shrink-0 tabular-nums text-muted-foreground">{r.views != null ? nf.format(r.views) : "–"}</span>
@@ -329,6 +501,7 @@ export function AnalysisView({
           stats={stats.all}
           cross
           reels={stats.reels}
+          media={media}
           brief={briefing ? { pattern: briefing.across_accounts.pattern, tell: briefing.across_accounts.tell_the_model } : null}
         />
       )}

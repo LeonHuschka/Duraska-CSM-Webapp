@@ -44,7 +44,7 @@ const Briefing = z.object({
         worth_testing: z.array(z.string()).describe("Weak findings worth a deliberate test, one line each."),
       })
     )
-    .describe("One entry per account that has findings."),
+    .describe("One entry per account, also for accounts with few winners."),
   across_accounts: z.object({
     pattern: z.string().describe("What winners share across accounts — only features that hold in most accounts."),
     tell_the_model: z.array(z.string()),
@@ -65,9 +65,12 @@ Rules:
 - Build the winning pattern and the instructions only from strong and medium findings. Weak findings go to "worth testing", never into instructions.
 - Every instruction must be something the creator can do on the next shoot ("wear the black hairband", "start already turning, eye contact in the first frame", "film in the bathroom, mirror behind"). Combine features that the combinations show work together.
 - These are correlations, not proven causes. Say so once in the caveats, not in every line.
-- If an account has too few winners for anything strong, say that instead of stretching weak evidence.
+- If an account has too few winners for anything strong, say that instead of stretching weak evidence — but still give it a reading: "shared by its winners" lists what its few winners have in common, and the cross-account findings say what works on the other accounts. From those, write its winning_pattern as a description of its winners so far, and put concrete next shoots in worth_testing (lean on what also holds across accounts). Its tell_the_model may then only repeat cross-account instructions its winners already match.
 - Findings that share a pattern letter rest on the same winner reels: they are one observation (often one look or one concept that worked several times), not separate evidence. Describe each pattern as one look, say how many winner reels it rests on, and do not count its features as independent support for each other.
 - Plain English, short lines, no hype.`;
+
+/** Below this many winners an account gets a description instead of tests. */
+export const SMALL = 6;
 
 const fmt = (f: Finding, scope: "account" | "all") =>
   `${describeKey(f.key)} — winners ${f.winners.k}/${f.winners.n}, rest ${f.rest.k}/${f.rest.n}` +
@@ -153,6 +156,11 @@ export async function writeBriefing(stats: AnalysisStats, summaries: Map<string,
       `Winner features:\n${s.positive.slice(0, 20).map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
       `Combinations:\n${s.combos.map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
       `Winners avoid:\n${s.negative.slice(0, 8).map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
+      a.stats.winners < SMALL && a.stats.shared?.length
+        ? `Shared by its winners (too few winners to test; description only):\n${a.stats.shared
+            .map((x) => `- ${describeKey(x.key)} — winners ${x.winners.k}/${x.winners.n}, rest ${x.rest.k}/${x.rest.n}`)
+            .join("\n")}`
+        : "",
       `Winners, as described:\n${stats.reels
         .filter((r) => r.accountId === a.id && r.cohort === "winner")
         .slice(0, 8)

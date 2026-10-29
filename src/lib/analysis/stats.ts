@@ -67,7 +67,14 @@ export type ScopeStats = {
   combos: Finding[];
   /** Older runs have none. */
   patterns?: Pattern[];
+  /**
+   * What the winners have in common, without a test: for an account with
+   * too few winners to prove anything, this is still what to look at.
+   */
+  shared?: Shared[];
 };
+
+export type Shared = { key: string; winners: { k: number; n: number }; rest: { k: number; n: number }; examples: string[] };
 
 // ── distributions ──
 
@@ -285,7 +292,31 @@ export function compare(reels: StatReel[], opts: { byAccount?: boolean; minSuppo
     .sort((a, b) => a.p - b.p)
     .slice(0, 8);
   base.patterns = groupByWinners([...base.positive, ...base.combos]);
+  base.shared = shared(reels);
   return base;
+}
+
+/**
+ * Features at least two winners and at least half of them show, clearly more
+ * often than the rest does. A description to go on, not a finding.
+ */
+function shared(reels: StatReel[]): Shared[] {
+  const winners = reels.filter((r) => r.cohort === "winner");
+  const rest = reels.filter((r) => r.cohort !== "winner");
+  const keys = new Set<string>();
+  winners.forEach((r) => r.keys.forEach((k) => keys.add(k)));
+  const out: { s: Shared; gap: number }[] = [];
+  keys.forEach((key) => {
+    const w = winners.filter((r) => r.keys.has(key));
+    const kR = rest.filter((r) => r.keys.has(key)).length;
+    const gap = w.length / winners.length - (rest.length ? kR / rest.length : 0);
+    if (w.length < 2 || w.length * 2 < winners.length || gap < 0.3) return;
+    out.push({ s: { key, winners: { k: w.length, n: winners.length }, rest: { k: kR, n: rest.length }, examples: w.map((r) => r.id) }, gap });
+  });
+  return out
+    .sort((a, b) => b.gap - a.gap)
+    .slice(0, 12)
+    .map((x) => x.s);
 }
 
 /**

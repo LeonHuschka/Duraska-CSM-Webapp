@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePersonaId } from "@/lib/persona";
-import { AnalysisView } from "@/components/research/analysis-view";
+import { AnalysisView, type ReelMedia } from "@/components/research/analysis-view";
 import { RunAnalysisButton } from "@/components/research/run-analysis-button";
 import type { AnalysisBriefing, AnalysisStats } from "@/lib/analysis/report";
 
@@ -53,6 +53,8 @@ export default async function ResearchPage({
     supabase.from("reel_analyses").select("status, cohort, note").eq("persona_id", personaId),
   ]);
   const isOwner = profile?.global_role === "owner";
+  const stats = (doneRun?.stats ?? null) as unknown as AnalysisStats | null;
+  const media = stats ? await reelMedia(supabase, stats) : {};
   // A run older than three hours that never finished died on the way.
   const counts = (lastRun?.counts ?? {}) as Record<string, number>;
   const open = lastRun?.status === "running" && Date.now() - new Date(lastRun.started_at).getTime() < 3 * 3600_000;
@@ -127,7 +129,8 @@ export default async function ResearchPage({
           </div>
 
           <AnalysisView
-            stats={(doneRun?.stats ?? null) as unknown as AnalysisStats | null}
+            stats={stats}
+            media={media}
             briefing={(doneRun?.briefing ?? null) as unknown as AnalysisBriefing | null}
             scope={sp.scope ?? "all"}
           />
@@ -144,4 +147,36 @@ export default async function ResearchPage({
       )}
     </div>
   );
+}
+
+/**
+ * Covers for the reels on the page (stored by the scrape, signed for an
+ * hour) and what Gemini saw in each one's first seconds.
+ */
+async function reelMedia(supabase: Awaited<ReturnType<typeof createClient>>, stats: AnalysisStats): Promise<ReelMedia> {
+  const ids = stats.reels.map((r) => r.id);
+  if (!ids.length) return {};
+  const [{ data: rows }, { data: covers }] = await Promise.all([
+    supabase.from("reel_analyses").select("id, account_id, shortcode, features").in("id", ids),
+    supabase
+      .from("reel_metrics")
+      .select("account_id, shortcode, cover_path")
+      .in("shortcode", stats.reels.map((r) => r.shortcode))
+      .not("cover_path", "is", null),
+  ]);
+  const coverOf = new Map<string, string>();
+  for (const c of covers ?? []) if (c.cover_path) coverOf.set(`${c.account_id}|${c.shortcode}`, c.cover_path);
+  const paths = Array.from(new Set(Array.from(coverOf.values())));
+  const signed = new Map<string, string>();
+  if (paths.length) {
+    const { data: urls } = await supabase.storage.from("content-assets").createSignedUrls(paths, 3600);
+    for (const u of urls ?? []) if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+  }
+  const out: ReelMedia = {};
+  for (const r of rows ?? []) {
+    const path = coverOf.get(`${r.account_id}|${r.shortcode}`);
+    const hook = (r.features as { hook?: { first_seconds?: string | null } } | null)?.hook?.first_seconds ?? null;
+    out[r.id] = { cover: path ? signed.get(path) ?? null : null, hook };
+  }
+  return out;
 }
