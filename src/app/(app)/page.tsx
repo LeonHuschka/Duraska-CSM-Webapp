@@ -4,7 +4,9 @@ import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import { CreatePersonaCard } from "@/components/personas/create-persona-card";
 import { Upload, Eye, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { LinksDonut, TrialJobs, WeekVsMust } from "@/components/dashboard/model-home";
+import { LinksDonut, StockDays, TrialJobs, WeekVsMust } from "@/components/dashboard/model-home";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { pipelineCounts } from "@/lib/pipeline-counts";
 import { Checklist } from "@/components/dashboard/checklist";
 import { listTrials } from "@/lib/trials";
 import { stillDone } from "@/lib/checklist";
@@ -121,6 +123,12 @@ export default async function DashboardPage({
     const tgChat = tgCfg?.chat_id ? String(tgCfg.chat_id).replace(/^-100/, "") : null;
     const tgLink = tgChat && tgCfg?.requests_thread_id ? `https://t.me/c/${tgChat}/${tgCfg.requests_thread_id}` : null;
 
+    // ── Reels in stock: in editing plus fresh, at the posts a day ──
+    // Read as admin: the posting side (slots, accounts) is not hers to see,
+    // and these are the same numbers the morning alert goes by.
+    const POSTS_PER_DAY = 2;
+    const stock = await pipelineCounts(createAdminClient(), personaId);
+
     // ── Trial-Maxxing waiting for her ──
     const trials = await listTrials(supabase, personaId);
 
@@ -156,6 +164,8 @@ export default async function DashboardPage({
           <h1 className="text-2xl font-semibold tracking-tight">Hey{persona?.name ? ` ${persona.name}` : ""} 👋</h1>
           <p className="mt-1 text-sm text-muted-foreground">Here&apos;s where your reels stand.</p>
         </div>
+
+        <StockDays toEdit={stock.toEdit} fresh={stock.readyReels} perDay={POSTS_PER_DAY} />
 
         <Checklist items={checklistNow} canEdit={!isModel} />
 

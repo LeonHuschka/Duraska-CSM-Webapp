@@ -62,6 +62,31 @@ export function LinksDonut({ open, shot, topicHref }: { open: number; shot: numb
 }
 
 /**
+ * How long the reels already in the pipe last: jobs waiting for a cut
+ * plus finished reels nobody has posted yet, at the posts a day the
+ * accounts run. Rounded down — half a day of reels is not a day.
+ */
+export function StockDays({ toEdit, fresh, perDay }: { toEdit: number; fresh: number; perDay: number }) {
+  const stock = toEdit + fresh;
+  const days = Math.floor(stock / perDay);
+  const tone = days <= 1 ? "text-rose-400" : days <= 3 ? "text-amber-300" : "text-emerald-400";
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/50 bg-card p-5">
+      <div className="min-w-0">
+        <h2 className="text-sm font-semibold">Reels in stock</h2>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {toEdit} in editing · {fresh} ready to post · {perDay} posted a day
+        </p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p className={`text-3xl font-semibold tabular-nums leading-none ${tone}`}>{days}</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">{days === 1 ? "day" : "days"} left</p>
+      </div>
+    </div>
+  );
+}
+
+/**
  * This week, day by day, against the three a day the accounts need: the
  * must as a faint dashed bar, what she shot laid over it, and one number
  * for where the week stands.
