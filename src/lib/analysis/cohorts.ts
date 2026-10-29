@@ -14,9 +14,13 @@ const DAY = 86_400_000;
  * - loser: at most LOSER_LIFT × median, and a clean one: not a Trial-Maxxing
  *   reshoot, and not from a stretch where the whole account was down (then
  *   it flopped for the account, not for what is in it).
- * - control: a few ordinary reels per account and month, the middle that
- *   keeps winner-against-loser honest. Picked by a hash of the shortcode, so
- *   the same reels stay picked from run to run.
+ * - control: as many ordinary reels per account as it has winners (at least
+ *   CONTROL_MIN) — the middle that tells "winners have it" apart from "losers
+ *   lack it". Picked by a hash of the shortcode, so the same reels stay
+ *   picked from run to run and a new winner only adds one.
+ *
+ * Instagram only: that is where the reach is; Facebook only gets the same
+ * reels cross-posted, so its numbers say nothing about what is in them.
  *
  * Only reels at least MATURE_DAYS old count: a two-day-old reel has not had
  * its reach yet and would read as a loser.
@@ -24,7 +28,7 @@ const DAY = 86_400_000;
 const MATURE_DAYS = 7;
 const LOSER_LIFT = 0.5;
 const CONTROL_BAND = [0.7, 2] as const;
-const CONTROL_PER_MONTH = 4;
+const CONTROL_MIN = 2;
 /** Other reels of the account within this many days tell whether it was a bad stretch. */
 const STRETCH_DAYS = 3;
 const MIN_REELS = 6;
@@ -62,6 +66,7 @@ export async function selectCohorts(supabase: Db, personaId: string): Promise<Co
       .from("accounts")
       .select("id, posts_per_day, status")
       .eq("persona_id", personaId)
+      .eq("platform", "instagram")
       .not("status", "in", '("dead","paused")')
       .gt("posts_per_day", 0),
     supabase.from("trial_cells").select("request_id").not("request_id", "is", null),
@@ -114,7 +119,8 @@ export async function selectCohorts(supabase: Db, personaId: string): Promise<Co
     const mid = median(list.map((r) => Number(r.views)).filter((v) => v > 0));
     if (mid <= 0) return;
     const withLift = list.map((r) => ({ r, lift: Number(r.views) / mid, t: new Date(r.posted_at!).getTime() }));
-    const controls = new Map<string, typeof withLift>();
+    const controls: typeof withLift = [];
+    let winners = 0;
 
     for (const x of withLift) {
       const base = {
@@ -132,39 +138,35 @@ export async function selectCohorts(supabase: Db, personaId: string): Promise<Co
       };
       if (x.lift >= lift && base.views >= minViews) {
         out.push({ ...base, cohort: "winner" });
+        winners++;
       } else if (x.lift <= LOSER_LIFT) {
         if (x.r.request_id && trialRequests.has(x.r.request_id)) continue;
         const near = withLift.filter((o) => o !== x && Math.abs(o.t - x.t) <= STRETCH_DAYS * DAY).map((o) => o.lift);
         if (near.length >= 2 && median(near) < LOSER_LIFT) continue; // the account was down, not this reel
         out.push({ ...base, cohort: "loser" });
       } else if (x.lift >= CONTROL_BAND[0] && x.lift <= CONTROL_BAND[1]) {
-        const month = x.r.posted_at!.slice(0, 7);
-        const list = controls.get(month) ?? [];
-        list.push(x);
-        controls.set(month, list);
+        controls.push(x);
       }
     }
-    controls.forEach((list) => {
-      list
-        .sort((a, b) => hash(a.r.shortcode!) - hash(b.r.shortcode!))
-        .slice(0, CONTROL_PER_MONTH)
-        .forEach((x) =>
-          out.push({
-            accountId,
-            personaId,
-            shortcode: x.r.shortcode!,
-            postUrl: x.r.post_url,
-            postedAt: x.r.posted_at!,
-            requestId: x.r.request_id,
-            views: Number(x.r.views),
-            likes: x.r.likes,
-            comments: x.r.comments,
-            shares: x.r.shares,
-            lift: x.lift,
-            cohort: "control",
-          })
-        );
-    });
+    controls
+      .sort((a, b) => hash(a.r.shortcode!) - hash(b.r.shortcode!))
+      .slice(0, Math.max(CONTROL_MIN, winners))
+      .forEach((x) =>
+        out.push({
+          accountId,
+          personaId,
+          shortcode: x.r.shortcode!,
+          postUrl: x.r.post_url,
+          postedAt: x.r.posted_at!,
+          requestId: x.r.request_id,
+          views: Number(x.r.views),
+          likes: x.r.likes,
+          comments: x.r.comments,
+          shares: x.r.shares,
+          lift: x.lift,
+          cohort: "control",
+        })
+      );
   });
   return out;
 }
@@ -210,5 +212,10 @@ export async function syncCohorts(supabase: Db, personaId: string, reels: Cohort
       .eq("id", k.id);
     if (stale) again++;
   }
+  // Out of every cohort and never watched: drop it, or it would still be paid for.
+  // Watched ones stay; the stats only count what is in a cohort today.
+  const current = new Set(reels.map((r) => `${r.accountId}|${r.shortcode}`));
+  const gone = (known ?? []).filter((k) => k.status !== "done" && !current.has(`${k.account_id}|${k.shortcode}`)).map((k) => k.id);
+  for (let i = 0; i < gone.length; i += 100) await supabase.from("reel_analyses").delete().in("id", gone.slice(i, i + 100));
   return { added, again };
 }
