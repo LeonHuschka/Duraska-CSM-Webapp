@@ -94,6 +94,8 @@ function PatternCards({ stats, reels, media }: { stats: ScopeStats; reels: Analy
   if (!patterns.length) return null;
   const byId = new Map(reels.map((r) => [r.id, r]));
   const all = [...stats.positive, ...stats.combos];
+  // Looks overlap; each card leads with reels the cards above have not shown.
+  const seen = new Set<string>();
   return (
     <Section
       title="What it looks like"
@@ -107,8 +109,9 @@ function PatternCards({ stats, reels, media }: { stats: ScopeStats; reels: Analy
           const shown = p.winners
             .map((id) => byId.get(id))
             .filter((r): r is NonNullable<typeof r> => !!r)
-            .sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0))
+            .sort((a, b) => Number(seen.has(a.id)) - Number(seen.has(b.id)) || (b.lift ?? 0) - (a.lift ?? 0))
             .slice(0, 3);
+          shown.forEach((r) => seen.add(r.id));
           return (
             <div key={p.label} className="grid gap-4 border-t border-border/30 pt-4 first:border-0 first:pt-0 md:grid-cols-[auto_1fr]">
               <Thumbs ids={shown.map((r) => r.id)} reels={reels} media={media} size="lg" />
