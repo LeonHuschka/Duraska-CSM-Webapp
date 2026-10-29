@@ -66,13 +66,20 @@ Rules:
 - Every instruction must be something the creator can do on the next shoot ("wear the black hairband", "start already turning, eye contact in the first frame", "film in the bathroom, mirror behind"). Combine features that the combinations show work together.
 - These are correlations, not proven causes. Say so once in the caveats, not in every line.
 - If an account has too few winners for anything strong, say that instead of stretching weak evidence.
+- Findings that share a pattern letter rest on the same winner reels: they are one observation (often one look or one concept that worked several times), not separate evidence. Describe each pattern as one look, say how many winner reels it rests on, and do not count its features as independent support for each other.
 - Plain English, short lines, no hype.`;
 
 const fmt = (f: Finding, scope: "account" | "all") =>
   `${describeKey(f.key)} — winners ${f.winners.k}/${f.winners.n}, rest ${f.rest.k}/${f.rest.n}` +
   `, median lift ${f.liftWith?.toFixed(1) ?? "?"}× with vs ${f.liftWithout?.toFixed(1) ?? "?"}× without` +
   `, p=${f.p.toFixed(3)} q=${f.q.toFixed(3)}, ${f.confidence ?? "none"}` +
-  (scope === "all" && f.accounts ? `, accounts agree ${f.accounts.agree}/${f.accounts.total}` : "");
+  (scope === "all" && f.accounts ? `, accounts agree ${f.accounts.agree}/${f.accounts.total}` : "") +
+  (f.pattern ? `, pattern ${f.pattern}` : "");
+
+const patternLine = (s: ScopeStats) =>
+  `Patterns (findings with the same letter rest on the same winners):\n${
+    (s.patterns ?? []).map((p) => `- ${p.label}: ${p.winners.length} winner reels, ${p.findings} findings`).join("\n") || "- none"
+  }`;
 
 /** The cohorts of today joined with what Gemini saw, counted. */
 export async function buildStats(supabase: Db, personaId: string, cohorts: CohortReel[]): Promise<AnalysisStats> {
@@ -142,6 +149,7 @@ export async function writeBriefing(stats: AnalysisStats, summaries: Map<string,
     const s = a.stats;
     parts.push(
       `## ${a.label} (${a.platform}) — ${s.winners} winners, ${s.losers} losers, ${s.controls} control`,
+      patternLine(s),
       `Winner features:\n${s.positive.slice(0, 20).map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
       `Combinations:\n${s.combos.map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
       `Winners avoid:\n${s.negative.slice(0, 8).map((f) => `- ${fmt(f, "account")}`).join("\n") || "- none"}`,
@@ -154,6 +162,7 @@ export async function writeBriefing(stats: AnalysisStats, summaries: Map<string,
   }
   parts.push(
     `## All accounts — ${stats.all.winners} winners, ${stats.all.losers} losers, ${stats.all.controls} control`,
+    patternLine(stats.all),
     `Winner features:\n${stats.all.positive.slice(0, 20).map((f) => `- ${fmt(f, "all")}`).join("\n") || "- none"}`,
     `Combinations:\n${stats.all.combos.map((f) => `- ${fmt(f, "all")}`).join("\n") || "- none"}`,
     `Winners avoid:\n${stats.all.negative.slice(0, 8).map((f) => `- ${fmt(f, "all")}`).join("\n") || "- none"}`,

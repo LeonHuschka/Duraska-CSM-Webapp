@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { describeKey } from "@/lib/analysis/codebook";
-import type { Finding, ScopeStats } from "@/lib/analysis/stats";
+import type { Finding, Pattern, ScopeStats } from "@/lib/analysis/stats";
 import type { AnalysisBriefing, AnalysisStats } from "@/lib/analysis/report";
 
 /**
@@ -49,9 +49,20 @@ function Lines({ items, empty }: { items: string[]; empty?: string }) {
   );
 }
 
-function FindingsTable({ rows, cross, reels }: { rows: Finding[]; cross?: boolean; reels: AnalysisStats["reels"] }) {
+function FindingsTable({
+  rows,
+  cross,
+  reels,
+  patterns,
+}: {
+  rows: Finding[];
+  cross?: boolean;
+  reels: AnalysisStats["reels"];
+  patterns?: Pattern[];
+}) {
   if (!rows.length) return <p className="text-xs text-muted-foreground">Nothing clear yet.</p>;
   const byId = new Map(reels.map((r) => [r.id, r]));
+  const size = new Map((patterns ?? []).map((p) => [p.label, p.winners.length]));
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-xs">
@@ -63,6 +74,7 @@ function FindingsTable({ rows, cross, reels }: { rows: Finding[]; cross?: boolea
             <th className="py-2 pr-3 font-normal">Median lift with / without</th>
             {cross && <th className="py-2 pr-3 font-normal">Accounts</th>}
             <th className="py-2 pr-3 font-normal">Confidence</th>
+            {patterns && <th className="py-2 pr-3 font-normal">Pattern</th>}
             <th className="py-2 font-normal">Examples</th>
           </tr>
         </thead>
@@ -93,6 +105,20 @@ function FindingsTable({ rows, cross, reels }: { rows: Finding[]; cross?: boolea
                   </span>
                 )}
               </td>
+              {patterns && (
+                <td className="py-2 pr-3 whitespace-nowrap">
+                  {f.pattern ? (
+                    <span
+                      className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px]"
+                      title="Findings with the same letter rest on the same winner reels: one observation, not several."
+                    >
+                      {f.pattern} · {size.get(f.pattern)} reels
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">–</span>
+                  )}
+                </td>
+              )}
               <td className="py-2">
                 <div className="flex flex-wrap gap-1">
                   {f.examples.slice(0, 4).map((id) => {
@@ -157,10 +183,17 @@ function ScopeView({
         title="What winners have more often"
         hint="Winners against the rest (losers and control). Strong: survives the correction for testing many features. Medium: p < 0.05. Weak: a hint."
       >
-        <FindingsTable rows={stats.positive.slice(0, 30)} cross={cross} reels={reels} />
+        {!!stats.patterns?.length && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            These findings rest on {stats.patterns.length === 1 ? "one group" : `${stats.patterns.length} groups`} of winners:{" "}
+            {stats.patterns.map((p) => `${p.label} (${p.winners.length} reels, ${p.findings} findings)`).join(" · ")}. Findings in
+            one group are one look that worked, not separate evidence.
+          </p>
+        )}
+        <FindingsTable rows={stats.positive.slice(0, 30)} cross={cross} reels={reels} patterns={stats.patterns} />
       </Section>
-      <Section title="Combinations" hint="Two features together, where the pair beats each alone often enough to count.">
-        <FindingsTable rows={stats.combos} cross={cross} reels={reels} />
+      <Section title="Combinations" hint="Two features together, corrected for every pair that could have been tried.">
+        <FindingsTable rows={stats.combos} cross={cross} reels={reels} patterns={stats.patterns} />
       </Section>
       <Section title="What winners avoid" hint="Clearly more common in the rest than in winners.">
         <FindingsTable rows={stats.negative.slice(0, 15)} cross={cross} reels={reels} />

@@ -44,7 +44,11 @@ export type Finding = {
   accounts?: { agree: number; total: number };
   /** Winners that show it, for the page to link. */
   examples: string[];
+  /** The pattern it belongs to: findings with the same letter rest on the same winners. */
+  pattern?: string;
 };
+
+export type Pattern = { label: string; winners: string[]; findings: number };
 
 export type TimeFinding = {
   key: string;
@@ -61,6 +65,8 @@ export type ScopeStats = {
   positive: Finding[];
   negative: Finding[];
   combos: Finding[];
+  /** Older runs have none. */
+  patterns?: Pattern[];
 };
 
 // ── distributions ──
@@ -115,14 +121,20 @@ export function cmh(tables: [number, number, number, number][]): number {
   return erfc(Math.sqrt(chi / 2));
 }
 
-/** Benjamini–Hochberg q-values, in the order given. */
-export function bh(ps: number[]): number[] {
+/**
+ * Benjamini–Hochberg q-values, in the order given. `family` is how many
+ * tests there could have been: when only the promising ones were run, the
+ * rest count as tests that found nothing, which keeps a hand-picked shortlist
+ * from looking better than it is.
+ */
+export function bh(ps: number[], family = ps.length): number[] {
+  const m = Math.max(family, ps.length);
   const order = ps.map((p, i) => [p, i] as const).sort((x, y) => x[0] - y[0]);
   const q = new Array<number>(ps.length);
   let min = 1;
   for (let r = order.length - 1; r >= 0; r--) {
     const [p, i] = order[r];
-    min = Math.min(min, (p * order.length) / (r + 1));
+    min = Math.min(min, (p * m) / (r + 1));
     q[i] = min;
   }
   return q;
@@ -191,8 +203,8 @@ function table(reels: StatReel[], has: (r: StatReel) => boolean): [number, numbe
   return [a, b, c, d];
 }
 
-function finish(list: Finding[]): Finding[] {
-  const q = bh(list.map((f) => f.p));
+function finish(list: Finding[], family?: number): Finding[] {
+  const q = bh(list.map((f) => f.p), family);
   list.forEach((f, i) => {
     f.q = q[i];
     f.confidence = confidence(f);
@@ -234,8 +246,9 @@ export function compare(reels: StatReel[], opts: { byAccount?: boolean; minSuppo
     return { agree, total };
   };
 
+  const candidates = candidateKeys(reels, minSupport);
   const singles = finish(
-    candidateKeys(reels, minSupport).map((key) => {
+    candidates.map((key) => {
       const has = (r: StatReel) => r.keys.has(key);
       const f = finding(reels, key, has, test(has));
       if (opts.byAccount) f.accounts = agreement(has);
@@ -265,11 +278,46 @@ export function compare(reels: StatReel[], opts: { byAccount?: boolean; minSuppo
       pairs.push(f);
     }
   }
-  base.combos = finish(pairs)
+  // The pairs were picked from the best singles, so correct over every pair that could have been tried.
+  const allPairs = (candidates.length * (candidates.length - 1)) / 2;
+  base.combos = finish(pairs, allPairs)
     .filter((f) => f.ratio > 1 && f.confidence && f.winners.k >= 3)
     .sort((a, b) => a.p - b.p)
     .slice(0, 8);
+  base.patterns = groupByWinners([...base.positive, ...base.combos]);
   return base;
+}
+
+/**
+ * Findings that rest on the same winners are one observation, not several:
+ * five reels of one look carry its colour, its pose and its place all at
+ * once. Each finding joins the first pattern whose winners it largely
+ * shares (Jaccard ≥ SAME_WINNERS), strongest findings first.
+ */
+const SAME_WINNERS = 0.6;
+function groupByWinners(findings: Finding[]): Pattern[] {
+  const patterns: (Pattern & { set: Set<string> })[] = [];
+  const order = [...findings].sort((a, b) => a.p - b.p);
+  for (const f of order) {
+    const mine = new Set(f.examples);
+    if (mine.size < 2) continue;
+    const home = patterns.find((p) => {
+      let both = 0;
+      mine.forEach((id) => {
+        if (p.set.has(id)) both++;
+      });
+      return both / (mine.size + p.set.size - both) >= SAME_WINNERS;
+    });
+    if (home) {
+      home.findings++;
+      f.pattern = home.label;
+    } else {
+      const label = String.fromCharCode(65 + patterns.length);
+      patterns.push({ label, winners: Array.from(mine), findings: 1, set: mine });
+      f.pattern = label;
+    }
+  }
+  return patterns.map(({ label, winners, findings }) => ({ label, winners, findings }));
 }
 
 /**
