@@ -170,10 +170,11 @@ export async function writeBriefing(stats: AnalysisStats, summaries: Map<string,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     thinking: { type: "adaptive" },
-    output_config: { effort: "high", format: betaZodOutputFormat(Briefing) },
+    // The numbers are already decided; this only puts them into words, and has to fit one invocation.
+    output_config: { effort: "medium", format: betaZodOutputFormat(Briefing) },
     system: SYSTEM,
     messages: [{ role: "user", content: parts.join("\n\n") }],
-  });
+  }, { signal: AbortSignal.timeout(240_000) });
   if (response.stop_reason === "refusal") throw new Error("briefing refused");
   if (!response.parsed_output) throw new Error(`no briefing (stop: ${response.stop_reason})`);
   return response.parsed_output;

@@ -6,7 +6,7 @@ import type { Json } from "@/lib/types/database";
 import { geminiConfigured, GEMINI_MODEL } from "@/lib/gemini";
 import { selectCohorts, syncCohorts } from "@/lib/analysis/cohorts";
 import { claimRows, openCount, watchReel } from "@/lib/analysis/watch";
-import { buildStats, winnerSummaries, writeBriefing } from "@/lib/analysis/report";
+import { buildStats, winnerSummaries, writeBriefing, type AnalysisStats } from "@/lib/analysis/report";
 
 /**
  * Analysis, in steps that each fit one invocation:
@@ -176,28 +176,43 @@ async function handle(req: Request) {
     return NextResponse.json({ ok: true, step }, { status: 202 });
   }
 
+  // The counting is quick and saved first, so the page has it even if the
+  // briefing fails; the briefing gets an invocation of its own.
   if (step === "finish") {
     waitUntil(
       (async () => {
         try {
           const cohorts = await selectCohorts(supabase, personaId);
           const stats = await buildStats(supabase, personaId, cohorts);
-          const winnerIds = stats.reels.filter((r) => r.cohort === "winner").map((r) => r.id);
-          const briefing = stats.all.winners > 0 ? await writeBriefing(stats, await winnerSummaries(supabase, winnerIds)) : null;
           await supabase
             .from("analysis_runs")
-            .update({
-              status: "done",
-              stats: stats as unknown as Json,
-              briefing: briefing as unknown as Json,
-              finished_at: new Date().toISOString(),
-            })
+            .update({ status: "done", stats: stats as unknown as Json, finished_at: new Date().toISOString() })
             .eq("id", runId);
+          if (stats.all.winners > 0) await next(url.origin, { step: "brief", run: runId, persona: personaId });
         } catch (err) {
           await supabase
             .from("analysis_runs")
             .update({ status: "failed", note: err instanceof Error ? err.message.slice(0, 300) : "failed", finished_at: new Date().toISOString() })
             .eq("id", runId);
+        }
+      })()
+    );
+    return NextResponse.json({ ok: true, step }, { status: 202 });
+  }
+
+  if (step === "brief") {
+    waitUntil(
+      (async () => {
+        const { data: run } = await supabase.from("analysis_runs").select("stats").eq("id", runId).maybeSingle();
+        const stats = run?.stats as unknown as AnalysisStats | null;
+        if (!stats) return;
+        try {
+          const winnerIds = stats.reels.filter((r) => r.cohort === "winner").map((r) => r.id);
+          const briefing = await writeBriefing(stats, await winnerSummaries(supabase, winnerIds));
+          await supabase.from("analysis_runs").update({ briefing: briefing as unknown as Json }).eq("id", runId);
+        } catch (err) {
+          const why = err instanceof Error ? err.message.slice(0, 200) : "failed";
+          await supabase.from("analysis_runs").update({ note: `Briefing not written: ${why}` }).eq("id", runId);
         }
       })()
     );
