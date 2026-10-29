@@ -234,12 +234,13 @@ export async function retryableVideoLinks(supabase: Db, personaId: string, limit
   return (data ?? []).map((r) => r.id);
 }
 
+/** The note is Telegram HTML already (see entitiesToHtml); only the URL is escaped here. */
 export function caption(url: string, note: string | null): string {
   const esc = (t: string) =>
     t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return [
     `🔗 <b>Link:</b> ${esc(url)}`,
-    `📝 <b>Notes:</b> ${note?.trim() ? esc(note.trim()) : "—"}`,
+    `📝 <b>Notes:</b> ${note?.trim() ? note.trim() : "—"}`,
   ].join("\n");
 }
 

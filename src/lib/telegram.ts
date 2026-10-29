@@ -176,6 +176,62 @@ export async function editMessageText(opts: {
   });
 }
 
+export type TgEntity = { type: string; offset: number; length: number; url?: string };
+
+const escHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * A message's text with its formatting, as Telegram HTML — bold, italics,
+ * lists typed as lines, quotes, links — so a note reposted by the bot looks
+ * the way it was written. Entities of the types in `skip` are dropped with
+ * their text (the links themselves, a /command). Offsets are UTF-16, which
+ * is what JS strings index by.
+ */
+export function entitiesToHtml(text: string, entities: TgEntity[] = [], skip: string[] = []): string {
+  const tag = (e: TgEntity): [string, string] | null => {
+    switch (e.type) {
+      case "bold": return ["<b>", "</b>"];
+      case "italic": return ["<i>", "</i>"];
+      case "underline": return ["<u>", "</u>"];
+      case "strikethrough": return ["<s>", "</s>"];
+      case "spoiler": return ["<tg-spoiler>", "</tg-spoiler>"];
+      case "code": return ["<code>", "</code>"];
+      case "pre": return ["<pre>", "</pre>"];
+      case "blockquote": return ["<blockquote>", "</blockquote>"];
+      case "expandable_blockquote": return ["<blockquote expandable>", "</blockquote>"];
+      case "text_link": return e.url ? [`<a href="${escHtml(e.url).replace(/"/g, "&quot;")}">`, "</a>"] : null;
+      default: return null;
+    }
+  };
+  const dropped = entities.filter((e) => skip.includes(e.type));
+  const styled = entities
+    .map((e) => ({ e, t: tag(e) }))
+    .filter((x): x is { e: TgEntity; t: [string, string] } => x.t !== null)
+    // Outer before inner where two start together, so they nest.
+    .sort((a, b) => a.e.offset - b.e.offset || b.e.length - a.e.length);
+  let out = "";
+  const open: { end: number; close: string }[] = [];
+  for (let i = 0; i <= text.length; i++) {
+    // Close what ends here, innermost first.
+    for (let k = open.length - 1; k >= 0; k--) {
+      if (open[k].end === i) {
+        out += open[k].close;
+        open.splice(k, 1);
+      }
+    }
+    if (i === text.length) break;
+    for (const x of styled) {
+      if (x.e.offset === i) {
+        out += x.t[0];
+        open.push({ end: x.e.offset + x.e.length, close: x.t[1] });
+      }
+    }
+    if (dropped.some((d) => i >= d.offset && i < d.offset + d.length)) continue;
+    out += escHtml(text[i]);
+  }
+  return out;
+}
+
 /** Rewrite the caption under a photo or video the bot sent. */
 export async function editMessageCaption(opts: {
   chat_id: number | string;

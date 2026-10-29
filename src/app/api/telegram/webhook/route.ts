@@ -9,7 +9,9 @@ import {
   setMessageReaction,
   deleteMessage,
   editMessageCaption,
+  entitiesToHtml,
   parseCaptionDate,
+  type TgEntity,
   REACTION,
 } from "@/lib/telegram";
 import { extractMetricsFromImage } from "@/lib/vision";
@@ -50,6 +52,8 @@ type TgMessage = {
   from?: TgUser;
   text?: string;
   caption?: string;
+  entities?: TgEntity[];
+  caption_entities?: TgEntity[];
   photo?: TgPhoto[];
   /** In a forum topic: the message that opened it, which carries its name. */
   reply_to_message?: { message_id?: number; forum_topic_created?: { name?: string } };
@@ -206,7 +210,8 @@ async function handleNote(msg: TgMessage, text: string): Promise<boolean> {
     .maybeSingle();
   if (!link) return true;
 
-  const note = text.replace(/^\/note(@\S+)?/i, "").trim() || null;
+  // Her formatting kept; the command itself dropped.
+  const note = tidyNote(entitiesToHtml(msg.text ?? text, msg.entities, ["bot_command"])) || null;
   await supabase.from("content_links").update({ note }).eq("id", link.id);
   if (link.video_message_id != null) {
     const res = await editMessageCaption({
@@ -220,6 +225,15 @@ async function handleNote(msg: TgMessage, text: string): Promise<boolean> {
   return true;
 }
 
+/** Runs of spaces to one, no blank lines beyond one, trimmed — line breaks kept. */
+function tidyNote(html: string): string {
+  return html
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** Hand the job to its own invocation and stop caring about the answer. */
 function fireCleanup(req: Request, personaId: string, secret: string) {
   fire(req, `/api/links/check?persona=${encodeURIComponent(personaId)}`, secret, "cleanup");
@@ -228,7 +242,8 @@ function fireCleanup(req: Request, personaId: string, secret: string) {
 /** Fetch the reel behind a freshly posted link and repost it as a video. */
 function fireVideo(req: Request, linkId: string, note: string, secret: string) {
   const q = new URLSearchParams({ link: linkId });
-  if (note) q.set("note", note.slice(0, 900));
+  // A cut through HTML would break the caption; a note that long goes plain.
+  if (note) q.set("note", note.length <= 900 ? note : note.replace(/<[^>]+>/g, "").slice(0, 900).replace(/&[a-z]*$/, ""));
   fire(req, `/api/links/video?${q}`, secret, "video");
 }
 
@@ -382,10 +397,9 @@ async function handleMessage(req: Request, msg: TgMessage) {
   // The link regex stops at the shortcode, so a share link leaves its tail
   // behind ("/?stkn=…", "?igsh=…"). That is part of the URL, not something
   // the sender wrote — strip whole URLs before calling the rest a note.
-  const note = text
-    .replace(/https?:\/\/\S+/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Telegram marks every URL as an entity, tail included, so dropping
+  // those entities drops exactly the links. Formatting and line breaks stay.
+  const note = tidyNote(entitiesToHtml(text, msg.entities ?? msg.caption_entities, ["url"]));
   // Say "got it, fetching" on the link before the slow part starts. The
   // message is replaced by the video when it lands, so the eyes go with it.
   if ((stored ?? []).length > 0) {
