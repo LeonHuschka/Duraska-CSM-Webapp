@@ -234,7 +234,7 @@ export async function retryableVideoLinks(supabase: Db, personaId: string, limit
   return (data ?? []).map((r) => r.id);
 }
 
-function caption(url: string, note: string | null): string {
+export function caption(url: string, note: string | null): string {
   const esc = (t: string) =>
     t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return [

@@ -176,6 +176,21 @@ export async function editMessageText(opts: {
   });
 }
 
+/** Rewrite the caption under a photo or video the bot sent. */
+export async function editMessageCaption(opts: {
+  chat_id: number | string;
+  message_id: number;
+  caption: string;
+  parse_mode?: "HTML" | "Markdown";
+}) {
+  return call("editMessageCaption", {
+    chat_id: opts.chat_id,
+    message_id: opts.message_id,
+    caption: opts.caption,
+    parse_mode: opts.parse_mode ?? "HTML",
+  });
+}
+
 /**
  * Put an emoji reaction on a message. Requires the bot to be an admin in
  * the group. Telegram only accepts a fixed set of emoji here.

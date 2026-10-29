@@ -8,12 +8,14 @@ import {
   downloadFile,
   setMessageReaction,
   deleteMessage,
+  editMessageCaption,
   parseCaptionDate,
   REACTION,
 } from "@/lib/telegram";
 import { extractMetricsFromImage } from "@/lib/vision";
 import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
+import { caption } from "@/lib/inspo-video";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -50,7 +52,7 @@ type TgMessage = {
   caption?: string;
   photo?: TgPhoto[];
   /** In a forum topic: the message that opened it, which carries its name. */
-  reply_to_message?: { forum_topic_created?: { name?: string } };
+  reply_to_message?: { message_id?: number; forum_topic_created?: { name?: string } };
   forum_topic_created?: { name?: string };
 };
 type TgReactionUpdate = {
@@ -140,6 +142,7 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   // "/check@DuraskaBot extra words" → "check"
   const word = text.slice(1).split(/\s+/)[0] ?? "";
   const name = word.split("@")[0].toLowerCase();
+  if (name === "note") return handleNote(msg, text);
   if (!COMMANDS.has(name)) return false;
 
   const supabase = createAdminClient();
@@ -181,6 +184,41 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   return true;
 }
 
+
+/**
+ * `/note new text` as a reply to an inspo — the bot's video or the original
+ * link message — replaces its note, in the caption under the video and on
+ * the link row. A bare `/note` clears it. Only as a
+ * command, never any reply: "Noted here sir" must not become the note.
+ * The command message is deleted again; a reply to anything else is left
+ * standing, so whoever sent it sees nothing happened.
+ */
+async function handleNote(msg: TgMessage, text: string): Promise<boolean> {
+  const target = msg.reply_to_message?.message_id;
+  if (!target) return true;
+  const supabase = createAdminClient();
+  const { data: link } = await supabase
+    .from("content_links")
+    .select("id, url, video_message_id")
+    .eq("chat_id", msg.chat.id)
+    .or(`message_id.eq.${target},video_message_id.eq.${target}`)
+    .limit(1)
+    .maybeSingle();
+  if (!link) return true;
+
+  const note = text.replace(/^\/note(@\S+)?/i, "").trim() || null;
+  await supabase.from("content_links").update({ note }).eq("id", link.id);
+  if (link.video_message_id != null) {
+    const res = await editMessageCaption({
+      chat_id: msg.chat.id,
+      message_id: Number(link.video_message_id),
+      caption: caption(link.url, note),
+    });
+    if (!res.ok) console.warn("[telegram] /note caption not edited:", res.error);
+  }
+  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+  return true;
+}
 
 /** Hand the job to its own invocation and stop caring about the answer. */
 function fireCleanup(req: Request, personaId: string, secret: string) {
