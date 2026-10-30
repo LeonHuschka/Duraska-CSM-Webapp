@@ -11,7 +11,7 @@ import {
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { quickVideoFrame, safeStorageName } from "@/lib/thumbnails";
+import { quickVideoFrame, safeStorageName, thumbnailPathFor } from "@/lib/thumbnails";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,6 +79,8 @@ const CONCURRENCY = 3;
 
 // Phones decode one video at a time well; several at once stall them all.
 let thumbQueue: Promise<unknown> = Promise.resolve();
+// The frame each card grabbed, kept so Send can store it as the take's thumbnail.
+const frames = new WeakMap<File, Blob>();
 
 /** What the model sees of a take: the photo itself, or a video's first
  *  frame grabbed onto a canvas. */
@@ -97,6 +99,7 @@ function TakeThumb({ file }: { file: File }) {
       job.then((blob) => {
         if (cancelled) return;
         if (!blob) return setUrl("");
+        frames.set(file, blob);
         made = URL.createObjectURL(blob);
         setUrl(made);
       });
@@ -380,7 +383,17 @@ export function UploadView({ personaId }: { personaId: string }) {
       let saved = 0;
       for (const t of ready) {
         try {
-          // No thumbnail here on purpose — the Vault backfills them later.
+          // The frame the card already shows, so the job page has a picture
+          // at once; a take without one gets it there later.
+          const frame = frames.get(t.file);
+          let thumbnail_path: string | null = null;
+          if (frame) {
+            const tPath = thumbnailPathFor(t.path);
+            const { error: thumbErr } = await createClient()
+              .storage.from("content-assets")
+              .upload(tPath, frame, { contentType: "image/jpeg", upsert: true });
+            if (!thumbErr) thumbnail_path = tPath;
+          }
           await createAssetRecord({
             request_id: created.request_id,
             stage: "raw",
@@ -388,7 +401,7 @@ export function UploadView({ personaId }: { personaId: string }) {
             file_name: t.file.name,
             mime_type: resolveMime(t.file),
             size_bytes: t.file.size,
-            thumbnail_path: null,
+            thumbnail_path,
             fansly: t.fansly,
           });
           saved++;

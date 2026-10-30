@@ -35,6 +35,7 @@ import {
 import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
 import { EditNotes } from "@/components/requests/edit-notes";
+import { useThumbBackfill } from "@/components/requests/use-thumb-backfill";
 import {
   deleteAsset,
   setAssetFansly,
@@ -105,9 +106,12 @@ export function RequestDetail({
   const [isNsfw, setIsNsfw] = useState(request.is_nsfw);
   const [isTrial, setIsTrial] = useState(request.is_trial ?? false);
 
-  const rawAssets = assets.filter((a) => a.stage === "raw");
-  const editedAssets = assets.filter((a) => a.stage === "edited");
-  const fanslyCuts = assets.filter((a) => a.stage === "fansly");
+  // Videos without a picture get one made in the background.
+  const thumbs = useThumbBackfill(assets);
+  const shown = assets.map((a) => (thumbs[a.id] ? { ...a, thumbnailUrl: thumbs[a.id] } : a));
+  const rawAssets = shown.filter((a) => a.stage === "raw");
+  const editedAssets = shown.filter((a) => a.stage === "edited");
+  const fanslyCuts = shown.filter((a) => a.stage === "fansly");
 
   const handleEditSave = () => {
     startTransition(async () => {
