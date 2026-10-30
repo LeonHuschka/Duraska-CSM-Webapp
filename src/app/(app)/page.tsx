@@ -113,7 +113,6 @@ export default async function DashboardPage({
       .eq("persona_id", personaId);
     const openLinks = (links ?? []).filter((l) => l.status === "open").length;
     const shotLinks = (links ?? []).filter((l) => ["shot", "uploaded", "edited"].includes(l.status)).length;
-    const shotNotUploaded = (links ?? []).filter((l) => l.status === "shot").length;
 
     const { data: tgCfg } = await supabase
       .from("telegram_config")
@@ -172,12 +171,6 @@ export default async function DashboardPage({
         <LinksDonut open={openLinks} shot={shotLinks} topicHref={tgLink} />
 
         <WeekVsMust days={week} must={MUST_PER_DAY} todayIndex={weekday} />
-
-        {shotNotUploaded > 0 && (
-          <p className="rounded-2xl bg-amber-500/10 px-3 py-2.5 text-xs text-amber-300">
-            📤 {shotNotUploaded} reel{shotNotUploaded === 1 ? "" : "s"} marked as shot but not uploaded yet — send them over!
-          </p>
-        )}
 
         <TrialJobs trials={trials} />
 
