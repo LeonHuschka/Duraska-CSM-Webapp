@@ -63,11 +63,13 @@ export default async function RequestDetailPage({
     .not("video_path", "is", null)
     .or(`request_id.eq.${id}${inspoKey ? `,url_key.eq.${inspoKey}` : ""}`)
     .limit(2);
-  const inspoVideoPath =
+  let inspoVideoPath =
     inspoLinks?.find((l) => l.request_id === id)?.video_path ??
     inspoLinks?.[0]?.video_path ??
     request.inspo_video_path ??
     null;
+  // A Trial-Maxxing box: the outlier it reshoots, as the trial page shows it.
+  if (!inspoVideoPath) inspoVideoPath = await trialOutlierVideo(supabase, id);
 
   // Generate signed URLs for all assets (originals + thumbnails) in one batch
   const allPaths = new Set<string>();
@@ -100,4 +102,27 @@ export default async function RequestDetailPage({
       inspoVideoUrl={inspoVideoPath ? (urlByPath[inspoVideoPath] ?? null) : null}
     />
   );
+}
+
+/** The outlier video of the trial whose box made this job, if it is one. */
+async function trialOutlierVideo(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  requestId: string
+): Promise<string | null> {
+  const { data: cell } = await supabase.from("trial_cells").select("trial_id").eq("request_id", requestId).limit(1).maybeSingle();
+  if (!cell) return null;
+  const { data: t } = await supabase.from("trials").select("video_path, source_request_id").eq("id", cell.trial_id).maybeSingle();
+  if (t?.video_path) return t.video_path;
+  if (!t?.source_request_id) return null;
+  // A reel of ours: its first finished cut.
+  const { data: cut } = await supabase
+    .from("content_assets")
+    .select("file_path")
+    .eq("request_id", t.source_request_id)
+    .eq("stage", "edited")
+    .is("deleted_at", null)
+    .order("uploaded_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return cut?.file_path ?? null;
 }

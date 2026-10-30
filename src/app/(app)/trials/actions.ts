@@ -14,9 +14,7 @@ import {
   ensureTrial,
   loadTrial,
   notifyTrial,
-  roundBrief,
   storeOutlierVideo,
-  winnersOf,
   type Dimension,
   type Phase,
 } from "@/lib/trials";
@@ -140,13 +138,11 @@ export async function openCellJob(cellId: string) {
   if (!me?.member) return { error: "Not a member of this persona", requestId: null, personaId: null };
   if (cell.request_id) return { error: null, requestId: cell.request_id, personaId: trial.persona_id };
 
-  const view = await loadTrial(supabase, trial.id);
   const { data: account } = trial.account_id
     ? await supabase.from("accounts").select("handle, display_name").eq("id", trial.account_id).maybeSingle()
     : { data: null };
   const acc = account ? account.display_name || accountLabel(account.handle) : "the outlier's account";
   const name = cellName({ dimension: cell.dimension as Dimension, slot: cell.slot, label: cell.label });
-  const brief = view ? roundBrief(cell.dimension as Dimension, winnersOf(view), view.reshoots) : "";
   const { title } = await getNextReelTitle();
   const { data: maxRow } = await supabase
     .from("content_requests")
@@ -161,7 +157,9 @@ export async function openCellJob(cellId: string) {
     .insert({
       persona_id: trial.persona_id,
       title,
-      description: `🧪 Trial-Maxxing · ${name} for ${acc}. Recreate the outlier — ${brief} Post on ${acc} only.`,
+      // Short on purpose: the trial page holds the brief, and a round has
+      // as many reshoots as the team set, not what a sentence would freeze.
+      description: `🧪 Trial-Maxxing · ${name} · ${acc}`,
       inspo_link: trial.post_url,
       status: "requested",
       position: (maxRow?.position ?? 0) + 1,
