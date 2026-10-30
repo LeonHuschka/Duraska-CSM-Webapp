@@ -36,7 +36,7 @@ import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
 import { EditNotes } from "@/components/requests/edit-notes";
 import { useThumbBackfill } from "@/components/requests/use-thumb-backfill";
-import { PosterVideo, TrialInspoSlot } from "@/components/requests/inspo-videos";
+import { InspoSlot, PosterVideo } from "@/components/requests/inspo-videos";
 import {
   deleteAsset,
   moveCut,
@@ -281,12 +281,22 @@ export function RequestDetail({
               {inspoVideoUrl ? (
                 <PosterVideo url={inspoVideoUrl} label="Original inspo" />
               ) : (
-                <TrialInspoSlot trialId={trial.id} link={trial.inspoLink} />
+                <InspoSlot
+                  personaId={personaId}
+                  requestId={request.id}
+                  trialId={trial.id}
+                  link={trial.inspoLink}
+                  label="Original inspo"
+                />
               )}
               {viralVideoUrl && <PosterVideo url={viralVideoUrl} label="Went viral" />}
             </div>
           ) : (
-            inspoVideoUrl && <PosterVideo url={inspoVideoUrl} label="Inspo reel" />
+            inspoVideoUrl ? (
+              <PosterVideo url={inspoVideoUrl} label="Inspo reel" />
+            ) : (
+              <InspoSlot personaId={personaId} requestId={request.id} link={request.inspo_link} label="Inspo reel" />
+            )
           )}
         </div>
         <Button

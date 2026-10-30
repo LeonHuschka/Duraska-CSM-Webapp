@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { markInspoEdited } from "@/lib/content-links";
 
 export async function createAssetRecord(data: {
@@ -67,6 +68,38 @@ export async function moveCut(assetId: string, requestId: string, stage: "edited
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/editing");
   revalidatePath("/vault");
+}
+
+/**
+ * An inspo reel dropped in as a file, when no link gave one: the job's own
+ * inspo, or on a Trial-Maxxing job the original the viral reel was shot from.
+ */
+export async function setInspoVideo(data: { requestId: string; trialId?: string | null; path: string }) {
+  const supabase = await createClient();
+  const { data: r } = await supabase
+    .from("content_requests")
+    .select("persona_id")
+    .eq("id", data.requestId)
+    .maybeSingle();
+  if (!r) return { error: "No such job" };
+  if (!data.path.startsWith(`personas/${r.persona_id}/inspo/`)) return { error: "Wrong place for the file" };
+  if (data.trialId) {
+    const { data: t } = await supabase.from("trials").select("persona_id").eq("id", data.trialId).maybeSingle();
+    if (t?.persona_id !== r.persona_id) return { error: "No such trial" };
+    const { error } = await createAdminClient()
+      .from("trials")
+      .update({ inspo_video_path: data.path })
+      .eq("id", data.trialId);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("content_requests")
+      .update({ inspo_video_path: data.path, inspo_video_error: null })
+      .eq("id", data.requestId);
+    if (error) return { error: error.message };
+  }
+  revalidatePath(`/requests/${data.requestId}`);
+  return { error: null };
 }
 
 export async function deleteAsset(assetId: string, requestId: string) {
