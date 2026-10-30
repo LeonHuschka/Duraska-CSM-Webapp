@@ -187,6 +187,47 @@ export async function fetchRequestInspo(
 }
 
 /**
+ * The original inspo of a trial's viral reel, pasted by the team: stored
+ * on the trial so every job of it shows the original beside the outlier.
+ * A copy the bot already holds of that post is reused.
+ */
+export async function fetchTrialInspo(
+  supabase: Db,
+  trialId: string,
+  link: string
+): Promise<{ ok: boolean; note: string }> {
+  const { data: t } = await supabase.from("trials").select("id, persona_id").eq("id", trialId).maybeSingle();
+  if (!t) return { ok: false, note: "no such trial" };
+  await supabase.from("trials").update({ inspo_link: link, inspo_video_path: null }).eq("id", trialId);
+  const key = instagramKey(link);
+  if (key) {
+    const { data: copy } = await supabase
+      .from("content_links")
+      .select("video_path")
+      .eq("persona_id", t.persona_id)
+      .eq("url_key", key)
+      .not("video_path", "is", null)
+      .limit(1)
+      .maybeSingle();
+    if (copy?.video_path) {
+      await supabase.from("trials").update({ inspo_video_path: copy.video_path }).eq("id", trialId);
+      return { ok: true, note: "the topic has a copy" };
+    }
+  }
+  const resolved = await resolveVideoUrl(link);
+  if (!resolved.ok) return { ok: false, note: resolved.note };
+  const bytes = await downloadVideo(resolved.url);
+  if (!bytes) return { ok: false, note: "download failed" };
+  const path = `personas/${t.persona_id}/trials/${trialId}/inspo.mp4`;
+  const { error } = await supabase.storage
+    .from("content-assets")
+    .upload(path, bytes, { contentType: "video/mp4", upsert: true });
+  if (error) return { ok: false, note: `storage: ${error.message}` };
+  await supabase.from("trials").update({ inspo_video_path: path }).eq("id", trialId);
+  return { ok: true, note: "stored" };
+}
+
+/**
  * Every link that has no copy yet and has not already failed, newest
  * first. Used by the webhook's follow-up call for one link and by hand
  * for the backlog.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -36,7 +36,7 @@ import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
 import { EditNotes } from "@/components/requests/edit-notes";
 import { useThumbBackfill } from "@/components/requests/use-thumb-backfill";
-import { quickVideoFrame } from "@/lib/thumbnails";
+import { PosterVideo, TrialInspoSlot } from "@/components/requests/inspo-videos";
 import {
   deleteAsset,
   setAssetFansly,
@@ -87,6 +87,9 @@ interface RequestDetailProps {
   personaId: string;
   /** The inspo reel the bot saved when its link was posted, signed. */
   inspoVideoUrl?: string | null;
+  /** A Trial-Maxxing job: the reel that went viral, shown beside its inspo. */
+  viralVideoUrl?: string | null;
+  trial?: { id: string; inspoLink: string | null } | null;
 }
 
 export function RequestDetail({
@@ -94,6 +97,8 @@ export function RequestDetail({
   assets,
   personaId,
   inspoVideoUrl = null,
+  viralVideoUrl = null,
+  trial = null,
 }: RequestDetailProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -106,23 +111,6 @@ export function RequestDetail({
   const [inspoLink, setInspoLink] = useState(request.inspo_link ?? "");
   const [isNsfw, setIsNsfw] = useState(request.is_nsfw);
   const [isTrial, setIsTrial] = useState(request.is_trial ?? false);
-
-  // The inspo reel's first frame as its poster — a paused video shows black.
-  const [inspoPoster, setInspoPoster] = useState<string | null>(null);
-  useEffect(() => {
-    if (!inspoVideoUrl) return;
-    let made: string | null = null;
-    let gone = false;
-    quickVideoFrame(inspoVideoUrl, 25_000).then((blob) => {
-      if (!blob || gone) return;
-      made = URL.createObjectURL(blob);
-      setInspoPoster(made);
-    });
-    return () => {
-      gone = true;
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [inspoVideoUrl]);
 
   // Videos without a picture get one made in the background.
   const thumbs = useThumbBackfill(assets);
@@ -274,18 +262,17 @@ export function RequestDetail({
             requestId={request.id}
             initial={Array.isArray(request.edit_notes) ? (request.edit_notes as EditNote[]) : []}
           />
-          {inspoVideoUrl && (
-            <div className="shrink-0">
-              <video
-                src={inspoVideoUrl}
-                poster={inspoPoster ?? undefined}
-                controls
-                playsInline
-                preload="metadata"
-                className="aspect-[9/16] w-40 rounded-xl border border-border/50 bg-black object-cover sm:w-48"
-              />
-              <p className="mt-1 text-center text-[10px] text-muted-foreground">Inspo reel</p>
+          {trial ? (
+            <div className="flex gap-3">
+              {inspoVideoUrl ? (
+                <PosterVideo url={inspoVideoUrl} label="Original inspo" />
+              ) : (
+                <TrialInspoSlot trialId={trial.id} link={trial.inspoLink} />
+              )}
+              {viralVideoUrl && <PosterVideo url={viralVideoUrl} label="Went viral" />}
             </div>
+          ) : (
+            inspoVideoUrl && <PosterVideo url={inspoVideoUrl} label="Inspo reel" />
           )}
         </div>
         <Button
