@@ -172,9 +172,13 @@ async function thumbnailFromVideo(blob: Blob): Promise<Blob | null> {
  * this one sits invisibly in the page and plays muted for an instant —
  * the first painted frame is what we draw.
  */
-export async function quickVideoFrame(file: Blob): Promise<Blob | null> {
-  const url = URL.createObjectURL(file);
+export async function quickVideoFrame(file: Blob | string, timeoutMs = 8000): Promise<Blob | null> {
+  // A stored video by its signed URL, or a picked file. The URL needs CORS
+  // so the canvas can be read; storage sends it.
+  const remote = typeof file === "string";
+  const url = remote ? file : URL.createObjectURL(file);
   const video = document.createElement("video");
+  if (remote) video.crossOrigin = "anonymous";
   video.muted = true;
   video.playsInline = true;
   video.setAttribute("muted", "");
@@ -186,7 +190,7 @@ export async function quickVideoFrame(file: Blob): Promise<Blob | null> {
   video.src = url;
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("frame timeout")), 8000);
+      const timer = setTimeout(() => reject(new Error("frame timeout")), timeoutMs);
       const done = () => {
         clearTimeout(timer);
         video.pause();
@@ -219,7 +223,7 @@ export async function quickVideoFrame(file: Blob): Promise<Blob | null> {
     video.removeAttribute("src");
     video.load();
     video.remove();
-    URL.revokeObjectURL(url);
+    if (!remote) URL.revokeObjectURL(url);
   }
 }
 

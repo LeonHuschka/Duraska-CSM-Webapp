@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { generateThumbnailFromUrl, thumbnailPathFor } from "@/lib/thumbnails";
+import { quickVideoFrame, thumbnailPathFor } from "@/lib/thumbnails";
 import { saveAssetThumbnail } from "@/app/(app)/vault/actions";
 import type { AssetWithUrl } from "@/app/(app)/requests/[id]/page";
 
 /**
  * Videos on a job that have no thumbnail — takes from trial boxes, the
  * drop zone, or uploads from before the upload tab stored one — get it
- * here, two at a time: a frame from the first megabytes of the video,
+ * here, two at a time: the first frame of the video, read from storage,
  * stored next to it, so the next visit has it straight away. Returns the
  * fresh pictures by asset id to show in the meantime.
  */
@@ -28,7 +28,9 @@ export function useThumbBackfill(assets: AssetWithUrl[]): Record<string, string>
     const work = async () => {
       for (let a = todo.shift(); a; a = todo.shift()) {
         try {
-          const thumb = await generateThumbnailFromUrl(a.signedUrl, a.mime_type);
+          // Played muted in the page for an instant, like the upload cards:
+          // a detached video seeking to a frame stalls on phones and .mov.
+          const thumb = await quickVideoFrame(a.signedUrl, 25_000);
           if (!thumb) continue;
           const tPath = thumbnailPathFor(a.file_path);
           const { error } = await createClient()
