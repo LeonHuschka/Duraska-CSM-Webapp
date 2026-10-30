@@ -55,6 +55,20 @@ export async function setAssetFansly(assetId: string, requestId: string, fansly:
   revalidatePath("/editing");
 }
 
+/** Move a final cut between the Instagram and the Fansly pile. */
+export async function moveCut(assetId: string, requestId: string, stage: "edited" | "fansly") {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("content_assets")
+    .update({ stage })
+    .eq("id", assetId)
+    .in("stage", ["edited", "fansly"]);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/editing");
+  revalidatePath("/vault");
+}
+
 export async function deleteAsset(assetId: string, requestId: string) {
   const supabase = await createClient();
 

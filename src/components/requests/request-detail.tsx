@@ -39,6 +39,7 @@ import { useThumbBackfill } from "@/components/requests/use-thumb-backfill";
 import { PosterVideo, TrialInspoSlot } from "@/components/requests/inspo-videos";
 import {
   deleteAsset,
+  moveCut,
   setAssetFansly,
   updateRequestDetail,
   type EditNote,
@@ -163,6 +164,19 @@ export function RequestDetail({
         router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not move the take");
+      }
+    });
+  };
+
+  const handleMoveCut = (asset: AssetWithUrl) => {
+    const to = asset.stage === "fansly" ? "edited" : "fansly";
+    startTransition(async () => {
+      try {
+        await moveCut(asset.id, request.id, to);
+        toast.success(to === "fansly" ? "Moved to Fansly" : "Moved to Instagram");
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not move the cut");
       }
     });
   };
@@ -336,7 +350,7 @@ export function RequestDetail({
               label="Drop the Instagram cuts here"
               onUploadComplete={handleUploadComplete}
             />
-            <AssetGallery assets={editedAssets} onDelete={handleDeleteAsset} />
+            <AssetGallery assets={editedAssets} onDelete={handleDeleteAsset} onMoveCut={handleMoveCut} />
           </div>
           <div className="space-y-2 rounded-xl border border-sky-400/30 bg-sky-400/5 p-3">
             <h3 className="text-sm font-semibold text-sky-300">
@@ -349,7 +363,12 @@ export function RequestDetail({
               label="Drop the Fansly cuts here"
               onUploadComplete={handleUploadComplete}
             />
-            <AssetGallery assets={fanslyCuts} onDelete={handleDeleteAsset} empty="No Fansly cut yet" />
+            <AssetGallery
+              assets={fanslyCuts}
+              onDelete={handleDeleteAsset}
+              onMoveCut={handleMoveCut}
+              empty="No Fansly cut yet"
+            />
           </div>
         </div>
       </div>

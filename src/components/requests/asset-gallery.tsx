@@ -32,10 +32,12 @@ interface AssetGalleryProps {
   onDelete: (assetId: string) => void;
   /** Raw takes only: move a take to the other pile when she marked it wrong. */
   onToggleFansly?: (asset: AssetWithUrl) => void;
+  /** Final cuts only: move a cut between the Instagram and the Fansly pile. */
+  onMoveCut?: (asset: AssetWithUrl) => void;
   empty?: string;
 }
 
-export function AssetGallery({ assets, onDelete, onToggleFansly, empty }: AssetGalleryProps) {
+export function AssetGallery({ assets, onDelete, onToggleFansly, onMoveCut, empty }: AssetGalleryProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (assetId: string) => {
@@ -116,6 +118,17 @@ export function AssetGallery({ assets, onDelete, onToggleFansly, empty }: AssetG
                   title={asset.fansly ? "Mark as an Instagram take" : "Mark as a Fansly take"}
                 >
                   {asset.fansly ? "Mark IG" : "Mark Fansly"}
+                </Button>
+              )}
+              {onMoveCut && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-7 px-2 text-[10px]"
+                  onClick={() => onMoveCut(asset)}
+                  title={asset.stage === "fansly" ? "Move to the Instagram cuts" : "Move to the Fansly cuts"}
+                >
+                  {asset.stage === "fansly" ? "→ IG" : "→ Fansly"}
                 </Button>
               )}
               <a
