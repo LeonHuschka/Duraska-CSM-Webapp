@@ -7,7 +7,6 @@ import { requireActivePersonaId } from "@/lib/persona";
 import { getNextReelTitle } from "@/app/(app)/vault/actions";
 import {
   DIMENSIONS,
-  DIM_META,
   MAX_RESHOOTS,
   cellName,
   decideProposal,
@@ -15,7 +14,6 @@ import {
   ensureTrial,
   loadTrial,
   notifyTrial,
-  rowOpen,
   roundBrief,
   storeOutlierVideo,
   winnersOf,
@@ -140,9 +138,6 @@ export async function openCellJob(cellId: string) {
   if (!trial) return { error: "No such trial", requestId: null, personaId: null };
   const me = await who(supabase, trial.persona_id);
   if (!me?.member) return { error: "Not a member of this persona", requestId: null, personaId: null };
-  if (!rowOpen(trial.phase as Phase, cell.dimension as Dimension)) {
-    return { error: `${DIM_META[cell.dimension as Dimension].title} open once the round before is decided`, requestId: null, personaId: null };
-  }
   if (cell.request_id) return { error: null, requestId: cell.request_id, personaId: trial.persona_id };
 
   const view = await loadTrial(supabase, trial.id);

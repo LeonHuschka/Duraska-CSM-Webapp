@@ -127,7 +127,7 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
             d={d}
             index={i}
             row={rows[i]}
-            state={i < pIdx ? "decided" : i === pIdx ? "now" : "locked"}
+            state={i < pIdx ? "decided" : i === pIdx ? "now" : "later"}
             brief={trial.briefs[d]}
             winners={winners(d)}
             staff={staff}
@@ -149,15 +149,16 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
               </td>
             </tr>
             {DIMS.map((d, i) => {
-              const state = i < pIdx ? "decided" : i === pIdx ? "now" : "locked";
+              // Every round can be shot at any time; only the deciding goes in order.
+              const state = i < pIdx ? "decided" : i === pIdx ? "now" : "later";
               return (
-                <tr key={d} className={`border-b border-border/50 last:border-0 ${state === "locked" ? "opacity-50" : ""}`}>
+                <tr key={d} className="border-b border-border/50 last:border-0">
                   <th className="w-44 p-4 text-left align-top">
                     <p className="text-sm font-medium">
                       {rows[i].length} {META[d].title}
                     </p>
                     <p className="mt-1 text-[11px] font-normal text-muted-foreground">
-                      {state === "decided" ? "Decided" : state === "now" ? `${doneCount(rows[i])} of ${rows[i].length} shot` : "After the round above"}
+                      {state === "decided" ? "Decided" : `${doneCount(rows[i])} of ${rows[i].length} shot`}
                     </p>
                     {state === "decided" && winners(d).length > 0 && (
                       <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-normal text-amber-300">
@@ -167,13 +168,13 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
                     {state === "now" && staff && <DecideButton trialId={trial.id} index={i} row={rows[i]} compact />}
                   </th>
                   <td className="p-4">
-                    {state === "now" && <p className="mb-3 text-xs text-muted-foreground">{trial.briefs[d]}</p>}
+                    {state !== "decided" && <p className="mb-3 text-xs text-muted-foreground">{trial.briefs[d]}</p>}
                     <div
                       className="grid gap-3"
                       style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(rows[i].length, 1), 6)}, minmax(0, 1fr))` }}
                     >
                       {rows[i].map((c) => (
-                        <CellTile key={c.id} c={c} locked={state === "locked"} onOpen={() => state !== "locked" && setOpenId(c.id)} />
+                        <CellTile key={c.id} c={c} locked={false} onOpen={() => setOpenId(c.id)} />
                       ))}
                     </div>
                     {staff && rows[i].some((c) => c.views != null) && (
@@ -325,7 +326,7 @@ function MobileRound({
   d: Dimension;
   index: number;
   row: MatrixCell[];
-  state: "decided" | "now" | "locked";
+  state: "decided" | "now" | "later";
   brief: string;
   winners: string[];
   staff: boolean;
@@ -345,25 +346,20 @@ function MobileRound({
             ? winners.length
               ? `Winner: ${winners.join(", ")}`
               : "Decided"
-            : state === "now"
-              ? `${shot} of ${row.length} shot`
-              : "Opens after the round before"}
+            : `${shot} of ${row.length} shot`}
         </p>
       </div>
-      {state === "locked" ? (
-        <Lock className="h-4 w-4 shrink-0 text-muted-foreground/60" />
-      ) : state === "decided" ? (
+      {state !== "now" ? (
         <span className="flex shrink-0 items-center gap-2">
-          <Check className="h-4 w-4 text-emerald-400" />
+          {state === "decided" && <Check className="h-4 w-4 text-emerald-400" />}
           <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
         </span>
       ) : null}
     </div>
   );
-  if (state === "locked") return <div className="rounded-2xl border border-border/40 px-4 py-3 opacity-60">{head}</div>;
   return (
     <div className="rounded-2xl border border-border/50 bg-card p-4">
-      {state === "decided" ? (
+      {state !== "now" ? (
         <button type="button" className="w-full" onClick={() => setExpanded((x) => !x)}>
           {head}
         </button>
@@ -372,7 +368,7 @@ function MobileRound({
       )}
       {expanded && (
         <>
-          {state === "now" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
+          {state !== "decided" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
           <div className="mt-3 grid grid-cols-3 gap-2">
             {row.map((c) => (
               <CellTile key={c.id} c={c} locked={false} onOpen={() => onOpen(c.id)} />

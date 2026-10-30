@@ -81,8 +81,6 @@ export type TrialView = {
 };
 
 export const phaseIndex = (p: Phase) => (p === "done" ? 3 : DIMENSIONS.indexOf(p));
-/** A row can be worked on once the rounds before it are decided. */
-export const rowOpen = (phase: Phase, d: Dimension) => DIMENSIONS.indexOf(d) <= phaseIndex(phase);
 
 /** What she is asked to do in a round, given what won before it. */
 export function roundBrief(d: Dimension, winners: { outfit: string[]; location: string[] }, n = 6): string {
