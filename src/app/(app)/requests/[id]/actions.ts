@@ -129,3 +129,16 @@ export async function updateRequestDetail(
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/requests");
 }
+
+export type EditNote = { id: string; text: string; done: boolean };
+
+/** The editor's to-do list on a job — written by the team, ticked by the editor. */
+export async function saveEditNotes(requestId: string, notes: EditNote[]) {
+  const supabase = await createClient();
+  const clean = notes
+    .map((n) => ({ id: String(n.id), text: String(n.text).trim().slice(0, 500), done: !!n.done }))
+    .filter((n) => n.text);
+  const { error } = await supabase.from("content_requests").update({ edit_notes: clean }).eq("id", requestId);
+  if (error) return { error: error.message };
+  return { error: null };
+}

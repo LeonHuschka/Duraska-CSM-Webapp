@@ -34,10 +34,12 @@ import {
 } from "@/components/ui/select";
 import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
+import { EditNotes } from "@/components/requests/edit-notes";
 import {
   deleteAsset,
   setAssetFansly,
   updateRequestDetail,
+  type EditNote,
 } from "@/app/(app)/requests/[id]/actions";
 import type { ContentRequest } from "@/lib/types/database";
 import type { AssetWithUrl } from "@/app/(app)/requests/[id]/page";
@@ -176,7 +178,7 @@ export function RequestDetail({
 
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
+        <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-center gap-2.5">
             {request.is_trial && <TrialBadge size="lg" />}
             <h1 className="text-2xl font-semibold tracking-tight">
@@ -244,18 +246,25 @@ export function RequestDetail({
         </div>
         {/* The reel itself, kept from the day its link was posted — so the
             model sees what to shoot even after Instagram took it down. */}
-        {inspoVideoUrl && (
-          <div className="shrink-0 sm:ml-4">
-            <video
-              src={inspoVideoUrl}
-              controls
-              playsInline
-              preload="metadata"
-              className="aspect-[9/16] w-32 rounded-xl border border-border/50 bg-black object-cover sm:w-36"
-            />
-            <p className="mt-1 text-center text-[10px] text-muted-foreground">Inspo reel</p>
-          </div>
-        )}
+        <div className="flex shrink-0 flex-col-reverse gap-4 sm:ml-4 sm:flex-row sm:items-start">
+          {/* What the editor should change or add, beside the reel it is about */}
+          <EditNotes
+            requestId={request.id}
+            initial={Array.isArray(request.edit_notes) ? (request.edit_notes as EditNote[]) : []}
+          />
+          {inspoVideoUrl && (
+            <div className="shrink-0">
+              <video
+                src={inspoVideoUrl}
+                controls
+                playsInline
+                preload="metadata"
+                className="aspect-[9/16] w-40 rounded-xl border border-border/50 bg-black object-cover sm:w-48"
+              />
+              <p className="mt-1 text-center text-[10px] text-muted-foreground">Inspo reel</p>
+            </div>
+          )}
+        </div>
         <Button
           variant="outline"
           size="sm"

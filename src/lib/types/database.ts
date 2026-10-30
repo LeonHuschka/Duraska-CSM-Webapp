@@ -161,6 +161,7 @@ export type Database = {
           inspo_link: string | null;
           inspo_video_path: string | null;
           inspo_video_error: string | null;
+          edit_notes: Json;
           reference_image_urls: string[] | null;
           content_type_id: string | null;
           is_nsfw: boolean;
@@ -185,6 +186,7 @@ export type Database = {
           inspo_link?: string | null;
           inspo_video_path?: string | null;
           inspo_video_error?: string | null;
+          edit_notes?: Json;
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
@@ -209,6 +211,7 @@ export type Database = {
           inspo_link?: string | null;
           inspo_video_path?: string | null;
           inspo_video_error?: string | null;
+          edit_notes?: Json;
           reference_image_urls?: string[] | null;
           content_type_id?: string | null;
           is_nsfw?: boolean;
