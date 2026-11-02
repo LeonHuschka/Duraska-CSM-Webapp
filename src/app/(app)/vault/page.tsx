@@ -253,6 +253,20 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
     }
   }
 
+  // A cut planned for auto-posting is spoken for: it counts as out on its
+  // account, so no VA posts it meanwhile. (Before migration 00062 there
+  // is no such column and nothing is planned.)
+  const { data: planned, error: plannedErr } = await supabase
+    .from("schedule_slots")
+    .select("asset_id, account_id, publish_state")
+    .eq("persona_id", personaId)
+    .eq("auto_publish", true)
+    .eq("status", "scheduled");
+  for (const p of plannedErr ? [] : planned ?? []) {
+    if (!p.asset_id || !p.account_id || p.publish_state === "failed") continue;
+    (postedAccountsByAsset[p.asset_id] ??= new Set()).add(p.account_id);
+  }
+
   // Number the finished cuts of each job in the order they were uploaded.
   // Raw takes get no number: nobody posts those, and counting them would
   // make "2 of 5" mean something different on every card.

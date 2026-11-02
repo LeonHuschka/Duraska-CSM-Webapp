@@ -7,6 +7,7 @@ import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
 import { announceWinners } from "@/lib/winners";
 import { sendPostingFocus } from "@/lib/posting-focus";
+import { refreshIgTokens } from "@/lib/auto-publish";
 import { fetchInspoVideo, retryableVideoLinks } from "@/lib/inspo-video";
 import {
   checkInstagramAlive,
@@ -131,6 +132,8 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await sendPostingFocus(supabase, cfg.persona_id)] as const)
   );
   summary.focus = Object.fromEntries(focus);
+  // Auto-posting tokens run 60 days; renewed well before.
+  summary.igTokens = await refreshIgTokens(supabase).catch((err) => [String(err)]);
 
   for (const cfg of configs ?? []) {
     summary[cfg.persona_id] = await runForPersona(supabase, cfg, deadline);

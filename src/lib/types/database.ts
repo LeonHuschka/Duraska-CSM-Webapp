@@ -332,6 +332,15 @@ export type Database = {
           post_url: string | null;
           created_by: string | null;
           created_at: string;
+          auto_publish: boolean;
+          trial_reel: boolean;
+          share_to_feed: boolean;
+          publish_state: string | null;
+          publish_error: string | null;
+          publish_attempts: number;
+          ig_container_id: string | null;
+          ig_media_id: string | null;
+          publish_started_at: string | null;
         };
         Insert: {
           id?: string;
@@ -347,6 +356,15 @@ export type Database = {
           post_url?: string | null;
           created_by?: string | null;
           created_at?: string;
+          auto_publish?: boolean;
+          trial_reel?: boolean;
+          share_to_feed?: boolean;
+          publish_state?: string | null;
+          publish_error?: string | null;
+          publish_attempts?: number;
+          ig_container_id?: string | null;
+          ig_media_id?: string | null;
+          publish_started_at?: string | null;
         };
         Update: {
           id?: string;
@@ -362,6 +380,15 @@ export type Database = {
           post_url?: string | null;
           created_by?: string | null;
           created_at?: string;
+          auto_publish?: boolean;
+          trial_reel?: boolean;
+          share_to_feed?: boolean;
+          publish_state?: string | null;
+          publish_error?: string | null;
+          publish_attempts?: number;
+          ig_container_id?: string | null;
+          ig_media_id?: string | null;
+          publish_started_at?: string | null;
         };
         Relationships: [
           {
@@ -522,6 +549,18 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
+      };
+      ig_connections: {
+        Row: { account_id: string; persona_id: string; ig_user_id: string; username: string | null; access_token: string; token_expires_at: string | null; connected_by: string | null; connected_at: string; refreshed_at: string | null };
+        Insert: { account_id: string; persona_id: string; ig_user_id: string; username?: string | null; access_token: string; token_expires_at?: string | null; connected_by?: string | null; connected_at?: string; refreshed_at?: string | null };
+        Update: { account_id?: string; persona_id?: string; ig_user_id?: string; username?: string | null; access_token?: string; token_expires_at?: string | null; connected_by?: string | null; connected_at?: string; refreshed_at?: string | null };
+        Relationships: [];
+      };
+      app_secrets: {
+        Row: { name: string; value: string };
+        Insert: { name: string; value: string };
+        Update: { name?: string; value?: string };
         Relationships: [];
       };
       account_stories: {

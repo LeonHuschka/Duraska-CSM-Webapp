@@ -85,6 +85,37 @@ export async function AccountsTab({
     .neq("status", "archived");
   const trialOf = new Map((trialRows ?? []).map((t) => [`${t.account_id}|${t.shortcode}`, t.id]));
 
+  // Auto-posting: what is planned per account, and which are connected.
+  // Before migration 00062 neither is there; the board shows none of it.
+  const [autoRes, connRes] = await Promise.all([
+    supabase
+      .from("schedule_slots")
+      .select("account_id, scheduled_for, status, publish_state, posted_at")
+      .eq("persona_id", personaId)
+      .eq("auto_publish", true)
+      .gte("scheduled_for", new Date(Date.now() - 8 * DAY).toISOString()),
+    createAdminClient().from("ig_connections").select("account_id").eq("persona_id", personaId),
+  ]);
+  const autoSlots = autoRes.error ? [] : autoRes.data ?? [];
+  const connected = new Set((connRes.error ? [] : connRes.data ?? []).map((c) => c.account_id));
+  const autopostOf = (accountId: string): AccountTileData["autopost"] => {
+    const mine = autoSlots.filter((s) => s.account_id === accountId);
+    if (!connected.has(accountId) && mine.length === 0) return null;
+    const now = Date.now();
+    const ahead = mine
+      .filter((s) => s.status === "scheduled" && s.publish_state !== "failed" && new Date(s.scheduled_for).getTime() > now - 10 * 60_000)
+      .map((s) => s.scheduled_for)
+      .sort();
+    return {
+      connected: connected.has(accountId),
+      scheduled: ahead.length,
+      next: ahead[0] ?? null,
+      until: ahead[ahead.length - 1] ?? null,
+      failed: mine.filter((s) => s.publish_state === "failed").length,
+      posted7: mine.filter((s) => s.status === "posted" && s.posted_at && now - new Date(s.posted_at).getTime() < 7 * DAY).length,
+    };
+  };
+
   // Every Trial-Maxxing take by its job, and the account it is for: a reel
   // made from one counts as a trial reel on the posting calendar, archived
   // trials included — what was posted stays posted.
@@ -388,6 +419,7 @@ export async function AccountsTab({
       profileUrl: r.profileUrl,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       reels: r.tiles.map(({ seenAt, ...t }) => t),
+      autopost: r.a.platform === "instagram" ? autopostOf(r.a.id) : null,
     };
   });
 

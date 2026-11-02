@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowUpRight,
+  CalendarDays,
   ChevronDown,
   Eye,
   Flame,
@@ -108,6 +109,17 @@ export type AccountTileData = {
   sortOrder: number | null;
   profileUrl: string | null;
   reels: ReelTileData[];
+  /** Auto-posting through the planner, when the account uses it. */
+  autopost: {
+    connected: boolean;
+    /** Posts still ahead. */
+    scheduled: number;
+    next: string | null;
+    /** The last one planned: how far ahead the account is filled. */
+    until: string | null;
+    failed: number;
+    posted7: number;
+  } | null;
 };
 
 type SortKey = "all" | "va" | "meta" | "views" | "followers" | "inactive";
@@ -639,6 +651,8 @@ function AccountTile({
         />
       )}
 
+      {a.autopost && <AutopostStrip accountId={a.id} auto={a.autopost} />}
+
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
         {a.disabled ? (
           <span className="flex items-center gap-1 font-medium text-rose-400">
@@ -675,6 +689,57 @@ function AccountTile({
         />
       </div>
     </div>
+  );
+}
+
+/** The planner at a glance: how far ahead the account is filled, and what needs a look. */
+function AutopostStrip({ accountId, auto }: { accountId: string; auto: NonNullable<AccountTileData["autopost"]> }) {
+  const days = auto.until ? Math.max(0, Math.ceil((new Date(auto.until).getTime() - Date.now()) / 86_400_000)) : 0;
+  const tone = days <= 2 ? "text-rose-400" : days <= 5 ? "text-amber-300" : "text-emerald-400";
+  const fmt = (iso: string, o: Intl.DateTimeFormatOptions) => new Date(iso).toLocaleString("de-DE", o);
+  return (
+    <a
+      href={`/planner/${accountId}`}
+      onClick={(e) => e.stopPropagation()}
+      className="mt-3 block rounded-xl border border-primary/30 bg-primary/[0.06] p-2.5 transition-colors hover:border-primary/60"
+    >
+      <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-primary">
+        <span className="flex items-center gap-1">
+          <CalendarDays className="h-3 w-3" /> Auto-post
+        </span>
+        <span className={auto.connected ? "text-emerald-400" : "text-amber-300"}>
+          {auto.connected ? "connected" : "not connected"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <p className="text-lg font-semibold leading-none tabular-nums">{auto.scheduled}</p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">scheduled</p>
+        </div>
+        <div>
+          <p className={`text-lg font-semibold leading-none tabular-nums ${tone}`}>{days}d</p>
+          <p className="mt-0.5 truncate text-[10px] text-muted-foreground" suppressHydrationWarning>
+            {auto.until ? `until ${fmt(auto.until, { weekday: "short", day: "2-digit", month: "2-digit" })}` : "nothing planned"}
+          </p>
+        </div>
+        <div>
+          <p className="truncate text-sm font-semibold leading-tight" suppressHydrationWarning>
+            {auto.next ? fmt(auto.next, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+          </p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">next post</p>
+        </div>
+      </div>
+      {(auto.failed > 0 || auto.posted7 > 0) && (
+        <p className="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+          {auto.posted7 > 0 && <span>{auto.posted7} auto-posted · 7 days</span>}
+          {auto.failed > 0 && (
+            <span className="flex items-center gap-0.5 font-semibold text-rose-400">
+              <AlertTriangle className="h-3 w-3" /> {auto.failed} failed
+            </span>
+          )}
+        </p>
+      )}
+    </a>
   );
 }
 
@@ -836,6 +901,15 @@ function AccountPanel({
                 ? "Instagram"
                 : "the platform"}
             <ArrowUpRight className="h-3 w-3" />
+          </a>
+        )}
+        {canEdit && a.platform === "instagram" && !a.disabled && (
+          <a
+            href={`/planner/${a.id}`}
+            className={`${a.profileUrl ? "" : "ml-auto "}inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground hover:opacity-90`}
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            Auto-post planner
           </a>
         )}
       </div>
