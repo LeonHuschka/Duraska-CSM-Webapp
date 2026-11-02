@@ -119,6 +119,8 @@ export function PlannerView({
   const [picking, setPicking] = useState<Date | null>(null);
   const [filter, setFilter] = useState<"free" | "all">("free");
   const [search, setSearch] = useState("");
+  /** The reel whose takes are open in the vault; null shows one tile per reel. */
+  const [openReel, setOpenReel] = useState<string | null>(null);
 
   const times = useMemo(() => postingTimes(account.perDay), [account.perDay]);
   const canPlan = migrated;
@@ -146,6 +148,29 @@ export function PlannerView({
       return !q || c.title.toLowerCase().includes(q);
     });
   }, [cuts, filter, search, plannedCuts]);
+
+  // One tile per reel: its newest shown take on top, with how many it has.
+  const reels = useMemo(() => {
+    const isFree = (c: PlannerCut) => c.usedOn.length === 0 && !c.queued && !plannedCuts.has(c.id);
+    const total = new Map<string, { all: number; free: number }>();
+    for (const c of cuts) {
+      const t = total.get(c.requestId) ?? { all: 0, free: 0 };
+      t.all++;
+      if (isFree(c)) t.free++;
+      total.set(c.requestId, t);
+    }
+    const byReel = new Map<string, PlannerCut[]>();
+    for (const c of shownCuts) byReel.set(c.requestId, [...(byReel.get(c.requestId) ?? []), c]);
+    return Array.from(byReel, ([requestId, list]) => ({
+      requestId,
+      title: list[0].title,
+      cover: list[0],
+      takes: list,
+      ...total.get(requestId)!,
+    }));
+  }, [cuts, shownCuts, plannedCuts]);
+  const openTakes = openReel ? shownCuts.filter((c) => c.requestId === openReel) : [];
+  const openTitle = openReel ? cuts.find((c) => c.requestId === openReel)?.title ?? "" : "";
 
   const lastCaption = useMemo(
     () =>
@@ -364,33 +389,77 @@ export function PlannerView({
               </button>
             </p>
           ) : (
-            <p className="mb-2 text-[11px] text-muted-foreground">Drag a cut onto a day, or click it to plan it at the next free time.</p>
+            <p className="mb-2 text-[11px] text-muted-foreground">Click a reel to see its takes. Drag a take onto a day, or click it to plan it at the next free time.</p>
           )}
           <div className="relative mb-2">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Reel #…" className="h-8 pl-8 text-xs" />
+            <Input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setOpenReel(null);
+              }}
+              placeholder="Reel #…"
+              className="h-8 pl-8 text-xs"
+            />
           </div>
+          {openReel && (
+            <div className="mb-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setOpenReel(null)}
+                className="flex items-center gap-1 rounded-md border border-border/50 px-2 py-1 text-[11px] hover:bg-muted/40"
+              >
+                <ChevronLeft className="h-3 w-3" /> All reels
+              </button>
+              <span className="truncate text-xs font-semibold">{openTitle}</span>
+              <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+                {openTakes.length} take{openTakes.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          )}
           <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="grid auto-rows-max grid-cols-2 gap-2">
-            {shownCuts.length === 0 && (
+            {(openReel ? openTakes.length : reels.length) === 0 && (
               <p className="col-span-2 py-8 text-center text-xs text-muted-foreground">
-                {filter === "free" ? "Every cut is used or planned — switch to All" : "No cuts found"}
+                {filter === "free"
+                  ? openReel
+                    ? "Every take of this reel is used or planned — switch to All"
+                    : "Every cut is used or planned — switch to All"
+                  : "No cuts found"}
               </p>
             )}
-            {shownCuts.map((c) => (
-              <CutTile
-                key={c.id}
-                cut={c}
-                planned={plannedCuts.has(c.id) || c.queued}
-                draggable={canPlan}
-                onDragStart={() => setDrag({ kind: "cut", id: c.id })}
-                onDragEnd={() => {
-                  setDrag(null);
-                  setOver(null);
-                }}
-                onClick={() => openCut(c)}
-              />
-            ))}
+            {openReel
+              ? openTakes.map((c) => (
+                  <CutTile
+                    key={c.id}
+                    cut={c}
+                    planned={plannedCuts.has(c.id) || c.queued}
+                    draggable={canPlan}
+                    onDragStart={() => setDrag({ kind: "cut", id: c.id })}
+                    onDragEnd={() => {
+                      setDrag(null);
+                      setOver(null);
+                    }}
+                    onClick={() => openCut(c)}
+                  />
+                ))
+              : reels.map((r) => (
+                  <ReelTile
+                    key={r.requestId}
+                    cover={r.cover}
+                    title={r.title}
+                    all={r.all}
+                    free={r.free}
+                    draggable={canPlan}
+                    onDragStart={() => setDrag({ kind: "cut", id: r.cover.id })}
+                    onDragEnd={() => {
+                      setDrag(null);
+                      setOver(null);
+                    }}
+                    onClick={() => setOpenReel(r.requestId)}
+                  />
+                ))}
           </div>
           </div>
         </aside>
@@ -593,6 +662,61 @@ export function PlannerView({
         onChanged={() => router.refresh()}
       />
     </div>
+  );
+}
+
+/** A reel in the vault: its cover take, and how many takes it has. Dragging it plans that take. */
+function ReelTile({
+  cover,
+  title,
+  all,
+  free,
+  draggable,
+  onDragStart,
+  onDragEnd,
+  onClick,
+}: {
+  cover: PlannerCut;
+  title: string;
+  all: number;
+  free: number;
+  draggable: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData("text/plain", cover.id);
+        setHover(false);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="group relative block aspect-[9/16] w-full shrink-0 cursor-pointer overflow-hidden rounded-lg border border-border/40 bg-black text-left"
+    >
+      {hover ? (
+        <video src={cover.video} poster={cover.thumb ?? undefined} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+      ) : (
+        <Thumb src={cover.thumb} video={cover.video} />
+      )}
+      <span className="absolute right-1 top-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+        {all} take{all === 1 ? "" : "s"}
+      </span>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-6">
+        <p className="truncate text-[11px] font-semibold text-white">{title}</p>
+        <p className={`truncate text-[9px] ${free > 0 ? "text-emerald-300" : "text-white/60"}`}>
+          {free > 0 ? `${free} unused` : "all used or planned"}
+        </p>
+      </div>
+    </button>
   );
 }
 
