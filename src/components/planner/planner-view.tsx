@@ -380,7 +380,8 @@ export function PlannerView({
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Reel #…" className="h-8 pl-8 text-xs" />
           </div>
-          <div className="-mr-1 grid flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1">
+          <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="grid auto-rows-max grid-cols-2 gap-2">
             {shownCuts.length === 0 && (
               <p className="col-span-2 py-8 text-center text-xs text-muted-foreground">
                 {filter === "free" ? "Every cut is used or planned — switch to All" : "No cuts found"}
@@ -400,6 +401,7 @@ export function PlannerView({
                 onClick={() => openCut(c)}
               />
             ))}
+          </div>
           </div>
         </aside>
 
@@ -634,7 +636,7 @@ function CutTile({
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative aspect-[9/16] cursor-grab overflow-hidden rounded-lg border border-border/40 bg-black text-left active:cursor-grabbing"
+      className="group relative block aspect-[9/16] w-full shrink-0 cursor-grab overflow-hidden rounded-lg border border-border/40 bg-black text-left active:cursor-grabbing"
     >
       {hover ? (
         <video src={cut.video} poster={cut.thumb ?? undefined} autoPlay muted loop playsInline className="h-full w-full object-cover" />

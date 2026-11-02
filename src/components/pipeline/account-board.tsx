@@ -140,8 +140,8 @@ const short = (n: number) =>
       ? `${Math.round(n / 1000)}k`
       : nf.format(n);
 
-/** Not posting: disabled by the platform, or parked at 0 reels a day. */
-const inactive = (a: AccountTileData) => a.disabled || a.perDay === 0;
+/** Not posting: disabled by the platform, or parked at 0 reels a day and not auto-posting either. */
+const inactive = (a: AccountTileData) => a.disabled || (a.perDay === 0 && !a.autopost);
 
 type Group = {
   key: string;
@@ -542,7 +542,7 @@ function AccountTile({
   onDrop: () => void;
 }) {
   const [over, setOver] = useState(false);
-  const parked = a.perDay === 0 && !a.disabled;
+  const parked = a.perDay === 0 && !a.disabled && !a.autopost;
   return (
     <div
       id={`account-${a.id}`}
