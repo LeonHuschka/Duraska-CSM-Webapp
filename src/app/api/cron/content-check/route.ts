@@ -6,6 +6,7 @@ import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
 import { announceWinners } from "@/lib/winners";
+import { sendPostingFocus } from "@/lib/posting-focus";
 import { fetchInspoVideo, retryableVideoLinks } from "@/lib/inspo-video";
 import {
   checkInstagramAlive,
@@ -124,6 +125,12 @@ export async function GET(req: Request) {
     summary.pattern = "started";
   }
   if (only === "scrape") return NextResponse.json({ ok: true, summary });
+
+  // Each account's topic: what did best lately and what to post because of it.
+  const focus = await Promise.all(
+    (configs ?? []).map(async (cfg) => [cfg.persona_id, await sendPostingFocus(supabase, cfg.persona_id)] as const)
+  );
+  summary.focus = Object.fromEntries(focus);
 
   for (const cfg of configs ?? []) {
     summary[cfg.persona_id] = await runForPersona(supabase, cfg, deadline);
