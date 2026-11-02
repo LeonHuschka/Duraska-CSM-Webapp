@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AccountAvatar, PlatformLogo } from "@/components/pipeline/account-avatar";
-import { disconnectInstagram, updatePost } from "@/app/(app)/planner/[accountId]/actions";
+import { connectInstagram, disconnectInstagram, updatePost } from "@/app/(app)/planner/[accountId]/actions";
 import { PostEditor, type EditorTarget } from "@/components/planner/post-editor";
 import {
   addDays,
@@ -84,31 +84,21 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export function PlannerView({
   account,
   connection,
-  igReady,
   migrated,
   cuts,
   posts: initialPosts,
-  flash,
 }: {
   account: { id: string; label: string; platform: string; avatar: string | null; perDay: number; hasTopic: boolean };
   connection: { username: string | null; expiresAt: string | null } | null;
-  igReady: boolean;
   migrated: boolean;
   cuts: PlannerCut[];
   posts: PlannerPost[];
-  flash: { connected: boolean; error: string | null };
 }) {
   const router = useRouter();
   // Dates render in the viewer's own time zone, which the server does not
   // know: the calendar draws once mounted.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  useEffect(() => {
-    if (flash.connected) toast.success("Instagram connected — planned posts go out by themselves now");
-    if (flash.error) toast.error(`Instagram: ${flash.error}`);
-    if (flash.connected || flash.error) window.history.replaceState(null, "", `/planner/${account.id}`);
-  }, [flash, account.id]);
 
   const [posts, setPosts] = useState(initialPosts);
   useEffect(() => setPosts(initialPosts), [initialPosts]);
@@ -304,7 +294,7 @@ export function PlannerView({
           </div>
         </div>
         <div className="ml-auto">
-          <ConnectionPill accountId={account.id} connection={connection} igReady={igReady} migrated={migrated} />
+          <ConnectionPill accountId={account.id} connection={connection} migrated={migrated} />
         </div>
       </div>
 
@@ -792,16 +782,16 @@ function Banner({ tone, children }: { tone: "amber"; children: React.ReactNode }
 function ConnectionPill({
   accountId,
   connection,
-  igReady,
   migrated,
 }: {
   accountId: string;
   connection: { username: string | null; expiresAt: string | null } | null;
-  igReady: boolean;
   migrated: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
   const confirmRef = useRef(false);
   if (connection) {
     return (
@@ -834,20 +824,60 @@ function ConnectionPill({
       </div>
     );
   }
-  if (!migrated || !igReady) {
+  if (!migrated) {
     return (
       <span className="flex items-center gap-1.5 rounded-full border border-border/50 px-3 py-1 text-xs text-muted-foreground">
         <CalendarDays className="h-3.5 w-3.5" />
-        {!migrated ? "Waiting for the database update" : "Waiting for the Instagram app setup"}
+        Waiting for the database update
       </span>
     );
   }
+  const connect = async () => {
+    setBusy(true);
+    const res = await connectInstagram(accountId, token);
+    setBusy(false);
+    if (res.error) return void toast.error(res.error);
+    setToken("");
+    setOpen(false);
+    toast.success(`Connected as @${res.username} — planned posts go out by themselves now`);
+    router.refresh();
+  };
   return (
-    <a
-      href={`/api/instagram/connect?account=${accountId}`}
-      className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-fuchsia-600 to-amber-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow hover:opacity-90"
-    >
-      <PlatformLogo platform="instagram" className="h-3.5 w-3.5" /> Connect Instagram
-    </a>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-fuchsia-600 to-amber-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow hover:opacity-90"
+      >
+        <PlatformLogo platform="instagram" className="h-3.5 w-3.5" /> Connect Instagram
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-2 w-80 space-y-2 rounded-xl border border-border/60 bg-popover p-3 shadow-xl">
+          <p className="text-xs font-medium">Access token</p>
+          <p className="text-[11px] text-muted-foreground">
+            Meta app → Use cases → Instagram API → Generate access tokens. It is checked against this account and never shown again.
+          </p>
+          <Input
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && connect()}
+            placeholder="Paste the token"
+            className="h-8 text-xs"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={connect} disabled={busy || !token.trim()}>
+              {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              Connect
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

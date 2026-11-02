@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
 import { accountLabel } from "@/lib/account-analytics";
-import { igConfigured } from "@/lib/instagram-api";
 import { PlannerView, type PlannerCut, type PlannerPost } from "@/components/planner/planner-view";
 
 // "Post now" publishes inside the server action and waits for Instagram.
@@ -17,10 +16,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function PlannerPage({
   params,
-  searchParams,
 }: {
   params: { accountId: string };
-  searchParams: { connected?: string; ig_error?: string };
 }) {
   const access = await plannerAccount(params.accountId);
   if (!access) notFound();
@@ -192,11 +189,9 @@ export default async function PlannerPage({
         hasTopic: account.telegram_chat_id != null,
       }}
       connection={conn ? { username: conn.username, expiresAt: conn.token_expires_at } : null}
-      igReady={igConfigured()}
       migrated={migrated}
       cuts={cuts}
       posts={posts}
-      flash={{ connected: searchParams.connected === "1", error: searchParams.ig_error ?? null }}
     />
   );
 }

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
 import { publishDue } from "@/lib/auto-publish";
+import { connectWithToken } from "@/lib/instagram-api";
 
 type Res = { error: string | null; id?: string };
 
@@ -139,6 +140,34 @@ export async function postNow(slotId: string): Promise<Res & { state?: string }>
   if (result.state === "failed" || result.state === "retry") return { error: result.note ?? "Failed", state: result.state };
   if (result.state === "waiting") return { error: "Connect Instagram first", state: result.state };
   return { error: null, state: result.state };
+}
+
+/** A token pasted from the Meta dashboard; kept only if it reaches this very account. */
+export async function connectInstagram(accountId: string, token: string): Promise<Res & { username?: string }> {
+  const access = await plannerAccount(accountId);
+  if (!access) return { error: "Not allowed" };
+  if (!token.trim()) return { error: "Paste the token first" };
+  try {
+    const conn = await connectWithToken(token, access.account.handle ?? "");
+    const { error } = await createAdminClient()
+      .from("ig_connections")
+      .upsert({
+        account_id: accountId,
+        persona_id: access.account.persona_id,
+        ig_user_id: conn.igUserId,
+        username: conn.username,
+        access_token: conn.token,
+        token_expires_at: conn.expiresAt,
+        connected_by: access.userId,
+        connected_at: new Date().toISOString(),
+        refreshed_at: null,
+      });
+    if (error) return { error: error.message };
+    revalidatePath(`/planner/${accountId}`);
+    return { error: null, username: conn.username };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not connect" };
+  }
 }
 
 export async function disconnectInstagram(accountId: string): Promise<Res> {

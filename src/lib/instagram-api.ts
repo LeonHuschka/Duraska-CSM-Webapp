@@ -1,34 +1,19 @@
 import "server-only";
 
 /**
- * Instagram's own API, with Instagram Login: an account connects once in
- * the planner, and its reels are then published through it.
+ * Publishing through Meta's API. An account is connected once in the
+ * planner by pasting an access token from the Meta app's dashboard.
  *
- * Needs INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET — the Instagram app id
- * and secret from the Meta app's "Instagram API with Instagram Login"
- * settings, not the Meta app's own. The callback below must be listed
- * there as a valid OAuth redirect URI.
+ * Two kinds of token work: an Instagram token ("IGAA…", Instagram
+ * Login) talks to graph.instagram.com, a Facebook token ("EAA…", the
+ * Unified / Facebook Login setup new apps get) to graph.facebook.com.
+ * The calls are the same on both, only the host differs.
  */
-const GRAPH = "https://graph.instagram.com/v23.0";
-export const IG_REDIRECT = "https://csm-duraskastudios.space/api/instagram/callback";
-const SCOPES = ["instagram_business_basic", "instagram_business_content_publish"];
+const IG_GRAPH = "https://graph.instagram.com/v23.0";
+const FB_GRAPH = "https://graph.facebook.com/v23.0";
 
-export function igConfigured(): boolean {
-  return !!process.env.INSTAGRAM_APP_ID && !!process.env.INSTAGRAM_APP_SECRET;
-}
-
-export function authorizeUrl(state: string): string {
-  const q = new URLSearchParams({
-    client_id: process.env.INSTAGRAM_APP_ID ?? "",
-    redirect_uri: IG_REDIRECT,
-    response_type: "code",
-    scope: SCOPES.join(","),
-    state,
-    // Ask every time, so the right account is picked even when the
-    // browser is logged in to another one.
-    force_reauth: "true",
-  });
-  return `https://www.instagram.com/oauth/authorize?${q}`;
+function graphFor(token: string): string {
+  return token.startsWith("EAA") ? FB_GRAPH : IG_GRAPH;
 }
 
 type IgError = { error?: { message?: string; code?: number; error_subcode?: number; error_user_msg?: string } };
@@ -43,46 +28,58 @@ async function igFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-/** The code from the redirect → a long-lived token (60 days) and the account behind it. */
-export async function connectWithCode(code: string): Promise<{
-  token: string;
-  expiresAt: string | null;
-  igUserId: string;
-  username: string | null;
-}> {
-  const form = new URLSearchParams({
-    client_id: process.env.INSTAGRAM_APP_ID ?? "",
-    client_secret: process.env.INSTAGRAM_APP_SECRET ?? "",
-    grant_type: "authorization_code",
-    redirect_uri: IG_REDIRECT,
-    code,
-  });
-  const short = await igFetch<{ access_token?: string; data?: { access_token: string }[] }>(
-    "https://api.instagram.com/oauth/access_token",
-    { method: "POST", body: form }
-  );
-  const shortToken = short.access_token ?? short.data?.[0]?.access_token;
-  if (!shortToken) throw new Error("Instagram gave no token");
-  const long = await igFetch<{ access_token: string; expires_in?: number }>(
-    `https://graph.instagram.com/access_token?${new URLSearchParams({
-      grant_type: "ig_exchange_token",
-      client_secret: process.env.INSTAGRAM_APP_SECRET ?? "",
-      access_token: shortToken,
-    })}`
-  );
-  const me = await igFetch<{ user_id?: string; id?: string; username?: string }>(
-    `${GRAPH}/me?${new URLSearchParams({ fields: "user_id,username", access_token: long.access_token })}`
-  );
-  return {
-    token: long.access_token,
-    expiresAt: long.expires_in ? new Date(Date.now() + long.expires_in * 1000).toISOString() : null,
-    igUserId: String(me.user_id ?? me.id),
-    username: me.username ?? null,
-  };
+/**
+ * A pasted token → the Instagram account behind it, which must be the
+ * one asked for. Instagram tokens from the dashboard last 60 days and
+ * are renewed by the daily run; Facebook ones carry their own expiry.
+ */
+export async function connectWithToken(
+  rawToken: string,
+  handle: string
+): Promise<{ token: string; expiresAt: string | null; igUserId: string; username: string }> {
+  const token = rawToken.trim();
+  const want = handle.replace(/^@/, "").toLowerCase();
+  let igUserId: string | null = null;
+  let username: string | null = null;
+  let expiresAt: string | null = null;
+
+  if (graphFor(token) === IG_GRAPH) {
+    const me = await igFetch<{ user_id?: string; id?: string; username?: string }>(
+      `${IG_GRAPH}/me?${new URLSearchParams({ fields: "user_id,username", access_token: token })}`
+    );
+    igUserId = String(me.user_id ?? me.id);
+    username = me.username ?? null;
+    expiresAt = new Date(Date.now() + 60 * 86_400_000).toISOString();
+  } else {
+    const pages = await igFetch<{ data?: { instagram_business_account?: { id: string; username?: string } }[] }>(
+      `${FB_GRAPH}/me/accounts?${new URLSearchParams({
+        fields: "instagram_business_account{id,username}",
+        limit: "100",
+        access_token: token,
+      })}`
+    );
+    const hit = (pages.data ?? [])
+      .map((p) => p.instagram_business_account)
+      .find((a) => a?.username?.toLowerCase() === want);
+    if (hit) {
+      igUserId = hit.id;
+      username = hit.username ?? null;
+    }
+    const dbg = await igFetch<{ data?: { expires_at?: number } }>(
+      `${FB_GRAPH}/debug_token?${new URLSearchParams({ input_token: token, access_token: token })}`
+    ).catch(() => null);
+    const exp = dbg?.data?.expires_at;
+    expiresAt = exp ? new Date(exp * 1000).toISOString() : null;
+  }
+
+  if (!igUserId || !username) throw new Error(`This token has no access to @${want}`);
+  if (username.toLowerCase() !== want) throw new Error(`This token belongs to @${username}, not @${want}`);
+  return { token, expiresAt, igUserId, username };
 }
 
-/** Another 60 days. Works once the token is a day old and still valid. */
+/** Another 60 days. Works once the token is a day old and still valid; Instagram tokens only. */
 export async function refreshToken(token: string): Promise<{ token: string; expiresAt: string | null }> {
+  if (graphFor(token) === FB_GRAPH) throw new Error("Facebook tokens are not renewed — paste a new one");
   const res = await igFetch<{ access_token: string; expires_in?: number }>(
     `https://graph.instagram.com/refresh_access_token?${new URLSearchParams({
       grant_type: "ig_refresh_token",
@@ -111,7 +108,7 @@ export async function createReelContainer(
   // A trial reel goes to non-followers first and joins the profile by
   // itself when it does well.
   if (p.trial) form.set("trial_params", JSON.stringify({ graduation_strategy: "SS_PERFORMANCE" }));
-  const res = await igFetch<{ id: string }>(`${GRAPH}/${igUserId}/media`, { method: "POST", body: form });
+  const res = await igFetch<{ id: string }>(`${graphFor(token)}/${igUserId}/media`, { method: "POST", body: form });
   return res.id;
 }
 
@@ -122,7 +119,7 @@ export async function containerStatus(
   token: string
 ): Promise<{ code: ContainerStatus; detail: string | null }> {
   const res = await igFetch<{ status_code: ContainerStatus; status?: string }>(
-    `${GRAPH}/${containerId}?${new URLSearchParams({ fields: "status_code,status", access_token: token })}`
+    `${graphFor(token)}/${containerId}?${new URLSearchParams({ fields: "status_code,status", access_token: token })}`
   );
   return { code: res.status_code, detail: res.status ?? null };
 }
@@ -130,13 +127,13 @@ export async function containerStatus(
 /** Step two: the processed video goes live. */
 export async function publishContainer(igUserId: string, containerId: string, token: string): Promise<string> {
   const form = new URLSearchParams({ creation_id: containerId, access_token: token });
-  const res = await igFetch<{ id: string }>(`${GRAPH}/${igUserId}/media_publish`, { method: "POST", body: form });
+  const res = await igFetch<{ id: string }>(`${graphFor(token)}/${igUserId}/media_publish`, { method: "POST", body: form });
   return res.id;
 }
 
 export async function mediaPermalink(mediaId: string, token: string): Promise<string | null> {
   const res = await igFetch<{ permalink?: string }>(
-    `${GRAPH}/${mediaId}?${new URLSearchParams({ fields: "permalink", access_token: token })}`
+    `${graphFor(token)}/${mediaId}?${new URLSearchParams({ fields: "permalink", access_token: token })}`
   ).catch(() => null);
   return res?.permalink ?? null;
 }
@@ -144,7 +141,7 @@ export async function mediaPermalink(mediaId: string, token: string): Promise<st
 /** The newest post of the account — for a publish whose answer got lost. */
 export async function latestMedia(igUserId: string, token: string): Promise<{ id: string; permalink: string | null } | null> {
   const res = await igFetch<{ data?: { id: string; permalink?: string }[] }>(
-    `${GRAPH}/${igUserId}/media?${new URLSearchParams({ fields: "id,permalink", limit: "1", access_token: token })}`
+    `${graphFor(token)}/${igUserId}/media?${new URLSearchParams({ fields: "id,permalink", limit: "1", access_token: token })}`
   ).catch(() => null);
   const m = res?.data?.[0];
   return m ? { id: m.id, permalink: m.permalink ?? null } : null;
