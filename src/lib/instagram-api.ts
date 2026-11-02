@@ -35,7 +35,8 @@ async function igFetch<T>(url: string, init?: RequestInit): Promise<T> {
  */
 export async function connectWithToken(
   rawToken: string,
-  handle: string
+  handle: string,
+  accountId?: string
 ): Promise<{ token: string; expiresAt: string | null; igUserId: string; username: string }> {
   const token = rawToken.trim();
   const want = handle.replace(/^@/, "").toLowerCase();
@@ -51,8 +52,9 @@ export async function connectWithToken(
     username = me.username ?? null;
     expiresAt = new Date(Date.now() + 60 * 86_400_000).toISOString();
   } else {
-    // The accounts the token was granted, from its own scopes — works for
-    // system-user tokens, which have no Facebook page to go through.
+    // A system-user token does not tell which accounts it was granted, so
+    // the account id from the Meta dashboard comes along. User tokens list
+    // theirs in their scopes or through their Facebook pages.
     const dbg = await igFetch<{
       data?: { expires_at?: number; granular_scopes?: { scope: string; target_ids?: string[] }[] };
     }>(`${FB_GRAPH}/debug_token?${new URLSearchParams({ input_token: token, access_token: token })}`).catch(() => null);
@@ -61,6 +63,7 @@ export async function connectWithToken(
     const ids = new Set(
       (dbg?.data?.granular_scopes ?? []).filter((g) => g.scope.startsWith("instagram")).flatMap((g) => g.target_ids ?? [])
     );
+    if (accountId?.trim()) ids.add(accountId.trim());
     const pages = await igFetch<{ data?: { instagram_business_account?: { id: string } }[] }>(
       `${FB_GRAPH}/me/accounts?${new URLSearchParams({
         fields: "instagram_business_account{id}",
@@ -87,7 +90,7 @@ export async function connectWithToken(
         `${IG_GRAPH}/me?${new URLSearchParams({ fields: "user_id,username", access_token: token })}`
       ).catch(() => null);
       if (me?.username) throw new Error("This token only works with Instagram's own API — tell Claude");
-      throw new Error("The token reaches no Instagram account — generate it again in the Meta app");
+      throw new Error("Paste the Instagram account ID too — the number under the account in the Meta app");
     }
   }
 

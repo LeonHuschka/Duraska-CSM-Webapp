@@ -792,6 +792,7 @@ function ConnectionPill({
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
+  const [igId, setIgId] = useState("");
   const confirmRef = useRef(false);
   if (connection) {
     return (
@@ -834,7 +835,7 @@ function ConnectionPill({
   }
   const connect = async () => {
     setBusy(true);
-    const res = await connectInstagram(accountId, token);
+    const res = await connectInstagram(accountId, token, igId);
     setBusy(false);
     if (res.error) return void toast.error(res.error);
     setToken("");
@@ -858,6 +859,13 @@ function ConnectionPill({
             Meta app → Use cases → Instagram API → Generate access tokens. It is checked against this account and never shown again.
           </p>
           <Input
+            inputMode="numeric"
+            value={igId}
+            onChange={(e) => setIgId(e.target.value.replace(/\D/g, ""))}
+            placeholder="Instagram account ID (1784…)"
+            className="h-8 text-xs"
+          />
+          <Input
             type="password"
             autoComplete="off"
             value={token}
@@ -865,7 +873,6 @@ function ConnectionPill({
             onKeyDown={(e) => e.key === "Enter" && !busy && connect()}
             placeholder="Paste the token"
             className="h-8 text-xs"
-            autoFocus
           />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>

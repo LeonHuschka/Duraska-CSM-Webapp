@@ -143,12 +143,12 @@ export async function postNow(slotId: string): Promise<Res & { state?: string }>
 }
 
 /** A token pasted from the Meta dashboard; kept only if it reaches this very account. */
-export async function connectInstagram(accountId: string, token: string): Promise<Res & { username?: string }> {
+export async function connectInstagram(accountId: string, token: string, igAccountId?: string): Promise<Res & { username?: string }> {
   const access = await plannerAccount(accountId);
   if (!access) return { error: "Not allowed" };
   if (!token.trim()) return { error: "Paste the token first" };
   try {
-    const conn = await connectWithToken(token, access.account.handle ?? "");
+    const conn = await connectWithToken(token, access.account.handle ?? "", igAccountId);
     const { error } = await createAdminClient()
       .from("ig_connections")
       .upsert({
