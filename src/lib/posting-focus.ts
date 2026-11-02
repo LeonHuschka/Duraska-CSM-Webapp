@@ -36,7 +36,7 @@ type Db = SupabaseClient<Database>;
 export async function sendPostingFocus(
   supabase: Db,
   personaId: string,
-  opts: { dryRun?: boolean } = {}
+  opts: { dryRun?: boolean; handle?: string } = {}
 ): Promise<string[]> {
   const notes: string[] = [];
   // Its own topic only: an account with no topic set would land in the
@@ -47,6 +47,7 @@ export async function sendPostingFocus(
     .eq("persona_id", personaId)
     .not("status", "in", '("dead","paused")')
     .gt("posts_per_day", 0);
+  if (opts.handle) q = q.eq("handle", opts.handle);
   if (!opts.dryRun) q = q.not("telegram_chat_id", "is", null).not("telegram_thread_id", "is", null);
   const { data: accounts } = await q;
   if (!accounts?.length) return ["no account topics"];
@@ -160,6 +161,7 @@ async function reelLine(
 
   let title: string | null = null;
   let free = 0;
+  let freeReels: string[] = [];
   if (requestIds.length) {
     const [{ data: reqs }, { data: cuts }] = await Promise.all([
       supabase.from("content_requests").select("id, title, is_nsfw").in("id", requestIds),
@@ -178,7 +180,9 @@ async function reelLine(
       ? await supabase.from("schedule_slots").select("asset_id").in("asset_id", ids).eq("status", "posted")
       : { data: [] as { asset_id: string | null }[] };
     const taken = new Set((posted ?? []).map((p) => p.asset_id));
-    free = ids.filter((id) => !taken.has(id)).length;
+    const freeCuts = (cuts ?? []).filter((c) => ids.includes(c.id) && !taken.has(c.id));
+    free = freeCuts.length;
+    freeReels = Array.from(new Set(freeCuts.map((c) => c.request_id)));
   }
 
   const name = title
@@ -188,7 +192,7 @@ async function reelLine(
       : "a reel";
   const todo =
     free > 0
-      ? `${free} more ${free === 1 ? "cut" : "cuts"} in the vault${trial ? " (Trial-Maxxing reshoots)" : ""} — post ${free === 1 ? "it" : "them"}`
+      ? `${free} more ${free === 1 ? "cut" : "cuts"} in the vault${trial ? " (Trial-Maxxing reshoots)" : ""} — post ${free === 1 ? "it" : "them"}: <a href="${APP_URL}/vault?reel=${freeReels.join(",")}">open in vault</a>`
       : "no cuts left — post reels like it";
   return `${icon} ${name} · ${stats}\n    → ${todo}`;
 }

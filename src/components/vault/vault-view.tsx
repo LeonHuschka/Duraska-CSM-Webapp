@@ -1008,13 +1008,17 @@ export function VaultView({
   accounts,
   viewer,
   members,
+  onlyReels = [],
 }: {
   assets: VaultAsset[];
   accounts: PostingAccount[];
   viewer: VaultViewer;
   members: VaultMember[];
+  /** Opened from a link to certain reels: their cuts only, until cleared. */
+  onlyReels?: string[];
 }) {
   const [search, setSearch] = useState("");
+  const [only, setOnly] = useState<string[]>(onlyReels);
 
   // ── Whose accounts are on show ──
   //
@@ -1232,6 +1236,10 @@ export function VaultView({
     // Reset to page 1 whenever filters change (side-effectless via key on grid)
     let items = localAssets;
 
+    if (only.length) {
+      items = items.filter((a) => only.includes(a.request_id));
+    }
+
     if (stageFilter !== "all") {
       items = items.filter((a) => a.stage === stageFilter);
     }
@@ -1257,7 +1265,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
+  }, [localAssets, only, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
@@ -1396,6 +1404,28 @@ export function VaultView({
       {canSwitch && lens !== null && visibleAccounts.length === 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
           @{lens} manages no account yet — this is exactly what they see.
+        </div>
+      )}
+
+      {only.length > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs">
+          <span>
+            Showing{" "}
+            {Array.from(
+              new Set(localAssets.filter((a) => only.includes(a.request_id)).map((a) => a.request_title.split(" · ")[0]))
+            ).join(", ") || "the linked reel"}{" "}
+            only
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setOnly([]);
+              window.history.replaceState(null, "", "/vault");
+            }}
+            className="font-semibold text-primary hover:underline"
+          >
+            Show all
+          </button>
         </div>
       )}
 

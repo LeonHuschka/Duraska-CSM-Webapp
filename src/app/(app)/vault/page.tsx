@@ -77,7 +77,9 @@ export interface VaultMember {
   name: string;
 }
 
-export default async function VaultPage() {
+export default async function VaultPage({ searchParams }: { searchParams: { reel?: string } }) {
+  // "?reel=<job id>[,<job id>]": the bot's link to the cuts of one reel.
+  const onlyReels = (searchParams.reel ?? "").split(",").filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   const supabase = await createClient();
   const personaId = await getActivePersonaId();
 
@@ -344,6 +346,12 @@ export default async function VaultPage() {
     .filter(Boolean) as VaultAsset[];
 
   return (
-    <VaultView assets={assetsWithUrls} accounts={accounts} viewer={viewer} members={members} />
+    <VaultView
+      assets={assetsWithUrls}
+      accounts={accounts}
+      viewer={viewer}
+      members={members}
+      onlyReels={onlyReels}
+    />
   );
 }
