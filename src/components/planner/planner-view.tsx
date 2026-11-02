@@ -14,25 +14,43 @@ import {
   ChevronRight,
   Clock,
   FlaskConical,
+  Globe,
+  Image as ImageIcon,
+  Images,
   Loader2,
   Plus,
   Search,
+  Sparkles,
   Unplug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AccountAvatar, PlatformLogo } from "@/components/pipeline/account-avatar";
-import { connectInstagram, disconnectInstagram, updatePost } from "@/app/(app)/planner/[accountId]/actions";
+import {
+  connectInstagram,
+  disconnectInstagram,
+  setPlannerSettings,
+  updatePost,
+} from "@/app/(app)/planner/[accountId]/actions";
 import { PostEditor, type EditorTarget } from "@/components/planner/post-editor";
+import { FeedComposer } from "@/components/planner/feed-composer";
+import { FillDialog, planFill, type FillItem } from "@/components/planner/fill-dialog";
 import {
   addDays,
+  addMonths,
   atTime,
+  bestTimes,
   dayKey,
   hhmm,
   postingTimes,
+  startOfMonth,
   startOfWeek,
   stateOf,
   STATE_META,
+  TIMEZONES,
+  tzLabel,
+  whenLabel,
+  type HourWindow,
 } from "@/components/planner/planner-utils";
 
 export type PlannerCut = {
@@ -48,11 +66,17 @@ export type PlannerCut = {
   usedOn: string[];
   /** Planned for auto-posting somewhere. */
   queued: boolean;
+  /** The reel's best plays against its account's usual reach, anywhere. */
+  lift: number | null;
 };
 
 export type PlannerPost = {
   id: string;
   assetId: string | null;
+  requestId: string | null;
+  kind: "reel" | "image" | "carousel";
+  /** A feed post's pictures, in order. */
+  images: string[];
   title: string;
   variant: string | null;
   thumb: string | null;
@@ -80,20 +104,40 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
  * it; drag a planned post to another day to move it; click anything to
  * open it. Week view shows each day's posting times as free slots, so the
  * gaps are visible at a glance.
+ *
+ * Everything runs on the account's clock (a US account plans in New York
+ * time), and its free times come from its own reels once they say when
+ * they do best.
  */
 export function PlannerView({
   account,
   connection,
   migrated,
+  feedReady,
   cuts,
   posts: initialPosts,
+  windows,
+  ownReels,
 }: {
-  account: { id: string; label: string; platform: string; avatar: string | null; perDay: number; hasTopic: boolean };
+  account: {
+    id: string;
+    label: string;
+    platform: string;
+    avatar: string | null;
+    perDay: number;
+    hasTopic: boolean;
+    personaId: string;
+    tz: string;
+  };
   connection: { username: string | null; expiresAt: string | null } | null;
   migrated: boolean;
+  feedReady: boolean;
   cuts: PlannerCut[];
   posts: PlannerPost[];
+  windows: HourWindow[];
+  ownReels: number;
 }) {
+  const tz = account.tz;
   const router = useRouter();
   // Dates render in the viewer's own time zone, which the server does not
   // know: the calendar draws once mounted.
@@ -111,7 +155,8 @@ export function PlannerView({
   }, [live, router]);
 
   const [view, setView] = useState<"week" | "month">("week");
-  const [anchor, setAnchor] = useState(() => startOfWeek(new Date()));
+  const today = dayKey(new Date(), tz);
+  const [anchor, setAnchor] = useState(() => startOfWeek(dayKey(new Date(), tz)));
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [drag, setDrag] = useState<Drag>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -121,21 +166,25 @@ export function PlannerView({
   const [search, setSearch] = useState("");
   /** The reel whose takes are open in the vault; null shows one tile per reel. */
   const [openReel, setOpenReel] = useState<string | null>(null);
+  const [composer, setComposer] = useState<Date | null>(null);
+  const [fill, setFill] = useState<FillItem[] | null>(null);
 
-  const times = useMemo(() => postingTimes(account.perDay), [account.perDay]);
+  // The account's own best times when its reels say enough, else the usual ones.
+  const learned = useMemo(() => bestTimes(windows, account.perDay), [windows, account.perDay]);
+  const times = learned ?? postingTimes(account.perDay);
   const canPlan = migrated;
   const canPublish = migrated && !!connection;
 
   const byDay = useMemo(() => {
     const m = new Map<string, PlannerPost[]>();
     for (const p of posts) {
-      const k = dayKey(new Date(p.at));
+      const k = dayKey(new Date(p.at), tz);
       if (!m.has(k)) m.set(k, []);
       m.get(k)!.push(p);
     }
     m.forEach((list) => list.sort((a, b) => a.at.localeCompare(b.at)));
     return m;
-  }, [posts]);
+  }, [posts, tz]);
 
   const plannedCuts = useMemo(
     () => new Set(posts.filter((p) => p.auto && p.status !== "posted" && p.publishState !== "failed").map((p) => p.assetId)),
@@ -200,26 +249,25 @@ export function PlannerView({
   }, [posts]);
 
   // The first free posting time from now on, for a cut clicked without a day.
-  const nextFree = (from: Date = new Date()): Date => {
+  const nextFree = (): Date => {
     for (let i = 0; i < 60; i++) {
-      const day = addDays(new Date(from.getFullYear(), from.getMonth(), from.getDate()), i);
-      const t = freeTimes(day)[0];
+      const t = freeTimes(addDays(today, i))[0];
       if (t) return t;
     }
     return new Date(Date.now() + 3600_000);
   };
-  const freeTimes = (day: Date): Date[] => {
-    const taken = (byDay.get(dayKey(day)) ?? []).map((p) => new Date(p.at).getTime());
+  const freeTimes = (day: string): Date[] => {
+    const taken = (byDay.get(day) ?? []).map((p) => new Date(p.at).getTime());
     return times
-      .map((t) => atTime(day, t))
+      .map((t) => atTime(day, t, tz))
       .filter((d) => d.getTime() > Date.now() + 5 * 60_000)
       .filter((d) => !taken.some((x) => Math.abs(x - d.getTime()) < 45 * 60_000));
   };
-  const suggestFor = (day: Date): Date => {
+  const suggestFor = (day: string): Date => {
     const free = freeTimes(day)[0];
     if (free) return free;
-    const today = dayKey(day) === dayKey(new Date());
-    const base = today ? new Date(Date.now() + 30 * 60_000) : atTime(day, "18:00");
+    if (day !== today) return atTime(day, times[times.length - 1], tz);
+    const base = new Date(Date.now() + 30 * 60_000);
     base.setMinutes(Math.ceil(base.getMinutes() / 15) * 15, 0, 0);
     return base;
   };
@@ -231,7 +279,7 @@ export function PlannerView({
   };
 
   // ── Dropping ──
-  const dropOn = (day: Date, exact?: Date) => {
+  const dropOn = (day: string, exact?: Date) => {
     const d = drag;
     setDrag(null);
     setOver(null);
@@ -246,21 +294,21 @@ export function PlannerView({
     const st = stateOf(post);
     if (!["scheduled", "overdue", "failed"].includes(st)) return void toast.error("That one is already out");
     const old = new Date(post.at);
-    const at = exact ?? atTime(day, hhmm(old));
+    const at = exact ?? atTime(day, hhmm(old, tz), tz);
     if (at.getTime() < Date.now()) return void toast.error("That time has passed");
-    if (dayKey(at) === dayKey(old) && hhmm(at) === hhmm(old)) return;
+    if (at.getTime() === old.getTime()) return;
     setPosts((list) => list.map((p) => (p.id === post.id ? { ...p, at: at.toISOString() } : p)));
     void updatePost(post.id, { scheduledFor: at.toISOString() }).then((res) => {
       if (res.error) {
         toast.error(res.error);
         setPosts((list) => list.map((p) => (p.id === post.id ? { ...p, at: post.at } : p)));
       } else {
-        toast.success(`Moved to ${at.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`);
+        toast.success(`Moved to ${whenLabel(at, tz)}`);
         router.refresh();
       }
     });
   };
-  const dropProps = (key: string, day: Date, exact?: Date) =>
+  const dropProps = (key: string, day: string, exact?: Date) =>
     canPlan
       ? {
           onDragOver: (e: React.DragEvent) => {
@@ -283,26 +331,36 @@ export function PlannerView({
   // ── Range ──
   const days = useMemo(() => {
     if (view === "week") return Array.from({ length: 7 }, (_, i) => addDays(anchor, i));
-    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-    const start = startOfWeek(first);
-    const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
-    const n = Math.ceil((last.getTime() - start.getTime()) / 86_400_000 / 7 + 0.0001) * 7;
-    return Array.from({ length: Math.max(35, n) }, (_, i) => addDays(start, i));
+    const start = startOfWeek(anchor);
+    const last = addDays(addMonths(anchor, 1), -1);
+    const n = Math.max(35, Math.ceil((Date.parse(last) - Date.parse(start)) / 86_400_000 / 7 + 0.0001) * 7);
+    return Array.from({ length: n }, (_, i) => addDays(start, i));
   }, [view, anchor]);
-  const step = (dir: number) =>
-    setAnchor((a) =>
-      view === "week" ? addDays(a, dir * 7) : new Date(a.getFullYear(), a.getMonth() + dir, 1)
-    );
-  const goToday = () => setAnchor(view === "week" ? startOfWeek(new Date()) : new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const step = (dir: number) => setAnchor((a) => (view === "week" ? addDays(a, dir * 7) : addMonths(a, dir)));
+  const goToday = () => setAnchor(view === "week" ? startOfWeek(today) : startOfMonth(today));
   const switchView = (v: "week" | "month") => {
     setView(v);
-    setAnchor(v === "week" ? startOfWeek(anchor) : new Date(anchor.getFullYear(), anchor.getMonth(), 1));
+    setAnchor(v === "week" ? startOfWeek(anchor) : startOfMonth(anchor));
   };
+  // Day keys are calendar dates; noon UTC names them in any zone.
+  const dateOf = (key: string) => new Date(`${key}T12:00:00Z`);
   const rangeLabel = mounted
     ? view === "week"
-      ? `${anchor.toLocaleDateString("de-DE", { day: "2-digit", month: "short" })} – ${addDays(anchor, 6).toLocaleDateString("de-DE", { day: "2-digit", month: "short", year: "numeric" })}`
-      : anchor.toLocaleDateString("en-GB", { month: "long", year: "numeric" })
+      ? `${dateOf(anchor).toLocaleDateString("de-DE", { timeZone: "UTC", day: "2-digit", month: "short" })} – ${dateOf(addDays(anchor, 6)).toLocaleDateString("de-DE", { timeZone: "UTC", day: "2-digit", month: "short", year: "numeric" })}`
+      : dateOf(anchor).toLocaleDateString("en-GB", { timeZone: "UTC", month: "long", year: "numeric" })
     : "";
+
+  // ── Fill free times ──
+  const startFill = () => {
+    const slots = days.flatMap((d) => freeTimes(d));
+    const plan = planFill({ slots, cuts, posts, plannedCuts });
+    if (!plan.length) {
+      return void toast.error(
+        slots.length ? "No unused takes left that keep two days between takes of one reel" : "No free times left in this range"
+      );
+    }
+    setFill(plan);
+  };
 
   return (
     <div className="space-y-4">
@@ -318,7 +376,8 @@ export function PlannerView({
             <p className="text-[11px] text-muted-foreground">Auto-post planner</p>
           </div>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Settings accountId={account.id} tz={tz} perDay={account.perDay} />
           <ConnectionPill accountId={account.id} connection={connection} migrated={migrated} />
         </div>
       </div>
@@ -339,13 +398,13 @@ export function PlannerView({
         <Stat label="Scheduled" value={String(stats.scheduled)} hint="posts ahead" />
         <Stat
           label="Covered until"
-          value={mounted && stats.until ? stats.until.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }) : "—"}
+          value={mounted && stats.until ? whenLabel(stats.until, tz, false) : "—"}
           hint={stats.until ? `${stats.days} day${stats.days === 1 ? "" : "s"}` : "nothing planned"}
           tone={stats.days <= 2 ? "rose" : stats.days <= 5 ? "amber" : "emerald"}
         />
         <Stat
           label="Next post"
-          value={mounted && stats.next ? new Date(stats.next.at).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+          value={mounted && stats.next ? whenLabel(new Date(stats.next.at), tz) : "—"}
           hint={stats.next ? stats.next.title : "drag a cut onto a day"}
         />
         <Stat label="Posted · 7 days" value={String(stats.posted7)} hint="auto and by hand" />
@@ -357,6 +416,8 @@ export function PlannerView({
         />
       </div>
 
+      <BestTimes windows={windows} ownReels={ownReels} times={times} learned={!!learned} tz={tz} label={account.label} />
+
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* The vault */}
         <aside
@@ -364,6 +425,18 @@ export function PlannerView({
             picking ? "border-primary ring-2 ring-primary/40" : "border-border/50"
           }`}
         >
+          <button
+            type="button"
+            disabled={!canPlan || !feedReady}
+            title={feedReady ? "One picture or a carousel of up to ten" : "Needs the database update 00063"}
+            onClick={() => {
+              setComposer(picking ?? nextFree());
+              setPicking(null);
+            }}
+            className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 py-2 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-40"
+          >
+            <Images className="h-3.5 w-3.5" /> New feed post
+          </button>
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Vault</h2>
             <div className="flex rounded-md border border-border/50 p-0.5 text-[11px]">
@@ -381,8 +454,7 @@ export function PlannerView({
           </div>
           {picking ? (
             <p className="mb-2 rounded-md bg-primary/15 px-2 py-1.5 text-[11px] text-primary">
-              Pick a cut for{" "}
-              {picking.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{" "}
+              Pick a cut for {whenLabel(picking, tz)}{" "}
               ·{" "}
               <button type="button" className="underline" onClick={() => setPicking(null)}>
                 cancel
@@ -479,7 +551,17 @@ export function PlannerView({
               </Button>
             </div>
             <h2 className="text-sm font-semibold">{rangeLabel}</h2>
-            <div className="ml-auto flex rounded-md border border-border/50 p-0.5 text-xs">
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-8 gap-1.5"
+              disabled={!canPlan || !mounted}
+              onClick={startFill}
+              title="Plans the best unused takes into this range's free times"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-primary" /> Fill free times
+            </Button>
+            <div className="flex rounded-md border border-border/50 p-0.5 text-xs">
               {(["week", "month"] as const).map((v) => (
                 <button
                   key={v}
@@ -500,11 +582,11 @@ export function PlannerView({
           ) : view === "week" ? (
             <div className="grid grid-cols-7 gap-2 overflow-x-auto">
               {days.map((day, i) => {
-                const key = dayKey(day);
+                const key = day;
                 const list = byDay.get(key) ?? [];
                 const free = freeTimes(day);
-                const isToday = key === dayKey(new Date());
-                const past = day.getTime() + 86_400_000 < Date.now();
+                const isToday = key === today;
+                const past = key < today;
                 // Posts and free times in one line-up by the clock.
                 const items: ({ kind: "post"; at: number; post: PlannerPost } | { kind: "free"; at: number; time: Date })[] = [
                   ...list.map((p) => ({ kind: "post" as const, at: new Date(p.at).getTime(), post: p })),
@@ -520,7 +602,7 @@ export function PlannerView({
                   >
                     <div className="mb-1.5 flex items-baseline justify-between px-1">
                       <span className={`text-xs font-semibold ${isToday ? "text-primary" : ""}`}>
-                        {WEEKDAYS[i]} {day.getDate()}.
+                        {WEEKDAYS[i]} {Number(key.slice(8))}.
                       </span>
                       {list.length > 0 && <span className="text-[10px] text-muted-foreground">{list.length}</span>}
                     </div>
@@ -530,6 +612,7 @@ export function PlannerView({
                           <PostCard
                             key={it.post.id}
                             post={it.post}
+                            tz={tz}
                             draggable={canPlan && ["scheduled", "overdue", "failed"].includes(stateOf(it.post))}
                             onDragStart={() => setDrag({ kind: "post", id: it.post.id })}
                             onDragEnd={() => {
@@ -542,6 +625,7 @@ export function PlannerView({
                           <FreeSlot
                             key={`free-${it.at}`}
                             time={it.time}
+                            tz={tz}
                             active={over === `${key}|${it.at}` || picking?.getTime() === it.at}
                             dropProps={dropProps(`${key}|${it.at}`, day, it.time)}
                             onClick={() => (canPlan ? setPicking(it.time) : undefined)}
@@ -575,11 +659,11 @@ export function PlannerView({
               </div>
               <div className="grid grid-cols-7 gap-1.5">
                 {days.map((day) => {
-                  const key = dayKey(day);
+                  const key = day;
                   const list = byDay.get(key) ?? [];
-                  const inMonth = day.getMonth() === anchor.getMonth();
-                  const isToday = key === dayKey(new Date());
-                  const past = day.getTime() + 86_400_000 < Date.now();
+                  const inMonth = key.slice(0, 7) === anchor.slice(0, 7);
+                  const isToday = key === today;
+                  const past = key < today;
                   const openSlots = past ? 0 : freeTimes(day).length;
                   return (
                     <div
@@ -598,7 +682,7 @@ export function PlannerView({
                           }}
                           className={`text-xs font-semibold hover:underline ${isToday ? "text-primary" : ""}`}
                         >
-                          {day.getDate()}
+                          {Number(key.slice(8))}
                         </button>
                         {openSlots > 0 && list.length === 0 && (
                           <span className="text-[9px] text-muted-foreground/60">{openSlots} free</span>
@@ -621,7 +705,7 @@ export function PlannerView({
                                 setOver(null);
                               }}
                               onClick={() => setEditor({ mode: "edit", post: p })}
-                              title={`${hhmm(new Date(p.at))} · ${p.title} · ${STATE_META[st].label}`}
+                              title={`${hhmm(new Date(p.at), tz)} · ${p.title} · ${STATE_META[st].label}`}
                               className={`relative h-12 w-7 overflow-hidden rounded ring-2 ${STATE_META[st].ring}`}
                             >
                               <Thumb src={p.thumb} />
@@ -647,7 +731,8 @@ export function PlannerView({
               </span>
             ))}
             <span className="flex items-center gap-1">
-              <span className="h-2 w-4 rounded border border-dashed border-muted-foreground/50" /> Free posting time ({times.join(", ")})
+              <span className="h-2 w-4 rounded border border-dashed border-muted-foreground/50" /> Free posting time ({times.join(", ")}{" "}
+              {tzLabel(tz)})
             </span>
           </div>
         </section>
@@ -658,7 +743,27 @@ export function PlannerView({
         target={editor}
         lastCaption={lastCaption}
         canPublish={canPublish}
+        tz={tz}
+        posts={posts}
         onClose={() => setEditor(null)}
+        onChanged={() => router.refresh()}
+      />
+      <FeedComposer
+        accountId={account.id}
+        personaId={account.personaId}
+        at={composer}
+        tz={tz}
+        lastCaption={lastCaption}
+        canPublish={canPublish}
+        onClose={() => setComposer(null)}
+        onChanged={() => router.refresh()}
+      />
+      <FillDialog
+        accountId={account.id}
+        items={fill}
+        tz={tz}
+        lastCaption={lastCaption}
+        onClose={() => setFill(null)}
         onChanged={() => router.refresh()}
       />
     </div>
@@ -779,12 +884,14 @@ function CutTile({
 
 function PostCard({
   post,
+  tz,
   draggable,
   onDragStart,
   onDragEnd,
   onClick,
 }: {
   post: PlannerPost;
+  tz: string;
   draggable: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -813,8 +920,13 @@ function PostCard({
       <div className="absolute left-1 top-1 flex items-center gap-1">
         <span className="flex items-center gap-0.5 rounded bg-black/75 px-1 py-0.5 text-[10px] font-semibold text-white">
           <Clock className="h-2.5 w-2.5" />
-          {hhmm(new Date(post.at))}
+          {hhmm(new Date(post.at), tz)}
         </span>
+        {post.kind !== "reel" && (
+          <span className="rounded bg-black/75 p-0.5 text-white" title={post.kind === "carousel" ? "Carousel" : "Feed post"}>
+            {post.kind === "carousel" ? <Images className="h-2.5 w-2.5" /> : <ImageIcon className="h-2.5 w-2.5" />}
+          </span>
+        )}
         {post.trialReel && (
           <span className="rounded bg-fuchsia-500/90 p-0.5 text-white" title="Trial reel">
             <FlaskConical className="h-2.5 w-2.5" />
@@ -836,11 +948,13 @@ function PostCard({
 
 function FreeSlot({
   time,
+  tz,
   active,
   dropProps,
   onClick,
 }: {
   time: Date;
+  tz: string;
   active: boolean;
   dropProps: Record<string, unknown>;
   onClick: () => void;
@@ -857,7 +971,7 @@ function FreeSlot({
       }`}
     >
       <Plus className="h-3 w-3" />
-      {hhmm(time)}
+      {hhmm(time, tz)}
     </button>
   );
 }
@@ -886,6 +1000,113 @@ function Stat({
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={`mt-0.5 truncate text-xl font-semibold tabular-nums ${color}`}>{value}</p>
       <p className="truncate text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+/** The account's clock and pace, right in the header. */
+function Settings({ accountId, tz, perDay }: { accountId: string; tz: string; perDay: number }) {
+  const router = useRouter();
+  const save = async (patch: { timezone?: string; perDay?: number }) => {
+    const res = await setPlannerSettings(accountId, patch);
+    if (res.error) toast.error(res.error);
+    else router.refresh();
+  };
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      <label className="flex items-center gap-1 rounded-full border border-border/50 py-1 pl-2.5 pr-1 text-muted-foreground">
+        <Globe className="h-3.5 w-3.5" />
+        <select
+          value={tz}
+          onChange={(e) => save({ timezone: e.target.value })}
+          className="bg-transparent text-xs text-foreground outline-none"
+          title="The time zone this account posts for — the calendar shows its times"
+        >
+          {!TIMEZONES.some((t) => t.id === tz) && <option value={tz}>{tz}</option>}
+          {TIMEZONES.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1 rounded-full border border-border/50 py-1 pl-2.5 pr-1 text-muted-foreground">
+        Posts a day
+        <select
+          value={perDay}
+          onChange={(e) => save({ perDay: Number(e.target.value) })}
+          className="bg-transparent text-xs text-foreground outline-none"
+        >
+          {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+/**
+ * When the account's reels do best, by the two hours they went up in:
+ * the median against its usual reach. The free times follow the best
+ * windows once enough of them have reels.
+ */
+function BestTimes({
+  windows,
+  ownReels,
+  times,
+  learned,
+  tz,
+  label,
+}: {
+  windows: HourWindow[];
+  ownReels: number;
+  times: string[];
+  learned: boolean;
+  tz: string;
+  label: string;
+}) {
+  const top = Math.max(1, ...windows.map((w) => w.lift ?? 0));
+  const picked = new Set(times.map((t) => Math.floor(Number(t.slice(0, 2)) / 2)));
+  return (
+    <div className="rounded-xl border border-border/50 bg-card/60 px-3 py-2.5">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Best times · {tzLabel(tz)}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {learned
+            ? `From ${ownReels} reels of ${label}: free times sit in the best windows`
+            : ownReels
+              ? `${ownReels} reels of ${label} so far — too few per window; using lunch and evening until they say more`
+              : `No scraped reels of ${label} yet — using lunch and evening (the usual best for a US audience)`}
+        </p>
+      </div>
+      <div className="grid grid-cols-12 gap-1">
+        {windows.map((w) => {
+          const h = w.lift != null ? Math.max(8, Math.round((w.lift / top) * 100)) : 0;
+          const hot = w.lift != null && w.lift >= 1.2;
+          return (
+            <div key={w.from} className="flex flex-col items-center gap-1" title={w.lift != null ? `${w.reels} reels · ${w.lift}× usual` : `${w.reels} reels`}>
+              <div className="flex h-10 w-full items-end overflow-hidden rounded bg-muted/20">
+                {w.lift != null ? (
+                  <div
+                    className={`w-full rounded ${hot ? "bg-emerald-500/70" : w.lift < 0.8 ? "bg-rose-500/50" : "bg-sky-500/50"}`}
+                    style={{ height: `${h}%` }}
+                  />
+                ) : (
+                  <div className="h-1 w-full bg-muted/30" />
+                )}
+              </div>
+              <span className={`text-[9px] tabular-nums ${picked.has(w.from / 2) ? "font-semibold text-primary" : "text-muted-foreground"}`}>
+                {String(w.from).padStart(2, "0")}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

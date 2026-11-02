@@ -134,6 +134,31 @@ export async function createReelContainer(
   return res.id;
 }
 
+/**
+ * A feed post: one picture, or a carousel of up to ten. Instagram takes
+ * JPEG only, between 4:5 and 1.91:1 — the planner converts on upload.
+ */
+export async function createFeedContainer(
+  igUserId: string,
+  token: string,
+  p: { imageUrls: string[]; caption: string | null }
+): Promise<string> {
+  const host = graphFor(token);
+  if (p.imageUrls.length === 1) {
+    const form = new URLSearchParams({ image_url: p.imageUrls[0], access_token: token });
+    if (p.caption) form.set("caption", p.caption);
+    return (await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id;
+  }
+  const children: string[] = [];
+  for (const url of p.imageUrls) {
+    const form = new URLSearchParams({ image_url: url, is_carousel_item: "true", access_token: token });
+    children.push((await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id);
+  }
+  const form = new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), access_token: token });
+  if (p.caption) form.set("caption", p.caption);
+  return (await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id;
+}
+
 export type ContainerStatus = "IN_PROGRESS" | "FINISHED" | "PUBLISHED" | "ERROR" | "EXPIRED";
 
 export async function containerStatus(

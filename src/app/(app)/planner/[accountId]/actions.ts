@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
 import { publishDue } from "@/lib/auto-publish";
 import { connectWithToken } from "@/lib/instagram-api";
+import { TIMEZONES } from "@/components/planner/planner-utils";
 
 type Res = { error: string | null; id?: string };
 
@@ -33,9 +34,11 @@ function editable(state: string | null, status: string) {
   return status === "scheduled" && state !== "uploading" && state !== "publishing" && state !== "published";
 }
 
+/** A reel from the vault (assetId), or a feed post of pictures uploaded in the planner. */
 export async function schedulePost(data: {
   accountId: string;
-  assetId: string;
+  assetId?: string;
+  feedPaths?: string[];
   scheduledFor: string;
   caption: string;
   trialReel: boolean;
@@ -46,37 +49,117 @@ export async function schedulePost(data: {
   const bad = checkCaption(data.caption);
   if (bad) return { error: bad };
   const supabase = await createClient();
-  const { data: asset } = await supabase
-    .from("content_assets")
-    .select("id, request_id")
-    .eq("id", data.assetId)
-    .is("deleted_at", null)
-    .maybeSingle();
-  const { data: request } = asset
-    ? await supabase.from("content_requests").select("persona_id").eq("id", asset.request_id).maybeSingle()
-    : { data: null };
-  if (!asset || request?.persona_id !== access.account.persona_id) return { error: "No such cut" };
-  const { data: slot, error } = await supabase
-    .from("schedule_slots")
-    .insert({
-      persona_id: access.account.persona_id,
-      account_id: data.accountId,
+  const personaId = access.account.persona_id;
+  const base = {
+    persona_id: personaId,
+    account_id: data.accountId,
+    platform: "instagram" as const,
+    scheduled_for: data.scheduledFor,
+    caption: data.caption.trim() || null,
+    status: "scheduled",
+    auto_publish: true,
+    created_by: access.userId,
+  };
+
+  let row;
+  if (data.feedPaths) {
+    const paths = data.feedPaths;
+    if (paths.length < 1 || paths.length > 10) return { error: "A feed post has 1 to 10 pictures" };
+    if (!paths.every((p) => p.startsWith(`personas/${personaId}/feed/`))) return { error: "Not this persona's pictures" };
+    row = {
+      ...base,
+      media_kind: paths.length === 1 ? "image" : "carousel",
+      media_paths: paths,
+      trial_reel: false,
+      share_to_feed: true,
+    };
+  } else {
+    const asset = await ownAsset(personaId, data.assetId ?? "");
+    if (!asset) return { error: "No such cut" };
+    row = {
+      ...base,
       request_id: asset.request_id,
       asset_id: asset.id,
-      platform: "instagram",
-      scheduled_for: data.scheduledFor,
-      caption: data.caption.trim() || null,
-      status: "scheduled",
-      auto_publish: true,
       trial_reel: data.trialReel,
       share_to_feed: data.shareToFeed,
-      created_by: access.userId,
-    })
-    .select("id")
-    .single();
+    };
+  }
+  const { data: slot, error } = await supabase.from("schedule_slots").insert(row).select("id").single();
   if (error) return { error: error.message };
   revalidatePath(`/planner/${data.accountId}`);
   return { error: null, id: slot.id };
+}
+
+async function ownAsset(personaId: string, assetId: string) {
+  const supabase = await createClient();
+  const { data: asset } = await supabase
+    .from("content_assets")
+    .select("id, request_id")
+    .eq("id", assetId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (!asset) return null;
+  const { data: request } = await supabase.from("content_requests").select("persona_id").eq("id", asset.request_id).maybeSingle();
+  return request?.persona_id === personaId ? asset : null;
+}
+
+/** Several reels at once — the planner's "Fill free times". */
+export async function fillSlots(
+  accountId: string,
+  items: { assetId: string; at: string }[],
+  caption: string
+): Promise<Res & { count?: number }> {
+  const access = await plannerAccount(accountId);
+  if (!access) return { error: "Not allowed" };
+  if (!items.length) return { error: "Nothing to plan" };
+  if (items.length > 60) return { error: "Too many at once" };
+  const bad = checkCaption(caption);
+  if (bad) return { error: bad };
+  const rows = [];
+  for (const it of items) {
+    if (new Date(it.at).getTime() < Date.now()) return { error: "One of the times has passed — open the planner again" };
+    const asset = await ownAsset(access.account.persona_id, it.assetId);
+    if (!asset) return { error: "One of the cuts is gone — open the planner again" };
+    rows.push({
+      persona_id: access.account.persona_id,
+      account_id: accountId,
+      request_id: asset.request_id,
+      asset_id: asset.id,
+      platform: "instagram" as const,
+      scheduled_for: it.at,
+      caption: caption.trim() || null,
+      status: "scheduled",
+      auto_publish: true,
+      created_by: access.userId,
+    });
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("schedule_slots").insert(rows);
+  if (error) return { error: error.message };
+  revalidatePath(`/planner/${accountId}`);
+  return { error: null, count: rows.length };
+}
+
+/** The account's planning clock and pace. */
+export async function setPlannerSettings(
+  accountId: string,
+  patch: { timezone?: string; perDay?: number }
+): Promise<Res> {
+  const access = await plannerAccount(accountId);
+  if (!access) return { error: "Not allowed" };
+  const update: { post_timezone?: string; posts_per_day?: number } = {};
+  if (patch.timezone !== undefined) {
+    if (!TIMEZONES.some((t) => t.id === patch.timezone)) return { error: "Unknown time zone" };
+    update.post_timezone = patch.timezone;
+  }
+  if (patch.perDay !== undefined) {
+    if (!Number.isInteger(patch.perDay) || patch.perDay < 0 || patch.perDay > 6) return { error: "0 to 6 a day" };
+    update.posts_per_day = patch.perDay;
+  }
+  const { error } = await createAdminClient().from("accounts").update(update).eq("id", accountId);
+  if (error) return { error: error.message };
+  revalidatePath(`/planner/${accountId}`);
+  return { error: null };
 }
 
 export async function updatePost(

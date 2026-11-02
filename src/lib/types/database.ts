@@ -341,6 +341,8 @@ export type Database = {
           ig_container_id: string | null;
           ig_media_id: string | null;
           publish_started_at: string | null;
+          media_kind: string;
+          media_paths: string[] | null;
         };
         Insert: {
           id?: string;
@@ -365,6 +367,8 @@ export type Database = {
           ig_container_id?: string | null;
           ig_media_id?: string | null;
           publish_started_at?: string | null;
+          media_kind?: string;
+          media_paths?: string[] | null;
         };
         Update: {
           id?: string;
@@ -389,6 +393,8 @@ export type Database = {
           ig_container_id?: string | null;
           ig_media_id?: string | null;
           publish_started_at?: string | null;
+          media_kind?: string;
+          media_paths?: string[] | null;
         };
         Relationships: [
           {
@@ -490,6 +496,7 @@ export type Database = {
           telegram_chat_id: number | null;
           telegram_thread_id: number | null;
           posts_per_day: number;
+          post_timezone: string | null;
           trial_reels_per_day: number;
           stories_per_day: number;
           manager_username: string | null;
@@ -514,6 +521,7 @@ export type Database = {
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
           posts_per_day?: number;
+          post_timezone?: string | null;
           trial_reels_per_day?: number;
           stories_per_day?: number;
           manager_username?: string | null;
@@ -538,6 +546,7 @@ export type Database = {
           telegram_chat_id?: number | null;
           telegram_thread_id?: number | null;
           posts_per_day?: number;
+          post_timezone?: string | null;
           trial_reels_per_day?: number;
           stories_per_day?: number;
           manager_username?: string | null;

@@ -5,6 +5,7 @@ import { accountLabel } from "@/lib/account-analytics";
 import { sendMessage } from "@/lib/telegram";
 import {
   containerStatus,
+  createFeedContainer,
   createReelContainer,
   latestMedia,
   mediaPermalink,
@@ -13,8 +14,9 @@ import {
 } from "@/lib/instagram-api";
 
 /**
- * The publisher: every reel in the planner whose time has come goes out
- * through Instagram's API.
+ * The publisher: every post in the planner whose time has come goes out
+ * through Instagram's API — reels from the vault, and feed posts (one
+ * picture or a carousel) uploaded in the planner.
  *
  * Instagram takes a reel in two steps — it fetches and processes the
  * video (a minute or two), then publishes it — so a post moves through
@@ -97,14 +99,21 @@ async function publishOne(supabase: Db, slot: Slot, deadline: number): Promise<P
         .maybeSingle();
       if (!claimed) return { id: s.id, state: "taken" };
       s = claimed;
-      const videoUrl = await signedVideo(supabase, s.asset_id);
-      if (!videoUrl) return fail(supabase, s, "The video is gone from the vault", true);
-      const container = await createReelContainer(conn.ig_user_id, conn.access_token, {
-        videoUrl,
-        caption: s.caption,
-        shareToFeed: s.share_to_feed,
-        trial: s.trial_reel,
-      });
+      let container: string;
+      if (s.media_kind === "image" || s.media_kind === "carousel") {
+        const imageUrls = await signedPaths(supabase, s.media_paths ?? []);
+        if (!imageUrls) return fail(supabase, s, "A picture of the post is gone", true);
+        container = await createFeedContainer(conn.ig_user_id, conn.access_token, { imageUrls, caption: s.caption });
+      } else {
+        const videoUrl = await signedVideo(supabase, s.asset_id);
+        if (!videoUrl) return fail(supabase, s, "The video is gone from the vault", true);
+        container = await createReelContainer(conn.ig_user_id, conn.access_token, {
+          videoUrl,
+          caption: s.caption,
+          shareToFeed: s.share_to_feed,
+          trial: s.trial_reel,
+        });
+      }
       await supabase.from("schedule_slots").update({ ig_container_id: container }).eq("id", s.id);
       s = { ...s, ig_container_id: container };
     }
@@ -118,10 +127,10 @@ async function publishOne(supabase: Db, slot: Slot, deadline: number): Promise<P
         if (st.code === "FINISHED") break;
         if (st.code === "PUBLISHED") return done(supabase, s, conn, null);
         if (st.code === "ERROR" || st.code === "EXPIRED") {
-          return fail(supabase, s, `Instagram could not process the video${st.detail ? `: ${st.detail}` : ""}`);
+          return fail(supabase, s, `Instagram could not process the ${what(s)}${st.detail ? `: ${st.detail}` : ""}`);
         }
         const started = s.publish_started_at ? new Date(s.publish_started_at).getTime() : Date.now();
-        if (Date.now() - started > UPLOAD_TIMEOUT_MS) return fail(supabase, s, "Instagram took too long to process the video");
+        if (Date.now() - started > UPLOAD_TIMEOUT_MS) return fail(supabase, s, `Instagram took too long to process the ${what(s)}`);
         if (Date.now() > deadline - 25_000) return { id: s.id, state: "processing" };
         await new Promise((r) => setTimeout(r, 5_000));
       }
@@ -161,6 +170,18 @@ async function signedVideo(supabase: Db, assetId: string | null): Promise<string
   // Long enough for Instagram to come back for it while processing.
   const { data } = await supabase.storage.from("content-assets").createSignedUrl(asset.file_path, 6 * 3600);
   return data?.signedUrl ?? null;
+}
+
+function what(s: Slot): string {
+  return s.media_kind === "carousel" ? "pictures" : s.media_kind === "image" ? "picture" : "video";
+}
+
+/** Signed links to every picture of a feed post, or null if one is missing. */
+async function signedPaths(supabase: Db, paths: string[]): Promise<string[] | null> {
+  if (!paths.length) return null;
+  const { data } = await supabase.storage.from("content-assets").createSignedUrls(paths, 6 * 3600);
+  const urls = paths.map((p) => data?.find((u) => u.path === p)?.signedUrl ?? null);
+  return urls.every(Boolean) ? (urls as string[]) : null;
 }
 
 async function done(supabase: Db, s: Slot, conn: Conn, mediaId: string | null): Promise<PublishResult> {
@@ -226,7 +247,10 @@ async function tell(supabase: Db, s: Slot, text: (handle: string, title: string)
     await sendMessage({
       chat_id: a.telegram_chat_id,
       message_thread_id: a.telegram_thread_id,
-      text: text(esc(accountLabel(a.handle)), `<b>${esc(r?.title ?? "A reel")}</b>`),
+      text: text(
+        esc(accountLabel(a.handle)),
+        `<b>${esc(r?.title ?? (s.media_kind === "carousel" ? "A carousel" : s.media_kind === "image" ? "A feed post" : "A reel"))}</b>`
+      ),
       disable_notification: true,
     });
   } catch (err) {

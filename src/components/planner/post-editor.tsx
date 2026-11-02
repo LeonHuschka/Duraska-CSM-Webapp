@@ -2,14 +2,23 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ArrowUpRight, FlaskConical, Loader2, RotateCcw, Send, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, ChevronLeft, ChevronRight, FlaskConical, Loader2, RotateCcw, Send, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { deletePost, postNow, schedulePost, updatePost } from "@/app/(app)/planner/[accountId]/actions";
 import type { PlannerCut, PlannerPost } from "@/components/planner/planner-view";
-import { dayKey, hhmm, stateOf, STATE_META } from "@/components/planner/planner-utils";
+import {
+  atTime,
+  dayKey,
+  hhmm,
+  SAME_REEL_GAP_MS,
+  stateOf,
+  STATE_META,
+  tzLabel,
+  whenLabel,
+} from "@/components/planner/planner-utils";
 
 export type EditorTarget =
   | { mode: "new"; cut: PlannerCut; at: Date }
@@ -28,6 +37,8 @@ export function PostEditor({
   target,
   lastCaption,
   canPublish,
+  tz,
+  posts,
   onClose,
   onChanged,
 }: {
@@ -35,6 +46,9 @@ export function PostEditor({
   target: EditorTarget | null;
   lastCaption: string | null;
   canPublish: boolean;
+  tz: string;
+  /** The account's other posts, to keep takes of one reel apart. */
+  posts: PlannerPost[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -45,17 +59,19 @@ export function PostEditor({
   const [feed, setFeed] = useState(true);
   const [busy, start] = useTransition();
   const [publishing, setPublishing] = useState(false);
+  const [slide, setSlide] = useState(0);
 
   useEffect(() => {
     if (!target) return;
     const at = target.mode === "new" ? target.at : new Date(target.post.at);
-    setDate(dayKey(at));
-    setTime(hhmm(at));
+    setDate(dayKey(at, tz));
+    setTime(hhmm(at, tz));
+    setSlide(0);
     setCaption(target.mode === "edit" ? target.post.caption : "");
     setTrial(target.mode === "edit" ? target.post.trialReel : false);
     setFeed(target.mode === "edit" ? target.post.shareToFeed : true);
     setPublishing(false);
-  }, [target]);
+  }, [target, tz]);
 
   if (!target) return null;
   const post = target.mode === "edit" ? target.post : null;
@@ -65,8 +81,23 @@ export function PostEditor({
   const thumb = target.mode === "new" ? target.cut.thumb : target.post.thumb;
   const title = target.mode === "new" ? target.cut.title : target.post.title;
   const variant = target.mode === "new" ? target.cut.variant : target.post.variant;
+  const images = post?.kind && post.kind !== "reel" ? post.images : [];
+  const isFeed = images.length > 0 || (!!post && post.kind !== "reel");
   const tags = caption.match(/#[^\s#]+/g)?.length ?? 0;
-  const when = new Date(`${date}T${time || "00:00"}`);
+  const when = date && time ? atTime(date, time, tz) : new Date(NaN);
+  const viewerTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // Another take of the same reel on this account too close by.
+  const requestId = target.mode === "new" ? target.cut.requestId : target.post.requestId;
+  const clash =
+    requestId && !Number.isNaN(when.getTime())
+      ? posts.find(
+          (p) =>
+            p.id !== post?.id &&
+            p.requestId === requestId &&
+            p.publishState !== "failed" &&
+            Math.abs(new Date(p.at).getTime() - when.getTime()) < SAME_REEL_GAP_MS
+        )
+      : undefined;
   const past = when.getTime() < Date.now() - 60_000;
   const tooLong = caption.length > MAX_CAPTION || tags > MAX_TAGS;
 
@@ -96,7 +127,7 @@ export function PostEditor({
         else if (res.state === "processing") toast.success("Instagram is still processing it — it goes live within minutes");
         else toast.success("Posted 🎉");
       } else {
-        toast.success(target.mode === "new" ? `Scheduled for ${when.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Saved");
+        toast.success(target.mode === "new" ? `Scheduled for ${whenLabel(when, tz)}` : "Saved");
       }
       onChanged();
       onClose();
@@ -128,7 +159,37 @@ export function PostEditor({
         </DialogHeader>
         <div className="grid gap-5 p-5 sm:grid-cols-[220px_1fr]">
           <div className="mx-auto w-[220px]">
-            {video ? (
+            {isFeed ? (
+              <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl border border-border/50 bg-black">
+                {images[slide] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={images[slide]} alt="" className="h-full w-full object-contain" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Picture gone</div>
+                )}
+                {images.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setSlide((i) => (i + images.length - 1) % images.length)}
+                      className="absolute left-1 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-1 text-white"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSlide((i) => (i + 1) % images.length)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-1 text-white"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <span className="absolute bottom-1.5 left-1/2 -translate-x-1/2 rounded bg-black/60 px-1.5 text-[10px] text-white">
+                      {slide + 1}/{images.length}
+                    </span>
+                  </>
+                )}
+              </div>
+            ) : video ? (
               <video
                 key={video}
                 src={video}
@@ -166,7 +227,7 @@ export function PostEditor({
 
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1">
-                <span className="text-[11px] font-medium text-muted-foreground">Day</span>
+                <span className="text-[11px] font-medium text-muted-foreground">Day · {tzLabel(tz)}</span>
                 <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={locked} className="h-9" />
               </label>
               <label className="space-y-1">
@@ -174,6 +235,18 @@ export function PostEditor({
                 <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={locked} className="h-9" />
               </label>
             </div>
+            {viewerTz !== tz && !Number.isNaN(when.getTime()) && (
+              <p className="-mt-2 text-[11px] text-muted-foreground">
+                = {whenLabel(when, viewerTz)} your time
+              </p>
+            )}
+            {clash && !locked && (
+              <p className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                Another take of this reel goes out {whenLabel(new Date(clash.at), tz)} — keep takes of one reel two days
+                apart, or Instagram shows the same video to the same people.
+              </p>
+            )}
 
             <label className="space-y-1">
               <span className="flex items-baseline justify-between text-[11px] font-medium text-muted-foreground">
@@ -201,7 +274,7 @@ export function PostEditor({
               )}
             </label>
 
-            <div className="space-y-2">
+            {!isFeed && <div className="space-y-2">
               <Toggle
                 on={trial}
                 set={setTrial}
@@ -220,7 +293,7 @@ export function PostEditor({
                 label="Show in the profile grid"
                 hint="Off: only in the Reels tab."
               />
-            </div>
+            </div>}
 
             {!locked && (
               <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
@@ -234,7 +307,7 @@ export function PostEditor({
                     variant="outline"
                     size="sm"
                     onClick={() => save(true)}
-                    disabled={busy || tooLong || !canPublish || !video}
+                    disabled={busy || tooLong || !canPublish || (!video && !isFeed)}
                     title={canPublish ? "Publish right away" : "Connect Instagram first"}
                   >
                     {publishing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}

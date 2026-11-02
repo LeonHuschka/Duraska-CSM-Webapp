@@ -4,6 +4,19 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
 import { accountLabel } from "@/lib/account-analytics";
 import { PlannerView, type PlannerCut, type PlannerPost } from "@/components/planner/planner-view";
+import { DEFAULT_TZ, hourIn, type HourWindow } from "@/components/planner/planner-utils";
+
+const DAY = 86_400_000;
+/** Reels still collecting plays stay out of the usual reach, as for winners. */
+const SETTLED_DAYS = 3;
+/** A posting window needs this many reels before it says anything. */
+const MIN_PER_WINDOW = 3;
+
+function median(xs: number[]): number {
+  const v = [...xs].sort((a, b) => a - b);
+  if (!v.length) return 0;
+  return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+}
 
 // "Post now" publishes inside the server action and waits for Instagram.
 export const maxDuration = 300;
@@ -12,7 +25,11 @@ export const dynamic = "force-dynamic";
 /**
  * The auto-post planner of one Instagram account: the vault's cuts on the
  * left, a calendar on the right, a cut dragged onto a day is a post that
- * goes out by itself at its time.
+ * goes out by itself at its time. Feed posts are pictures uploaded here.
+ *
+ * Two numbers come from the scraped reels: how each reel did against its
+ * account's usual reach (the best first when filling free times), and how
+ * this account's reels did by the hour they went up (its best times).
  */
 export default async function PlannerPage({
   params,
@@ -28,7 +45,7 @@ export default async function PlannerPage({
   const SLOT_BASE = "id, asset_id, request_id, account_id, scheduled_for, status, caption, post_url, posted_at";
   const SLOT_AUTO = `${SLOT_BASE}, auto_publish, trial_reel, share_to_feed, publish_state, publish_error`;
 
-  const [{ data: requests }, { data: accounts }, autoSlots, { data: conn }] = await Promise.all([
+  const [{ data: requests }, { data: accounts }, autoSlots, { data: conn }, feedCols, tzRow, { data: metrics }] = await Promise.all([
     supabase
       .from("content_requests")
       .select("id, title, is_nsfw")
@@ -42,7 +59,59 @@ export default async function PlannerPage({
       .select("username, token_expires_at, connected_at")
       .eq("account_id", account.id)
       .maybeSingle(),
+    // Before migration 00063 these columns are not there yet.
+    supabase.from("schedule_slots").select("id, media_kind, media_paths").eq("account_id", account.id).neq("media_kind", "reel").limit(2000),
+    supabase.from("accounts").select("post_timezone").eq("id", account.id).maybeSingle(),
+    supabase
+      .from("reel_metrics")
+      .select("account_id, shortcode, views, captured_at, posted_at, request_id")
+      .eq("persona_id", account.persona_id)
+      .eq("source", "scrape")
+      .eq("needs_review", false)
+      .not("shortcode", "is", null)
+      .order("captured_at", { ascending: false })
+      .limit(20000),
   ]);
+  const feedReady = !feedCols.error;
+  const tz = (!tzRow.error && tzRow.data?.post_timezone) || DEFAULT_TZ;
+  const feedOf = new Map(
+    (feedCols.data ?? []).map((r) => [r.id, { kind: r.media_kind as "image" | "carousel", paths: r.media_paths ?? [] }])
+  );
+
+  // ── How the reels did ──
+  // Newest reading per reel, then each reel against its account's usual reach.
+  const latest = new Map<string, NonNullable<typeof metrics>[number]>();
+  for (const r of metrics ?? []) {
+    const key = `${r.account_id}|${r.shortcode}`;
+    if (!latest.has(key)) latest.set(key, r);
+  }
+  const byAccount = new Map<string, NonNullable<typeof metrics>>();
+  latest.forEach((r) => {
+    if (!r.account_id) return;
+    byAccount.set(r.account_id, [...(byAccount.get(r.account_id) ?? []), r]);
+  });
+  const reelLift = new Map<string, number>();
+  const windows: HourWindow[] = Array.from({ length: 12 }, (_, i) => ({ from: i * 2, reels: 0, lift: null }));
+  const windowLifts: number[][] = windows.map(() => []);
+  byAccount.forEach((reels, accountId) => {
+    const settledBefore = Date.now() - SETTLED_DAYS * DAY;
+    const settled = reels.filter((r) => r.posted_at && new Date(r.posted_at).getTime() < settledBefore);
+    const usual = median(settled.map((r) => Number(r.views ?? 0)).filter((v) => v > 0));
+    if (settled.length < 5 || usual <= 0) return;
+    for (const r of settled) {
+      const lift = Number(r.views ?? 0) / usual;
+      if (r.request_id) reelLift.set(r.request_id, Math.max(reelLift.get(r.request_id) ?? 0, lift));
+      if (accountId === account.id && r.posted_at) {
+        const w = Math.floor(hourIn(new Date(r.posted_at), tz) / 2);
+        windowLifts[w].push(lift);
+      }
+    }
+  });
+  windows.forEach((w, i) => {
+    w.reels = windowLifts[i].length;
+    w.lift = w.reels >= MIN_PER_WINDOW ? Math.round(median(windowLifts[i]) * 100) / 100 : null;
+  });
+  const ownReels = windowLifts.reduce((n, l) => n + l.length, 0);
   // Before migration 00062 the auto-post columns are not there yet.
   const migrated = !autoSlots.error;
   type SlotRow = {
@@ -101,6 +170,7 @@ export default async function PlannerPage({
     paths.add(a.file_path);
     if (a.thumbnail_path) paths.add(a.thumbnail_path);
   }
+  feedOf.forEach((f) => f.paths.forEach((p) => paths.add(p)));
   const signed = new Map<string, string>();
   const list = Array.from(paths);
   for (let i = 0; i < list.length; i += 500) {
@@ -146,6 +216,7 @@ export default async function PlannerPage({
       uploadedAt: a.uploaded_at,
       usedOn: Array.from(usedOn.get(a.id) ?? []),
       queued: queued.has(a.id),
+      lift: reelLift.get(a.request_id) ?? null,
     }));
 
   const since = Date.now() - 62 * 86_400_000;
@@ -155,12 +226,21 @@ export default async function PlannerPage({
     .filter((s) => new Date(s.posted_at ?? s.scheduled_for).getTime() >= since)
     .map((s) => {
       const a = s.asset_id ? assetOf.get(s.asset_id) : undefined;
+      const feed = feedOf.get(s.id);
+      const images = feed ? feed.paths.map((p) => signed.get(p)).filter((u): u is string => !!u) : [];
       return {
         id: s.id,
         assetId: s.asset_id,
-        title: (s.request_id && titleOf.get(s.request_id)) || "Reel",
+        requestId: s.request_id,
+        kind: feed?.kind ?? ("reel" as const),
+        images,
+        title: feed
+          ? feed.kind === "carousel"
+            ? `Carousel · ${feed.paths.length}`
+            : "Feed post"
+          : (s.request_id && titleOf.get(s.request_id)) || "Reel",
         variant: a ? variant(a) : null,
-        thumb: a?.thumbnail_path ? signed.get(a.thumbnail_path) ?? null : null,
+        thumb: feed ? images[0] ?? null : a?.thumbnail_path ? signed.get(a.thumbnail_path) ?? null : null,
         video: a ? signed.get(a.file_path) ?? null : null,
         at: s.status === "posted" ? s.posted_at ?? s.scheduled_for : s.scheduled_for,
         caption: s.caption ?? "",
@@ -187,7 +267,12 @@ export default async function PlannerPage({
         avatar,
         perDay: Number(account.posts_per_day ?? 0),
         hasTopic: account.telegram_chat_id != null,
+        personaId: account.persona_id,
+        tz,
       }}
+      feedReady={feedReady}
+      windows={windows}
+      ownReels={ownReels}
       connection={conn ? { username: conn.username, expiresAt: conn.token_expires_at } : null}
       migrated={migrated}
       cuts={cuts}
