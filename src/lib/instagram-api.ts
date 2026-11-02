@@ -51,25 +51,44 @@ export async function connectWithToken(
     username = me.username ?? null;
     expiresAt = new Date(Date.now() + 60 * 86_400_000).toISOString();
   } else {
-    const pages = await igFetch<{ data?: { instagram_business_account?: { id: string; username?: string } }[] }>(
+    // The accounts the token was granted, from its own scopes — works for
+    // system-user tokens, which have no Facebook page to go through.
+    const dbg = await igFetch<{
+      data?: { expires_at?: number; granular_scopes?: { scope: string; target_ids?: string[] }[] };
+    }>(`${FB_GRAPH}/debug_token?${new URLSearchParams({ input_token: token, access_token: token })}`).catch(() => null);
+    const exp = dbg?.data?.expires_at;
+    expiresAt = exp ? new Date(exp * 1000).toISOString() : null;
+    const ids = new Set(
+      (dbg?.data?.granular_scopes ?? []).filter((g) => g.scope.startsWith("instagram")).flatMap((g) => g.target_ids ?? [])
+    );
+    const pages = await igFetch<{ data?: { instagram_business_account?: { id: string } }[] }>(
       `${FB_GRAPH}/me/accounts?${new URLSearchParams({
-        fields: "instagram_business_account{id,username}",
+        fields: "instagram_business_account{id}",
         limit: "100",
         access_token: token,
       })}`
-    );
-    const hit = (pages.data ?? [])
-      .map((p) => p.instagram_business_account)
-      .find((a) => a?.username?.toLowerCase() === want);
-    if (hit) {
-      igUserId = hit.id;
-      username = hit.username ?? null;
-    }
-    const dbg = await igFetch<{ data?: { expires_at?: number } }>(
-      `${FB_GRAPH}/debug_token?${new URLSearchParams({ input_token: token, access_token: token })}`
     ).catch(() => null);
-    const exp = dbg?.data?.expires_at;
-    expiresAt = exp ? new Date(exp * 1000).toISOString() : null;
+    for (const p of pages?.data ?? []) if (p.instagram_business_account) ids.add(p.instagram_business_account.id);
+    for (const id of Array.from(ids)) {
+      const acc = await igFetch<{ id: string; username?: string }>(
+        `${FB_GRAPH}/${id}?${new URLSearchParams({ fields: "id,username", access_token: token })}`
+      ).catch(() => null);
+      if (acc?.username?.toLowerCase() === want) {
+        igUserId = acc.id;
+        username = acc.username;
+        break;
+      }
+      if (acc?.username && !username) username = acc.username;
+    }
+    if (!igUserId && username) throw new Error(`This token belongs to @${username}, not @${want}`);
+    if (!ids.size) {
+      // Maybe a Unified-login token Instagram's own API takes.
+      const me = await igFetch<{ user_id?: string; id?: string; username?: string }>(
+        `${IG_GRAPH}/me?${new URLSearchParams({ fields: "user_id,username", access_token: token })}`
+      ).catch(() => null);
+      if (me?.username) throw new Error("This token only works with Instagram's own API — tell Claude");
+      throw new Error("The token reaches no Instagram account — generate it again in the Meta app");
+    }
   }
 
   if (!igUserId || !username) throw new Error(`This token has no access to @${want}`);

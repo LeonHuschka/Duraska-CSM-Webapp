@@ -166,7 +166,9 @@ export async function connectInstagram(accountId: string, token: string): Promis
     revalidatePath(`/planner/${accountId}`);
     return { error: null, username: conn.username };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not connect" };
+    const msg = err instanceof Error ? err.message : "Could not connect";
+    console.error(`[ig-connect] ${access.account.handle}: ${msg} (token ${token.trim().slice(0, 4)}…)`);
+    return { error: msg };
   }
 }
 
