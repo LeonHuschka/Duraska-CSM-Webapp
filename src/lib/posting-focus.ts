@@ -21,6 +21,8 @@ const WINDOW_DAYS = 14;
 /** Below this the board shows no badge either. */
 const MIN_LIFT = 2;
 const MAX_REELS = 3;
+/** Twice of almost nothing is still almost nothing — a fresh page's 78 plays. */
+const MIN_PLAYS = 500;
 /** An account with fewer reels has no usual reach to beat yet. */
 const MIN_REELS = 5;
 /**
@@ -88,7 +90,7 @@ export async function sendPostingFocus(
     const top = reels
       .filter((r) => r.posted_at && new Date(r.posted_at).getTime() >= since)
       .map((r) => ({ reel: r, lift: Number(r.views ?? 0) / median }))
-      .filter((x) => x.lift >= MIN_LIFT)
+      .filter((x) => x.lift >= MIN_LIFT && Number(x.reel.views ?? 0) >= MIN_PLAYS)
       .sort((x, y) => y.lift - x.lift)
       .slice(0, MAX_REELS);
     if (top.length === 0) {
@@ -139,7 +141,13 @@ async function reelLine(
 
   const requestIds = r.request_id ? [r.request_id] : [];
   const { data: trial } = r.shortcode
-    ? await supabase.from("trials").select("id").eq("account_id", accountId).eq("shortcode", r.shortcode).maybeSingle()
+    ? await supabase
+        .from("trials")
+        .select("id")
+        .eq("account_id", accountId)
+        .eq("shortcode", r.shortcode)
+        .neq("status", "dismissed")
+        .maybeSingle()
     : { data: null };
   if (trial) {
     const { data: cells } = await supabase
