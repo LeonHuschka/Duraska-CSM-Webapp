@@ -21,6 +21,12 @@ import { APP_URL, decideTrial, ensureTrial, notifyProposal } from "@/lib/trials"
 const DAY = 86_400_000;
 /** A reel older than this is history, not a new winner. */
 const FRESH_DAYS = 30;
+/**
+ * A reel younger than this is still collecting plays and stays out of the
+ * account's usual reach: a day of fresh posts with a few hundred plays each
+ * would pull the median down and make a weeks-old reel a "winner".
+ */
+const SETTLED_DAYS = 3;
 
 type Db = SupabaseClient<Database>;
 
@@ -103,7 +109,9 @@ export async function announceWinners(
   const freshSince = Date.now() - FRESH_DAYS * DAY;
   const candidates: { reel: Reel; median: number; lift: number }[] = [];
   byAccount.forEach((list) => {
+    const settledBefore = Date.now() - SETTLED_DAYS * DAY;
     const views = list
+      .filter((r) => !r.posted_at || new Date(r.posted_at).getTime() < settledBefore)
       .map((r) => Number(r.views))
       .filter((v) => v > 0)
       .sort((a, b) => a - b);
