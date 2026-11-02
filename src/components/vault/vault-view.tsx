@@ -12,6 +12,7 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  Scissors,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -663,9 +664,18 @@ function VaultCard({
             accounts={accounts}
           />
         </div>
-        <p className="mt-0.5 text-[10px] text-muted-foreground/60 truncate">
-          {asset.size_bytes ? formatBytes(asset.size_bytes) : asset.file_name}
-        </p>
+        <div className="mt-0.5 flex items-center justify-between gap-2">
+          <p className="min-w-0 truncate text-[10px] text-muted-foreground/60">
+            {asset.size_bytes ? formatBytes(asset.size_bytes) : asset.file_name}
+          </p>
+          <a
+            href={`/requests/${asset.request_id}`}
+            className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            title="Open the job: change, add or move its files"
+          >
+            <Scissors className="h-2.5 w-2.5" /> Edit
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -950,6 +960,13 @@ function ReelStack({
           <span className="tabular-nums">{reel.cuts.length} cuts</span>
         </button>
         <p className="min-w-0 truncate text-xs font-medium">{reel.title}</p>
+        <a
+          href={`/requests/${reel.requestId}`}
+          className="flex h-7 shrink-0 items-center gap-1 rounded-full border border-border/60 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+          title="Open the job: change, add or move its files"
+        >
+          <Scissors className="h-3 w-3" /> Edit files
+        </a>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {freeLabel}
           <RunTally title={reel.title} cuts={allCuts} postings={reel.postings} accounts={accounts} />

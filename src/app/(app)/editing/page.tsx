@@ -31,12 +31,14 @@ export default async function EditingPage() {
   }
 
   // Jobs relevant to editing: shooted (needs edit), edited (done, review),
-  // posted (archive-ish). We show shooted + edited primarily.
+  // posted (archive-ish). "Scheduled" — a cut of it is planned or marked
+  // posted on an account — is done editing and shows under Done, so a job
+  // never drops off the board once its cuts start going out.
   const { data: requests } = await supabase
     .from("content_requests")
     .select("id, title, status, is_nsfw, is_trial, inspo_link, description, created_at, content_type_id")
     .eq("persona_id", personaId)
-    .in("status", ["shooted", "edited", "posted"])
+    .in("status", ["shooted", "edited", "scheduled", "posted"])
     .order("created_at", { ascending: false })
     .limit(500);
 
@@ -76,7 +78,7 @@ export default async function EditingPage() {
       return {
         id: r.id,
         title: r.title,
-        status: r.status,
+        status: r.status === "scheduled" ? "edited" : r.status,
         is_nsfw: r.is_nsfw,
         is_trial: r.is_trial,
         inspo_link: r.inspo_link,
