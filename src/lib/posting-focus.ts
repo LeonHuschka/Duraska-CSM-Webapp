@@ -23,6 +23,11 @@ const MIN_LIFT = 2;
 const MAX_REELS = 3;
 /** An account with fewer reels has no usual reach to beat yet. */
 const MIN_REELS = 5;
+/**
+ * Reels younger than this are still collecting plays and stay out of the
+ * usual reach, as for winners — a morning of fresh posts would halve it.
+ */
+const SETTLED_DAYS = 3;
 
 type Db = SupabaseClient<Database>;
 
@@ -32,13 +37,16 @@ export async function sendPostingFocus(
   opts: { dryRun?: boolean } = {}
 ): Promise<string[]> {
   const notes: string[] = [];
-  const { data: accounts } = await supabase
+  // Its own topic only: an account with no topic set would land in the
+  // group's general chat.
+  let q = supabase
     .from("accounts")
     .select("id, handle, platform, telegram_chat_id, telegram_thread_id, manager_username, posts_per_day")
     .eq("persona_id", personaId)
     .not("status", "in", '("dead","paused")')
-    .gt("posts_per_day", 0)
-    .not("telegram_chat_id", "is", null);
+    .gt("posts_per_day", 0);
+  if (!opts.dryRun) q = q.not("telegram_chat_id", "is", null).not("telegram_thread_id", "is", null);
+  const { data: accounts } = await q;
   if (!accounts?.length) return ["no account topics"];
 
   const { data: rows } = await supabase
@@ -64,7 +72,10 @@ export async function sendPostingFocus(
   const since = Date.now() - WINDOW_DAYS * DAY;
   for (const a of accounts) {
     const reels = Array.from(latest.values()).filter((r) => r.account_id === a.id);
-    const views = reels
+    const settledBefore = Date.now() - SETTLED_DAYS * DAY;
+    const settled = reels.filter((r) => !r.posted_at || new Date(r.posted_at).getTime() < settledBefore);
+    // A young account has few settled reels yet; then all of them count.
+    const views = (settled.length >= MIN_REELS ? settled : reels)
       .map((r) => Number(r.views ?? 0))
       .filter((v) => v > 0)
       .sort((x, y) => x - y);
@@ -85,7 +96,7 @@ export async function sendPostingFocus(
       continue;
     }
 
-    const lines = await Promise.all(top.map((t) => reelLine(supabase, t.reel, t.lift)));
+    const lines = await Promise.all(top.map((t) => reelLine(supabase, a.id, t.reel, t.lift)));
     const nf = new Intl.NumberFormat("de-DE");
     const va = a.manager_username ? `@${a.manager_username.replace(/^@/, "")}, ` : "";
     const text = [
@@ -97,7 +108,7 @@ export async function sendPostingFocus(
       `👉 Post the remaining cuts of ${top.length === 1 ? "it" : "these"} first. When one has no cuts left, pick reels in the vault that look like it — same outfit, hook or vibe.`,
     ].join("\n");
     if (opts.dryRun) {
-      notes.push(`${a.handle}:\n${text}`);
+      notes.push(`${a.handle}${a.telegram_thread_id == null ? " (no topic set — would not be sent)" : ""}:\n${text}`);
       continue;
     }
     const res = await sendMessage({
@@ -111,39 +122,67 @@ export async function sendPostingFocus(
   return notes;
 }
 
-/** One reel: its name, how far it got, and what the vault still holds of it. */
+/**
+ * One reel: its name, how far it got, and what the vault still holds of
+ * it. A Trial-Maxxing outlier is one reel of many: its reshoots for this
+ * account are the cuts to post.
+ */
 async function reelLine(
   supabase: Db,
-  r: { request_id: string | null; views: number | null; post_url: string | null },
+  accountId: string,
+  r: { request_id: string | null; shortcode: string | null; views: number | null; post_url: string | null },
   lift: number
 ): Promise<string> {
   const nf = new Intl.NumberFormat("de-DE");
   const icon = lift >= 5 ? "🔥" : "📈";
   const stats = `${nf.format(Number(r.views ?? 0))} plays · ${lift.toFixed(1)}×`;
-  if (!r.request_id) {
-    const link = r.post_url ? `<a href="${esc(r.post_url)}">this reel</a>` : "a reel the app does not know";
-    return `${icon} ${link} · ${stats}\n    → no cuts of it in the app, post reels like it`;
+
+  const requestIds = r.request_id ? [r.request_id] : [];
+  const { data: trial } = r.shortcode
+    ? await supabase.from("trials").select("id").eq("account_id", accountId).eq("shortcode", r.shortcode).maybeSingle()
+    : { data: null };
+  if (trial) {
+    const { data: cells } = await supabase
+      .from("trial_cells")
+      .select("request_id")
+      .eq("trial_id", trial.id)
+      .not("request_id", "is", null);
+    for (const c of cells ?? []) if (c.request_id) requestIds.push(c.request_id);
   }
-  const [{ data: req }, { data: cuts }] = await Promise.all([
-    supabase.from("content_requests").select("title, is_nsfw").eq("id", r.request_id).maybeSingle(),
-    supabase
-      .from("content_assets")
-      .select("id")
-      .eq("request_id", r.request_id)
-      .eq("stage", "edited")
-      .is("deleted_at", null),
-  ]);
-  // A cut goes out once, anywhere — the vault's "free".
-  const ids = (cuts ?? []).map((c) => c.id);
-  const { data: posted } = ids.length
-    ? await supabase.from("schedule_slots").select("asset_id").in("asset_id", ids).eq("status", "posted")
-    : { data: [] as { asset_id: string | null }[] };
-  const taken = new Set((posted ?? []).map((p) => p.asset_id));
-  const free = req?.is_nsfw ? 0 : ids.filter((id) => !taken.has(id)).length;
-  const name = `<b>${esc(req?.title ?? "Reel")}</b>`;
-  return `${icon} ${name} · ${stats}\n    → ${
-    free > 0 ? `${free} more ${free === 1 ? "cut" : "cuts"} in the vault — post ${free === 1 ? "it" : "them"}` : "no cuts left — post reels like it"
-  }`;
+
+  let title: string | null = null;
+  let free = 0;
+  if (requestIds.length) {
+    const [{ data: reqs }, { data: cuts }] = await Promise.all([
+      supabase.from("content_requests").select("id, title, is_nsfw").in("id", requestIds),
+      supabase
+        .from("content_assets")
+        .select("id, request_id")
+        .in("request_id", requestIds)
+        .eq("stage", "edited")
+        .is("deleted_at", null),
+    ]);
+    title = r.request_id ? reqs?.find((q) => q.id === r.request_id)?.title ?? null : null;
+    const nsfw = new Set((reqs ?? []).filter((q) => q.is_nsfw).map((q) => q.id));
+    // A cut goes out once, anywhere — the vault's "free".
+    const ids = (cuts ?? []).filter((c) => !nsfw.has(c.request_id)).map((c) => c.id);
+    const { data: posted } = ids.length
+      ? await supabase.from("schedule_slots").select("asset_id").in("asset_id", ids).eq("status", "posted")
+      : { data: [] as { asset_id: string | null }[] };
+    const taken = new Set((posted ?? []).map((p) => p.asset_id));
+    free = ids.filter((id) => !taken.has(id)).length;
+  }
+
+  const name = title
+    ? `<b>${esc(title)}</b>`
+    : r.post_url
+      ? `<a href="${esc(r.post_url)}">${trial ? "the Trial-Maxxing reel" : "this reel"}</a>`
+      : "a reel";
+  const todo =
+    free > 0
+      ? `${free} more ${free === 1 ? "cut" : "cuts"} in the vault${trial ? " (Trial-Maxxing reshoots)" : ""} — post ${free === 1 ? "it" : "them"}`
+      : "no cuts left — post reels like it";
+  return `${icon} ${name} · ${stats}\n    → ${todo}`;
 }
 
 function esc(t: string): string {
