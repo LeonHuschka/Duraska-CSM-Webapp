@@ -1,5 +1,6 @@
 import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
+import { allRows } from "@/lib/supabase/all-rows";
 import { EditingView } from "@/components/editing/editing-view";
 
 export interface EditJob {
@@ -57,11 +58,15 @@ export default async function EditingPage() {
   // reshoot it must not make it vanish.
   const hadTakes = new Set<string>();
   if (reqIds.length > 0) {
-    const { data: assets } = await supabase
-      .from("content_assets")
-      .select("request_id, stage, fansly, deleted_at")
-      .in("request_id", reqIds);
-    for (const a of assets ?? []) {
+    const assets = await allRows((from, to) =>
+      supabase
+        .from("content_assets")
+        .select("request_id, stage, fansly, deleted_at")
+        .in("request_id", reqIds)
+        .order("id")
+        .range(from, to)
+    );
+    for (const a of assets) {
       if (a.stage === "raw") hadTakes.add(a.request_id);
       if (a.deleted_at) continue;
       const c = (countsByReq[a.request_id] ??= { raw: 0, fansly: 0, edited: 0 });

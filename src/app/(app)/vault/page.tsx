@@ -1,5 +1,6 @@
 import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
+import { allRows } from "@/lib/supabase/all-rows";
 import { VaultView } from "@/components/vault/vault-view";
 
 export interface VaultAsset {
@@ -189,17 +190,22 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
   // — we shoot a lot of NSFW Fansly so the older SFW pieces were getting
   // sliced off by a smaller limit. Egress stays low because vault-view
   // lazy-loads media via IntersectionObserver.
-  const { data: assets } = await supabase
-    .from("content_assets")
-    .select(
-      "id, request_id, file_name, file_path, thumbnail_path, mime_type, size_bytes, stage, uploaded_at"
-    )
-    .in("request_id", requestIds)
-    .is("deleted_at", null)
-    .order("uploaded_at", { ascending: false })
-    .limit(2000);
+  const assets = await allRows(
+    (from, to) =>
+      supabase
+        .from("content_assets")
+        .select(
+          "id, request_id, file_name, file_path, thumbnail_path, mime_type, size_bytes, stage, uploaded_at"
+        )
+        .in("request_id", requestIds)
+        .is("deleted_at", null)
+        .order("uploaded_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    4000
+  );
 
-  if (!assets || assets.length === 0) {
+  if (assets.length === 0) {
     return <VaultView assets={[]} accounts={accounts} viewer={viewer} members={members} />;
   }
 
