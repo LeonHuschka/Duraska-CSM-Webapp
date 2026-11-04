@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { instagramKey, setMessageReaction, REACTION } from "@/lib/telegram";
+import { refreshShootList } from "@/lib/shoot-list";
 
 /**
  * Tie a freshly-created content_request to the Telegram inspo link it came
@@ -14,22 +15,23 @@ export async function linkInspoToRequest(opts: {
   personaId: string;
   requestId: string;
   inspoUrl: string | null;
+  /** The link itself, when the upload came from its own page. */
+  linkId?: string;
 }) {
-  if (!opts.inspoUrl) return;
-  const key = instagramKey(opts.inspoUrl);
-  if (!key) return;
+  const key = opts.inspoUrl ? instagramKey(opts.inspoUrl) : null;
+  if (!key && !opts.linkId) return;
 
   try {
     const supabase = createAdminClient();
-    const { data: link } = await supabase
+    const q = supabase
       .from("content_links")
       .select("id, chat_id, message_id, status")
       .eq("persona_id", opts.personaId)
-      .eq("url_key", key)
-      .in("status", ["open", "shot"])
-      .order("posted_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .in("status", ["open", "shot"]);
+    const { data: link } = await (opts.linkId
+      ? q.eq("id", opts.linkId)
+      : q.eq("url_key", key!).order("posted_at", { ascending: true }).limit(1)
+    ).maybeSingle();
     if (!link) return;
 
     await supabase
@@ -46,6 +48,7 @@ export async function linkInspoToRequest(opts: {
       message_id: Number(link.message_id),
       emoji: REACTION.uploaded,
     });
+    await refreshShootList(supabase, opts.personaId);
   } catch (err) {
     console.warn("[content-links] linking failed", err);
   }

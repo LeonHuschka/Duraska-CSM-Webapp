@@ -33,6 +33,9 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/api/funnel") || pathname.startsWith("/funnel/")) {
     return NextResponse.next();
   }
+  // The upload page a Telegram button opens: its link is its key, so it
+  // needs no session — and a signed-in visitor must not be sent home.
+  if (pathname.startsWith("/shoot/")) return NextResponse.next();
   return await updateSession(request);
 }
 

@@ -1298,6 +1298,10 @@ export type Database = {
           shoot_notice_last_at: string | null;
           winners_thread_id: number | null;
           pattern_thread_id: number | null;
+          shoot_thread_id: number | null;
+          shoot_list_message_id: number | null;
+          shoot_list_day: string | null;
+          shoot_list_links: string[] | null;
           viral_lift: number;
           viral_min_views: number;
           created_at: string;
@@ -1330,6 +1334,10 @@ export type Database = {
           shoot_notice_last_at?: string | null;
           winners_thread_id?: number | null;
           pattern_thread_id?: number | null;
+          shoot_thread_id?: number | null;
+          shoot_list_message_id?: number | null;
+          shoot_list_day?: string | null;
+          shoot_list_links?: string[] | null;
           viral_lift?: number;
           viral_min_views?: number;
           created_at?: string;
@@ -1362,6 +1370,10 @@ export type Database = {
           shoot_notice_last_at?: string | null;
           winners_thread_id?: number | null;
           pattern_thread_id?: number | null;
+          shoot_thread_id?: number | null;
+          shoot_list_message_id?: number | null;
+          shoot_list_day?: string | null;
+          shoot_list_links?: string[] | null;
           viral_lift?: number;
           viral_min_views?: number;
           created_at?: string;

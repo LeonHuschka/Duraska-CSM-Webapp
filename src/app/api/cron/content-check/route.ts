@@ -7,6 +7,7 @@ import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
 import { announceWinners } from "@/lib/winners";
 import { sendPostingFocus } from "@/lib/posting-focus";
+import { postShootList } from "@/lib/shoot-list";
 import { refreshIgTokens } from "@/lib/auto-publish";
 import { fetchInspoVideo, retryableVideoLinks } from "@/lib/inspo-video";
 import {
@@ -132,6 +133,11 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await sendPostingFocus(supabase, cfg.persona_id)] as const)
   );
   summary.focus = Object.fromEntries(focus);
+  // SHOOTING: the day's reels to shoot, yesterday's leftovers first.
+  const shoot = await Promise.all(
+    (configs ?? []).map(async (cfg) => [cfg.persona_id, await postShootList(supabase, cfg.persona_id)] as const)
+  );
+  summary.shoot = Object.fromEntries(shoot);
   // Auto-posting tokens run 60 days; renewed well before.
   summary.igTokens = await refreshIgTokens(supabase).catch((err) => [String(err)]);
 

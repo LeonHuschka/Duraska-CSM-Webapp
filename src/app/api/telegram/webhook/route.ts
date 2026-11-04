@@ -18,6 +18,7 @@ import { extractMetricsFromImage } from "@/lib/vision";
 import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
 import { caption } from "@/lib/inspo-video";
+import { postShootList, refreshShootList } from "@/lib/shoot-list";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -276,6 +277,10 @@ async function handleMessage(req: Request, msg: TgMessage) {
   const topic = msg.forum_topic_created?.name ?? msg.reply_to_message?.forum_topic_created?.name ?? "";
   if (msg.message_thread_id && /pattern\s*analys/i.test(topic)) {
     await rememberPatternTopic(req, msg.chat.id, msg.message_thread_id);
+  }
+  // The same for SHOOTING, where the day's list of reels to shoot goes.
+  if (msg.message_thread_id && /^\W*shooting\b/i.test(topic)) {
+    await rememberShootTopic(msg.chat.id, msg.message_thread_id);
   }
 
   // A screenshot in an account group → read the stats off it.
@@ -706,11 +711,12 @@ async function handleReaction(r: TgReactionUpdate) {
   // message, so it applies to all of them.
   const { data: links } = await supabase
     .from("content_links")
-    .select("id, status")
+    .select("id, status, persona_id")
     .eq("chat_id", r.chat.id)
     .eq("message_id", r.message_id);
   if (!links || links.length === 0) return;
   const ids = links.map((l) => l.id);
+  const personaId = links[0].persona_id;
 
   // 💔 means "I opened this and the post is gone".
   //
@@ -741,6 +747,7 @@ async function handleReaction(r: TgReactionUpdate) {
     if (!res.ok) {
       console.log("[telegram] could not delete dead link message", res.error);
     }
+    await refreshShootList(supabase, personaId);
     return;
   }
 
@@ -757,6 +764,29 @@ async function handleReaction(r: TgReactionUpdate) {
       updated_at: new Date().toISOString(),
     })
     .in("id", open);
+  await refreshShootList(supabase, personaId);
+}
+
+/**
+ * Store the SHOOTING topic, once, say so in it and post today's list
+ * straight away; from then on a new one comes every morning.
+ */
+async function rememberShootTopic(chatId: number, threadId: number) {
+  const supabase = createAdminClient();
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("persona_id, shoot_thread_id")
+    .eq("chat_id", chatId)
+    .maybeSingle();
+  if (!cfg || Number(cfg.shoot_thread_id) === threadId) return;
+  await supabase.from("telegram_config").update({ shoot_thread_id: threadId }).eq("persona_id", cfg.persona_id);
+  await sendMessage({
+    chat_id: chatId,
+    message_thread_id: threadId,
+    text:
+      "✅ Got it — every morning the day's reels to shoot land here: what is left from the day before, the oldest inspo links, and two fresh ones. Here is today's.",
+  });
+  console.log("[telegram] shooting list:", await postShootList(supabase, cfg.persona_id, true));
 }
 
 /**

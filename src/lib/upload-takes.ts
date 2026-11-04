@@ -42,7 +42,7 @@ export function resolveMime(f: File): string {
   return MEDIA_EXT_MIME[extOf(f.name)] ?? "application/octet-stream";
 }
 
-function putWithProgress(url: string, file: File, mime: string, onProgress: (loaded: number) => void): Promise<void> {
+export function putWithProgress(url: string, file: File, mime: string, onProgress: (loaded: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url, true);

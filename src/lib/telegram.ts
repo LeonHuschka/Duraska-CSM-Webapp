@@ -139,7 +139,10 @@ export async function sendMessage(opts: {
   reply_to_message_id?: number | null;
   /** One row of link buttons under the message. */
   buttons?: { text: string; url: string }[];
+  /** Several rows of link buttons; wins over `buttons`. */
+  keyboard?: LinkButton[][];
 }) {
+  const rows = opts.keyboard ?? (opts.buttons?.length ? [opts.buttons] : null);
   return call<{ message_id: number }>("sendMessage", {
     chat_id: opts.chat_id,
     text: opts.text,
@@ -150,9 +153,11 @@ export async function sendMessage(opts: {
     ...(opts.reply_to_message_id
       ? { reply_parameters: { message_id: opts.reply_to_message_id, allow_sending_without_reply: true } }
       : {}),
-    ...(opts.buttons?.length ? { reply_markup: { inline_keyboard: [opts.buttons] } } : {}),
+    ...(rows?.length ? { reply_markup: { inline_keyboard: rows } } : {}),
   });
 }
+
+export type LinkButton = { text: string; url: string };
 
 /**
  * Rewrite a message the bot already sent.
@@ -166,6 +171,8 @@ export async function editMessageText(opts: {
   message_id: number;
   text: string;
   parse_mode?: "HTML" | "Markdown";
+  /** The buttons under it, replaced along with the text. */
+  keyboard?: LinkButton[][];
 }) {
   return call("editMessageText", {
     chat_id: opts.chat_id,
@@ -173,7 +180,24 @@ export async function editMessageText(opts: {
     text: opts.text,
     parse_mode: opts.parse_mode ?? "HTML",
     link_preview_options: { is_disabled: true },
+    ...(opts.keyboard ? { reply_markup: { inline_keyboard: opts.keyboard } } : {}),
   });
+}
+
+/** Pin a message in its chat, quietly. Needs the bot to be an admin who may pin. */
+export async function pinChatMessage(opts: { chat_id: number | string; message_id: number }) {
+  return call("pinChatMessage", { ...opts, disable_notification: true });
+}
+
+/**
+ * A link that opens a message in a group: "t.me/c/…" with the chat's id
+ * without its -100, and the topic when there is one.
+ */
+export function messageLink(chatId: number, messageId: number, threadId?: number | null): string {
+  const internal = String(chatId).replace(/^-100/, "");
+  return threadId
+    ? `https://t.me/c/${internal}/${threadId}/${messageId}`
+    : `https://t.me/c/${internal}/${messageId}`;
 }
 
 export type TgEntity = { type: string; offset: number; length: number; url?: string };
