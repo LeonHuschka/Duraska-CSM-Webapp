@@ -19,6 +19,7 @@ import {
   type Phase,
 } from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
+import { refreshShootList } from "@/lib/shoot-list";
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
 
@@ -33,6 +34,13 @@ async function who(supabase: Sb, personaId: string) {
   ]);
   const staff = profile?.global_role === "owner" || membership?.role === "owner" || membership?.role === "manager";
   return { userId: user.id, staff, member: staff || !!membership };
+}
+
+/** Today's SHOOTING list, after a trial box or round changed. */
+async function shootListOf(trialId: string) {
+  const admin = createAdminClient();
+  const { data: t } = await admin.from("trials").select("persona_id").eq("id", trialId).maybeSingle();
+  if (t) await refreshShootList(admin, t.persona_id);
 }
 
 function touch(trialId: string) {
@@ -249,6 +257,7 @@ export async function finishCell(cellId: string) {
   if (error) return { error: error.message };
   await supabase.from("trial_cells").update({ finished_at: now, updated_at: now }).eq("id", cellId);
   touch(cell.trial_id);
+  await shootListOf(cell.trial_id);
   return { error: null };
 }
 
@@ -308,6 +317,7 @@ export async function advanceTrial(trialId: string) {
     .eq("id", trialId);
   await notifyTrial(trialId, next === "done" ? "done" : "round");
   touch(trialId);
+  await shootListOf(trialId);
   return { error: null };
 }
 
@@ -330,6 +340,7 @@ export async function archiveTrial(trialId: string) {
   if (!me?.staff) return { error: "Only owners and managers can stop a trial" };
   await supabase.from("trials").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", trialId);
   touch(trialId);
+  await shootListOf(trialId);
   return { error: null };
 }
 

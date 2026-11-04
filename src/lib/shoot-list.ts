@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { berlinDay } from "@/lib/berlin-day";
 import { deleteMessage, editMessageText, messageLink, pinChatMessage, sendMessage, type LinkButton } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
+import { DIM_META, cellName, type Dimension } from "@/lib/trials";
+import { accountLabel } from "@/lib/account-analytics";
 
 /**
  * The SHOOTING topic: one message a day with the reels to shoot. The
@@ -11,7 +13,8 @@ import { shootUrl } from "@/lib/shoot-token";
  * yesterday first, then the oldest open links, and two of the newest so a
  * fresh trend does not wait for the backlog. Each line has a button to its
  * upload page and one to the inspo in the requests topic, and the message
- * is edited as the reels get shot.
+ * is edited as the reels get shot. Under them, the boxes of the running
+ * Trial-Maxxing round that still wait for takes, each with its upload page.
  */
 export const SHOOT_PER_DAY = 5;
 
@@ -62,7 +65,7 @@ export function notePlain(note: string | null): string {
 const dm = (iso: string) =>
   new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit" });
 
-async function render(db: Db, day: string, ids: string[]): Promise<{ text: string; keyboard: LinkButton[][] }> {
+async function render(db: Db, personaId: string, day: string, ids: string[]): Promise<{ text: string; keyboard: LinkButton[][] }> {
   const { data: rows } = ids.length
     ? await db
         .from("content_links")
@@ -105,13 +108,68 @@ async function render(db: Db, day: string, ids: string[]): Promise<{ text: strin
     keyboard.push([...(upload ? [{ text: `🎥 ${n} · Upload takes`, url: upload }] : []), jump]);
   });
 
+  const trial = await trialPart(db, personaId);
   const head =
     links.length === 0
       ? `🎬 <b>To shoot · ${date}</b>\n\nNothing open — every inspo link is shot. New ones go into the requests topic.`
-      : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}\n\n` +
-        `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo in the requests topic.`;
-  return { text: head, keyboard };
+      : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
+  const foot =
+    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo in the requests topic.` +
+    (trial.lines.length ? `\n🧪 opens a trial box — its takes go straight to editing.` : "");
+  return {
+    text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
+    keyboard: [...keyboard, ...trial.keyboard],
+  };
 }
+
+/** The running Trial-Maxxing rounds: per trial what is shot, and a button for each box still open. */
+async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
+  const { data: trials } = await db
+    .from("trials")
+    .select("id, account_id, phase, created_at")
+    .eq("persona_id", personaId)
+    .eq("status", "active")
+    .neq("phase", "done")
+    .order("created_at", { ascending: true });
+  if (!trials?.length) return { lines: [], keyboard: [] };
+  const accIds = trials.map((t) => t.account_id).filter((x): x is string => !!x);
+  const [{ data: cells }, { data: accounts }] = await Promise.all([
+    db
+      .from("trial_cells")
+      .select("id, trial_id, dimension, slot, label, finished_at")
+      .in("trial_id", trials.map((t) => t.id))
+      .order("slot"),
+    accIds.length
+      ? db.from("accounts").select("id, handle, display_name").in("id", accIds)
+      : Promise.resolve({ data: [] as { id: string; handle: string; display_name: string | null }[] }),
+  ]);
+  const accName = new Map((accounts ?? []).map((a) => [a.id, a.display_name || accountLabel(a.handle)]));
+
+  const lines = ["🧪 <b>Trial-Maxxing</b>"];
+  const keyboard: LinkButton[][] = [];
+  for (const t of trials) {
+    const d = t.phase as Dimension;
+    const round = (cells ?? []).filter((c) => c.trial_id === t.id && c.dimension === d);
+    if (!round.length) continue;
+    const open = round.filter((c) => !c.finished_at);
+    const who = t.account_id ? accName.get(t.account_id) ?? "" : "";
+    lines.push(
+      `${DIM_META[d].emoji} ${esc(who)} · ${DIM_META[d].title} — <b>${round.length - open.length}/${round.length}</b>` +
+        (open.length ? `\n   to shoot: ${open.map((c) => esc(name(c))).join(", ")}` : " 🎉")
+    );
+    const buttons = open
+      .map((c) => {
+        const url = shootUrl(c.id, "cell");
+        return url ? { text: `🧪 ${name(c)}${trials.length > 1 && who ? ` · ${who}` : ""}`, url } : null;
+      })
+      .filter((b): b is LinkButton => !!b);
+    for (let i = 0; i < buttons.length; i += 2) keyboard.push(buttons.slice(i, i + 2));
+  }
+  return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
+}
+
+const name = (c: { dimension: string; slot: number; label: string | null }) =>
+  cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label });
 
 /**
  * The morning's list, once a day: a new message in SHOOTING, pinned. Run
@@ -136,7 +194,7 @@ export async function postShootList(db: Db, personaId: string, fresh = false): P
     await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(cfg.shoot_list_message_id) });
   }
   const ids = await pick(db, personaId, cfg.shoot_list_links ?? []);
-  const { text, keyboard } = await render(db, today, ids);
+  const { text, keyboard } = await render(db, personaId, today, ids);
   const sent = await sendMessage({
     chat_id: cfg.chat_id,
     message_thread_id: cfg.shoot_thread_id,
@@ -162,7 +220,7 @@ export async function refreshShootList(db: Db, personaId: string): Promise<void>
       .eq("persona_id", personaId)
       .maybeSingle();
     if (!cfg?.chat_id || !cfg.shoot_list_message_id || !cfg.shoot_list_day) return;
-    const { text, keyboard } = await render(db, cfg.shoot_list_day, cfg.shoot_list_links ?? []);
+    const { text, keyboard } = await render(db, personaId, cfg.shoot_list_day, cfg.shoot_list_links ?? []);
     const res = await editMessageText({
       chat_id: cfg.chat_id,
       message_id: Number(cfg.shoot_list_message_id),
