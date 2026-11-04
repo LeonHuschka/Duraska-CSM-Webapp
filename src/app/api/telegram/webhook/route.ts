@@ -148,6 +148,7 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   const word = text.slice(1).split(/\s+/)[0] ?? "";
   const name = word.split("@")[0].toLowerCase();
   if (name === "note") return handleNote(msg, text);
+  if (name === "list") return handleShootList(msg);
   if (!COMMANDS.has(name)) return false;
 
   const supabase = createAdminClient();
@@ -223,6 +224,23 @@ async function handleNote(msg: TgMessage, text: string): Promise<boolean> {
     if (!res.ok) console.warn("[telegram] /note caption not edited:", res.error);
   }
   await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+  return true;
+}
+
+/**
+ * `/list` in SHOOTING — today's list again, picked anew and posted as a
+ * fresh message in place of the old one. The command itself is tidied away.
+ */
+async function handleShootList(msg: TgMessage): Promise<boolean> {
+  const supabase = createAdminClient();
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("persona_id, shoot_thread_id")
+    .eq("chat_id", msg.chat.id)
+    .maybeSingle();
+  if (!cfg?.shoot_thread_id || Number(cfg.shoot_thread_id) !== Number(msg.message_thread_id)) return false;
+  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+  console.log("[telegram] /list:", await postShootList(supabase, cfg.persona_id, true));
   return true;
 }
 

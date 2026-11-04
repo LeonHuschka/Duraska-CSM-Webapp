@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { berlinDay } from "@/lib/berlin-day";
-import { editMessageText, messageLink, pinChatMessage, sendMessage, type LinkButton } from "@/lib/telegram";
+import { deleteMessage, editMessageText, messageLink, pinChatMessage, sendMessage, type LinkButton } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
 
 /**
@@ -19,7 +19,11 @@ type Db = ReturnType<typeof createAdminClient>;
 
 const DONE = new Set(["shot", "uploaded", "edited"]);
 
-/** What is left of yesterday, then the oldest open links, then the newest. */
+/**
+ * What is left of yesterday, then the oldest open links, then the newest.
+ * Only links whose reel the bot holds a copy of: an old link without one
+ * is mostly a post that is gone, and there is nothing to shoot from it.
+ */
 async function pick(db: Db, personaId: string, carry: string[]): Promise<string[]> {
   const { data } = await db
     .from("content_links")
@@ -27,6 +31,7 @@ async function pick(db: Db, personaId: string, carry: string[]): Promise<string[
     .eq("persona_id", personaId)
     .eq("status", "open")
     .not("link_ok", "is", false)
+    .not("video_path", "is", null)
     .order("posted_at", { ascending: true })
     .limit(2000);
   const open = (data ?? []).map((l) => l.id);
@@ -54,13 +59,6 @@ export function notePlain(note: string | null): string {
     .trim();
 }
 
-/** The note as one short line. */
-function gist(note: string | null): string | null {
-  const line = notePlain(note).replace(/\s+/g, " ");
-  if (!line) return null;
-  return line.length > 70 ? `${line.slice(0, 68)}…` : line;
-}
-
 const dm = (iso: string) =>
   new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit" });
 
@@ -68,7 +66,7 @@ async function render(db: Db, day: string, ids: string[]): Promise<{ text: strin
   const { data: rows } = ids.length
     ? await db
         .from("content_links")
-        .select("id, chat_id, message_thread_id, message_id, status, note, posted_at, request_id")
+        .select("id, chat_id, message_thread_id, message_id, status, posted_at, request_id")
         .in("id", ids)
     : { data: [] };
   const byId = new Map((rows ?? []).map((r) => [r.id, r]));
@@ -90,7 +88,7 @@ async function render(db: Db, day: string, ids: string[]): Promise<{ text: strin
   const keyboard: LinkButton[][] = [];
   links.forEach((l, i) => {
     const n = i + 1;
-    const what = gist(l.note) ?? `Inspo from ${dm(l.posted_at)}`;
+    const what = `Inspo from ${dm(l.posted_at)}`;
     const jump = { text: `📍 ${n} · Inspo`, url: messageLink(Number(l.chat_id), Number(l.message_id), l.message_thread_id) };
     const upload = shootUrl(l.id);
     if (l.status === "dead") {
@@ -103,7 +101,7 @@ async function render(db: Db, day: string, ids: string[]): Promise<{ text: strin
       keyboard.push([...(upload ? [{ text: `✅ ${n} · ${t ?? "shot"}`, url: upload }] : []), jump]);
       return;
     }
-    lines.push(`⬜ ${n} · ${esc(what)} <i>(${dm(l.posted_at)})</i>`);
+    lines.push(`⬜ ${n} · ${esc(what)}`);
     keyboard.push([...(upload ? [{ text: `🎥 ${n} · Upload takes`, url: upload }] : []), jump]);
   });
 
@@ -118,7 +116,8 @@ async function render(db: Db, day: string, ids: string[]): Promise<{ text: strin
 /**
  * The morning's list, once a day: a new message in SHOOTING, pinned. Run
  * again the same day it only brings the message up to date — unless
- * `fresh`, which starts today's list over (when the topic is first set).
+ * `fresh`, which starts today's list over in a new message (when the
+ * topic is first set, or on `/list` in it).
  */
 export async function postShootList(db: Db, personaId: string, fresh = false): Promise<string> {
   const { data: cfg } = await db
@@ -133,6 +132,9 @@ export async function postShootList(db: Db, personaId: string, fresh = false): P
     return "already posted today";
   }
 
+  if (fresh && cfg.shoot_list_day === today && cfg.shoot_list_message_id) {
+    await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(cfg.shoot_list_message_id) });
+  }
   const ids = await pick(db, personaId, cfg.shoot_list_links ?? []);
   const { text, keyboard } = await render(db, today, ids);
   const sent = await sendMessage({
