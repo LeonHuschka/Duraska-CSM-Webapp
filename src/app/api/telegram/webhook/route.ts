@@ -18,7 +18,7 @@ import { extractMetricsFromImage } from "@/lib/vision";
 import { findGrid, cutCell, type Cell } from "@/lib/grid";
 import { matchTiles } from "@/lib/match-tile";
 import { caption } from "@/lib/inspo-video";
-import { postShootList, refreshShootList } from "@/lib/shoot-list";
+import { postShootList, refreshShootList, swapIntoShootList } from "@/lib/shoot-list";
 
 export const dynamic = "force-dynamic";
 // Reading a grid means one Vision call to extract it and up to three more to
@@ -149,6 +149,7 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
   const name = word.split("@")[0].toLowerCase();
   if (name === "note") return handleNote(msg, text);
   if (name === "list") return handleShootList(msg);
+  if (name === "shoot") return handleShoot(msg, text);
   if (!COMMANDS.has(name)) return false;
 
   const supabase = createAdminClient();
@@ -242,6 +243,55 @@ async function handleShootList(msg: TgMessage): Promise<boolean> {
   await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
   console.log("[telegram] /list:", await postShootList(supabase, cfg.persona_id, true));
   return true;
+}
+
+/**
+ * `/shoot` as a reply to an inspo — the bot's video or the original link
+ * message — puts it on today's SHOOTING list, on top; the last open reel
+ * there goes off it. `/shoot 3` takes #3 off instead. The bot answers in a
+ * line and tidies the command and its answer away after a few seconds, so
+ * the requests topic stays the model's queue.
+ */
+async function handleShoot(msg: TgMessage, text: string): Promise<boolean> {
+  const answer = async (line: string) => {
+    const sent = await sendMessage({
+      chat_id: msg.chat.id,
+      message_thread_id: msg.message_thread_id,
+      reply_to_message_id: msg.message_id,
+      text: line,
+      disable_notification: true,
+    });
+    waitUntil(
+      new Promise((r) => setTimeout(r, 12_000)).then(async () => {
+        await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+        if (sent.ok && sent.result) await deleteMessage({ chat_id: msg.chat.id, message_id: sent.result.message_id });
+      })
+    );
+    return true;
+  };
+  const target = msg.reply_to_message?.message_id;
+  if (!target) return answer("Reply with /shoot to the inspo that should go on today's list.");
+  const supabase = createAdminClient();
+  const { data: found } = await supabase
+    .from("content_links")
+    .select("id, persona_id, url_key")
+    .eq("chat_id", msg.chat.id)
+    .or(`message_id.eq.${target},video_message_id.eq.${target}`)
+    .limit(1)
+    .maybeSingle();
+  if (!found) return answer("That message is not an inspo link.");
+  // The bot's own repost of the reel, when there is one — that is what the list links to.
+  const { data: repost } = await supabase
+    .from("content_links")
+    .select("id, message_id, video_message_id")
+    .eq("persona_id", found.persona_id)
+    .eq("url_key", found.url_key)
+    .eq("status", "open")
+    .not("video_message_id", "is", null);
+  const linkId = (repost ?? []).find((l) => Number(l.message_id) === Number(l.video_message_id))?.id ?? found.id;
+  const n = Number(text.split(/\s+/)[1]);
+  const res = await swapIntoShootList(supabase, found.persona_id, linkId, Number.isInteger(n) && n > 0 ? n : null);
+  return answer(res.text);
 }
 
 /** Runs of spaces to one, no blank lines beyond one, trimmed — line breaks kept. */

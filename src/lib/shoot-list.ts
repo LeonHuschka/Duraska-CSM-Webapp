@@ -41,7 +41,7 @@ const DONE = new Set(["shot", "uploaded", "edited"]);
  * topic: one deleted there is gone for the model too, and is let go.
  */
 async function pick(db: Db, personaId: string, carry: string[]): Promise<string[]> {
-  const [{ data: open }, { data: done }, { data: jobs }] = await Promise.all([
+  const [{ data: open }, taken] = await Promise.all([
     db
       .from("content_links")
       .select("id, url_key, chat_id, message_id, video_message_id")
@@ -52,14 +52,8 @@ async function pick(db: Db, personaId: string, carry: string[]): Promise<string[
       .not("video_message_id", "is", null)
       .order("posted_at", { ascending: true })
       .limit(2000),
-    db.from("content_links").select("url_key").eq("persona_id", personaId).in("status", ["shot", "uploaded", "edited"]).limit(5000),
-    db.from("content_requests").select("inspo_link").eq("persona_id", personaId).not("inspo_link", "is", null).limit(5000),
+    takenKeys(db, personaId),
   ]);
-  const taken = new Set<string>((done ?? []).map((l) => l.url_key));
-  for (const j of jobs ?? []) {
-    const k = j.inspo_link ? instagramKey(j.inspo_link) : null;
-    if (k) taken.add(k);
-  }
   type L = NonNullable<typeof open>[number];
   const seen = new Set<string>();
   const candidates: L[] = [];
@@ -95,6 +89,20 @@ async function pick(db: Db, personaId: string, carry: string[]): Promise<string[
   await take(candidates, need - fresh);
   await take([...candidates].reverse(), SHOOT_PER_DAY - chosen.length);
   return chosen;
+}
+
+/** The reels already shot, or with a job: any posting of their link is done. */
+async function takenKeys(db: Db, personaId: string): Promise<Set<string>> {
+  const [{ data: done }, { data: jobs }] = await Promise.all([
+    db.from("content_links").select("url_key").eq("persona_id", personaId).in("status", ["shot", "uploaded", "edited"]).limit(5000),
+    db.from("content_requests").select("inspo_link").eq("persona_id", personaId).not("inspo_link", "is", null).limit(5000),
+  ]);
+  const taken = new Set<string>((done ?? []).map((l) => l.url_key));
+  for (const j of jobs ?? []) {
+    const k = j.inspo_link ? instagramKey(j.inspo_link) : null;
+    if (k) taken.add(k);
+  }
+  return taken;
 }
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -276,4 +284,69 @@ export async function refreshShootList(db: Db, personaId: string): Promise<void>
   } catch (err) {
     console.warn("[shoot-list] refresh failed", err);
   }
+}
+
+/**
+ * `/shoot` from the requests topic: this inspo onto today's list, on top,
+ * and one of today's open reels off it in its place — the last one, or
+ * number `drop`. Nothing is lost by that: a reel let go of is still open
+ * and comes back by age like any other. Says what it did, for the reply.
+ */
+export async function swapIntoShootList(
+  db: Db,
+  personaId: string,
+  linkId: string,
+  drop: number | null
+): Promise<{ ok: boolean; text: string }> {
+  const read = () =>
+    db
+      .from("telegram_config")
+      .select("chat_id, shoot_thread_id, shoot_list_message_id, shoot_list_day, shoot_list_links")
+      .eq("persona_id", personaId)
+      .maybeSingle();
+  let { data: cfg } = await read();
+  if (!cfg?.chat_id || !cfg.shoot_thread_id) return { ok: false, text: "There is no SHOOTING topic yet." };
+  // Before the morning's list is out, it comes first — the swap is into today's.
+  if (cfg.shoot_list_day !== berlinDay(new Date()) || !cfg.shoot_list_message_id) {
+    await postShootList(db, personaId);
+    ({ data: cfg } = await read());
+    if (!cfg?.shoot_list_message_id) return { ok: false, text: "Today's list could not be posted." };
+  }
+
+  const { data: link } = await db.from("content_links").select("id, url_key, status").eq("id", linkId).maybeSingle();
+  if (!link) return { ok: false, text: "That is not an inspo link." };
+  if (link.status === "dead") return { ok: false, text: "That inspo is marked as gone." };
+  if (DONE.has(link.status) || (await takenKeys(db, personaId)).has(link.url_key)) {
+    return { ok: false, text: "That reel is already shot." };
+  }
+
+  const ids = cfg.shoot_list_links ?? [];
+  const { data: rows } = ids.length
+    ? await db.from("content_links").select("id, url_key, status, posted_at").in("id", ids)
+    : { data: [] };
+  const byId = new Map((rows ?? []).map((r) => [r.id, r]));
+  const at = ids.findIndex((id) => byId.get(id)?.url_key === link.url_key);
+  if (at >= 0) return { ok: false, text: `That reel is already on today's list as #${at + 1}.` };
+
+  const isOpen = (id: string) => {
+    const r = byId.get(id);
+    return !!r && r.status === "open";
+  };
+  let out: string | null = null;
+  if (drop != null) {
+    out = ids[drop - 1] ?? null;
+    if (!out) return { ok: false, text: `Today's list has no #${drop}.` };
+    if (!isOpen(out)) return { ok: false, text: `#${drop} is already shot — pick an open one.` };
+  } else {
+    out = [...ids].reverse().find(isOpen) ?? null;
+  }
+
+  const next = [link.id, ...ids.filter((id) => id !== out)];
+  await db.from("telegram_config").update({ shoot_list_links: next }).eq("persona_id", personaId);
+  await refreshShootList(db, personaId);
+  const gone = out ? byId.get(out) : null;
+  return {
+    ok: true,
+    text: `✅ On today's list as #1${gone ? ` — Inspo from ${dm(gone.posted_at)} (was #${ids.indexOf(out!) + 1}) is off it` : ""}.`,
+  };
 }
