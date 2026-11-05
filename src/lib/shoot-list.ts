@@ -12,7 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { APP_URL, DIM_META, cellName, type Dimension } from "@/lib/trials";
+import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
 
 /**
@@ -179,7 +179,12 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
   };
 }
 
-/** The running Trial-Maxxing rounds: per trial what is shot, and a button to its matrix. */
+/**
+ * The running Trial-Maxxing trials: per trial each round that has begun —
+ * shot so far, what is left, the winner once picked — and a button to its
+ * matrix. A round is shot ahead of its phase as often as not, so the
+ * rounds are read from the boxes, not from the phase alone.
+ */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
     .from("trials")
@@ -193,7 +198,7 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   const [{ data: cells }, { data: accounts }] = await Promise.all([
     db
       .from("trial_cells")
-      .select("id, trial_id, dimension, slot, label, finished_at")
+      .select("id, trial_id, dimension, slot, label, finished_at, winner")
       .in("trial_id", trials.map((t) => t.id))
       .order("slot"),
     accIds.length
@@ -205,15 +210,26 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   const lines = ["🧪 <b>Trial-Maxxing</b>"];
   const keyboard: LinkButton[][] = [];
   for (const t of trials) {
-    const d = t.phase as Dimension;
-    const round = (cells ?? []).filter((c) => c.trial_id === t.id && c.dimension === d);
-    if (!round.length) continue;
-    const open = round.filter((c) => !c.finished_at);
+    const mine = (cells ?? []).filter((c) => c.trial_id === t.id);
+    const rounds: string[] = [];
+    for (const d of DIMENSIONS) {
+      const round = mine.filter((c) => c.dimension === d);
+      if (!round.length) continue;
+      const open = round.filter((c) => !c.finished_at);
+      const won = round.filter((c) => c.winner);
+      if (d !== t.phase && open.length === round.length && !won.length) continue; // not begun
+      const head = `${DIM_META[d].emoji} ${DIM_META[d].title} — <b>${round.length - open.length}/${round.length}</b>`;
+      rounds.push(
+        won.length
+          ? `${head} · 🏆 ${won.map((c) => esc(name(c))).join(", ")}`
+          : open.length
+            ? `${head}\n      to shoot: ${open.map((c) => esc(name(c))).join(", ")}`
+            : `${head} · winner not picked yet`
+      );
+    }
+    if (!rounds.length) continue;
     const who = t.account_id ? accName.get(t.account_id) ?? "" : "";
-    lines.push(
-      `${DIM_META[d].emoji} ${esc(who)} · ${DIM_META[d].title} — <b>${round.length - open.length}/${round.length}</b>` +
-        (open.length ? `\n   to shoot: ${open.map((c) => esc(name(c))).join(", ")}` : " 🎉")
-    );
+    lines.push(`<b>${esc(who || "Trial")}</b>\n${rounds.map((r) => `   ${r}`).join("\n")}`);
     keyboard.push([{ text: `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` }]);
   }
   return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
