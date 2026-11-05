@@ -48,7 +48,7 @@ export async function pipelineCounts(
       .from("content_requests")
       .select("id, status, is_nsfw")
       .eq("persona_id", personaId),
-    supabase.from("content_links").select("status").eq("persona_id", personaId),
+    supabase.from("content_links").select("status, url_key").eq("persona_id", personaId),
     supabase
       .from("schedule_slots")
       .select("request_id, asset_id, account_id")
@@ -130,6 +130,7 @@ export async function pipelineCounts(
     pools,
     toEdit: reqs.filter((r) => r.status === "shooted" && hasRaw.has(r.id)).length,
     openLinks: (links ?? []).filter((l) => l.status === "open").length,
-    shotNotUploaded: (links ?? []).filter((l) => l.status === "shot").length,
+    // Reels, not postings: a link posted twice is one reel to upload.
+    shotNotUploaded: new Set((links ?? []).filter((l) => l.status === "shot").map((l) => l.url_key)).size,
   };
 }

@@ -18,11 +18,10 @@ export async function linkInspoToRequest(opts: {
   /** The link itself, when the upload came from its own page. */
   linkId?: string;
 }) {
-  const key = opts.inspoUrl ? instagramKey(opts.inspoUrl) : null;
-  if (!key && !opts.linkId) return;
-
   try {
     const supabase = createAdminClient();
+    const key = opts.inspoUrl ? await inspoKey(supabase, opts.inspoUrl) : null;
+    if (!key && !opts.linkId) return;
     const q = supabase
       .from("content_links")
       .select("id, chat_id, message_id, status, url_key")
@@ -62,29 +61,47 @@ export async function linkInspoToRequest(opts: {
 }
 
 /**
+ * The reel an inspo URL means: its Instagram shortcode, or — when she
+ * copied the Telegram message instead (t.me/c/<chat>/<topic>/<message>) —
+ * the shortcode of the link posted in that message.
+ */
+async function inspoKey(db: ReturnType<typeof createAdminClient>, url: string): Promise<string | null> {
+  const key = instagramKey(url);
+  if (key) return key;
+  const m = url.match(/t\.me\/c\/(\d+)\/(?:\d+\/)?(\d+)/);
+  if (!m) return null;
+  const { data } = await db
+    .from("content_links")
+    .select("url_key")
+    .eq("chat_id", Number(`-100${m[1]}`))
+    .or(`message_id.eq.${m[2]},video_message_id.eq.${m[2]}`)
+    .limit(1)
+    .maybeSingle();
+  return data?.url_key ?? null;
+}
+
+/**
  * Called when a request gains final cuts. Flips its link to "edited" and
  * swaps the reaction so the group can tell shot-vs-finished apart.
  */
 export async function markInspoEdited(requestId: string) {
   try {
     const supabase = createAdminClient();
-    const { data: link } = await supabase
-      .from("content_links")
-      .select("id, chat_id, message_id, status")
-      .eq("request_id", requestId)
-      .maybeSingle();
-    if (!link || link.status === "edited") return;
-
-    await supabase
+    // Every posting of the reel carries the job, so every one turns.
+    const { data: links } = await supabase
       .from("content_links")
       .update({ status: "edited", updated_at: new Date().toISOString() })
-      .eq("id", link.id);
+      .eq("request_id", requestId)
+      .neq("status", "edited")
+      .select("chat_id, message_id");
 
-    await setMessageReaction({
-      chat_id: link.chat_id,
-      message_id: Number(link.message_id),
-      emoji: REACTION.edited,
-    });
+    for (const link of links ?? []) {
+      await setMessageReaction({
+        chat_id: link.chat_id,
+        message_id: Number(link.message_id),
+        emoji: REACTION.edited,
+      });
+    }
   } catch (err) {
     console.warn("[content-links] edited marking failed", err);
   }
