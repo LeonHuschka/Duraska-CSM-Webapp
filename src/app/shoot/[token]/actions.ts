@@ -57,7 +57,7 @@ export async function shootUploadUrls(token: string, names: string[]) {
  * The uploaded takes become the job: for an inspo link a new one (or more
  * takes for the one it has); for a trial box its job, sent to editing.
  */
-export async function shootSend(token: string, takes: Take[]) {
+export async function shootSend(token: string, takes: Take[], opts: { nsfw?: boolean } = {}) {
   const target = readShootToken(token);
   if (!target) return { error: "This link is not valid any more", title: null };
   const db = createAdminClient();
@@ -79,7 +79,7 @@ export async function shootSend(token: string, takes: Take[]) {
 
   const res =
     target.kind === "link"
-      ? await sendLink(db, target.id, personaId, model.user_id, takes)
+      ? await sendLink(db, target.id, personaId, model.user_id, takes, !!opts.nsfw)
       : await sendCell(db, target.id, personaId, model.user_id, takes);
   if (res.error) return res;
   await announceShoot(personaId);
@@ -87,7 +87,7 @@ export async function shootSend(token: string, takes: Take[]) {
   return res;
 }
 
-async function sendLink(db: Db, linkId: string, personaId: string, userId: string, takes: Take[]) {
+async function sendLink(db: Db, linkId: string, personaId: string, userId: string, takes: Take[], nsfw: boolean) {
   const { data: link } = await db
     .from("content_links")
     .select("id, url, note, request_id, video_path")
@@ -108,6 +108,7 @@ async function sendLink(db: Db, linkId: string, personaId: string, userId: strin
       description: notePlain(link.note) || "Self-produced based on inspo",
       inspoLink: link.url,
       status: "shooted",
+      nsfw,
     });
     if (made.error || !made.id) return { error: made.error ?? "Could not make the job", title: null };
     requestId = made.id;
@@ -212,7 +213,7 @@ async function newJob(
   db: Db,
   personaId: string,
   userId: string,
-  job: { description: string; inspoLink: string | null; status: "shooted" | "requested" }
+  job: { description: string; inspoLink: string | null; status: "shooted" | "requested"; nsfw?: boolean }
 ) {
   const [{ data: titles }, { data: top }] = await Promise.all([
     db.from("content_requests").select("title").eq("persona_id", personaId).ilike("title", "Reel #%"),
@@ -239,7 +240,7 @@ async function newJob(
       description: job.description,
       inspo_link: job.inspoLink,
       content_type_id: null,
-      is_nsfw: false,
+      is_nsfw: !!job.nsfw,
       status: job.status,
       shooted_at: job.status === "shooted" ? now : null,
       position: (top?.position ?? 0) + 1,

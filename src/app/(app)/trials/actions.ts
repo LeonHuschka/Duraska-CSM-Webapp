@@ -201,25 +201,32 @@ export async function recordTake(input: {
   file_name: string;
   mime_type: string;
   size_bytes: number;
+  /** Shot in a Fansly outfit. */
+  fansly?: boolean;
 }) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
-  const { error } = await supabase.from("content_assets").insert({
-    request_id: input.requestId,
-    stage: "raw",
-    file_path: input.file_path,
-    file_name: input.file_name,
-    mime_type: input.mime_type,
-    size_bytes: input.size_bytes,
-    uploaded_by: user.id,
-  });
-  if (error) return { error: error.message };
+  if (!user) return { error: "Not authenticated", id: null, fansly: null };
+  const { data: row, error } = await supabase
+    .from("content_assets")
+    .insert({
+      request_id: input.requestId,
+      stage: "raw",
+      file_path: input.file_path,
+      file_name: input.file_name,
+      mime_type: input.mime_type,
+      size_bytes: input.size_bytes,
+      fansly: !!input.fansly,
+      uploaded_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !row) return { error: error?.message ?? "not saved", id: null, fansly: null };
   const { data: cell } = await supabase.from("trial_cells").select("trial_id").eq("id", input.cellId).maybeSingle();
   if (cell) touch(cell.trial_id);
-  return { error: null };
+  return { error: null, id: row.id, fansly: !!input.fansly };
 }
 
 /** The picture in the cell, from the first take. */

@@ -13,6 +13,8 @@ import { createClient } from "@/lib/supabase/client";
 import { generateThumbnail, generateThumbnailFromUrl, safeStorageName } from "@/lib/thumbnails";
 import { isMediaFile, MAX_UPLOAD_MB, resolveMime, uploadToStorage } from "@/lib/upload-takes";
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
+import { TakeGrid, type GridTake } from "@/components/upload/take-grid";
+import { setAssetFansly } from "@/app/(app)/requests/[id]/actions";
 import {
   advanceTrial,
   archiveTrial,
@@ -518,7 +520,8 @@ function Pattern({ trial, winners }: { trial: MatrixTrial; winners: (d: Dimensio
   );
 }
 
-type UploadRow = { name: string; pct: number; status: "uploading" | "done" | "error" };
+/** A take in the box: the card the upload page draws, and its asset once it is stored. */
+type CellTake = GridTake & { assetId: string | null };
 
 /** One box: drop the takes, then finish to send it to editing. */
 function CellSheet({
@@ -535,48 +538,54 @@ function CellSheet({
   onChanged: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [rows, setRows] = useState<UploadRow[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [list, setList] = useState<CellTake[]>([]);
   const [finishing, startFinish] = useTransition();
   const [label, setLabel] = useState("");
   const [takesBase, setTakesBase] = useState<number | null>(null);
-  const uploading = rows.some((r) => r.status === "uploading");
-  const done = rows.filter((r) => r.status === "done").length;
+  const [requestId, setRequestId] = useState<string | null>(null);
+  // IG / Fansly as she sets it, read when a take is stored — she may tap before its upload is done.
+  const fanslyRef = useRef(new Map<string, boolean>());
+  const uploading = list.some((r) => r.status === "uploading" || r.status === "waiting");
+  const done = list.filter((r) => r.status === "done").length;
   const takes = Math.max(cell?.takes ?? 0, (takesBase ?? cell?.takes ?? 0) + done);
   const finished = !!cell && (cell.state === "finished" || cell.state === "edited" || cell.state === "posted");
+  const patch = (id: string, p: Partial<CellTake>) => setList((l) => l.map((t) => (t.id === id ? { ...t, ...p } : t)));
 
   const reset = () => {
-    setRows([]);
+    setList([]);
     setLabel("");
     setTakesBase(null);
+    setRequestId(null);
+    fanslyRef.current.clear();
   };
 
-  async function addTakes(list: FileList | null) {
-    if (!cell || !list?.length) return;
-    const files = Array.from(list).filter(isMediaFile);
+  async function addTakes(picked: FileList | null) {
+    if (!cell || !picked?.length) return;
+    const files = Array.from(picked).filter(isMediaFile);
     if (!files.length) return void toast.error("Those aren't photos or videos");
     const tooBig = files.filter((f) => f.size > MAX_UPLOAD_MB * 1024 * 1024);
     if (tooBig.length) toast.error(`${tooBig.length} take(s) are over ${MAX_UPLOAD_MB} MB and will fail`);
-    setBusy(true);
     if (takesBase === null) setTakesBase(cell.takes);
+    const fresh: CellTake[] = files.map((file) => ({ id: crypto.randomUUID(), file, fansly: false, status: "waiting", pct: 0, assetId: null }));
+    setList((l) => [...l, ...fresh]);
     const job = await openCellJob(cell.id);
     if (job.error || !job.requestId) {
-      setBusy(false);
+      fresh.forEach((t) => patch(t.id, { status: "error" }));
       return void toast.error(job.error ?? "Could not start the job");
     }
+    setRequestId(job.requestId);
     const supabase = createClient();
-    const start = rows.length;
-    setRows((r) => [...r, ...files.map((f) => ({ name: f.name, pct: 0, status: "uploading" as const }))]);
     let thumbDone = !!cell.thumb;
-    const queue = files.map((f, i) => ({ f, i: start + i }));
+    const queue = [...fresh];
     const lane = async () => {
       for (;;) {
-        const next = queue.shift();
-        if (!next) return;
-        const { f, i } = next;
+        const t = queue.shift();
+        if (!t) return;
+        const f = t.file;
         const path = `personas/${job.personaId}/requests/${job.requestId}/raw/${crypto.randomUUID()}_${safeStorageName(f.name)}`;
+        patch(t.id, { status: "uploading" });
         try {
-          await uploadToStorage(supabase, path, f, (pct) => setRows((r) => r.map((x, j) => (j === i ? { ...x, pct } : x))));
+          await uploadToStorage(supabase, path, f, (pct) => patch(t.id, { pct }));
           const res = await recordTake({
             cellId: cell.id,
             requestId: job.requestId!,
@@ -584,9 +593,13 @@ function CellSheet({
             file_name: f.name,
             mime_type: resolveMime(f),
             size_bytes: f.size,
+            fansly: fanslyRef.current.get(t.id) ?? false,
           });
-          if (res.error) throw new Error(res.error);
-          setRows((r) => r.map((x, j) => (j === i ? { ...x, pct: 100, status: "done" } : x)));
+          if (res.error || !res.id) throw new Error(res.error ?? "not saved");
+          // Tapped while it was being stored: the asset follows.
+          const now = fanslyRef.current.get(t.id) ?? false;
+          if (now !== (res.fansly ?? false)) await setAssetFansly(res.id, job.requestId!, now).catch(() => null);
+          patch(t.id, { pct: 100, status: "done", assetId: res.id });
           if (!thumbDone) {
             thumbDone = true;
             const blob = await generateThumbnail(f, resolveMime(f));
@@ -597,14 +610,22 @@ function CellSheet({
             }
           }
         } catch (e) {
-          setRows((r) => r.map((x, j) => (j === i ? { ...x, status: "error" } : x)));
+          patch(t.id, { status: "error" });
           toast.error(`${f.name}: ${e instanceof Error ? e.message : "upload failed"}`);
         }
       }
     };
     await Promise.all([lane(), lane()]);
-    setBusy(false);
     onChanged();
+  }
+
+  function toggleFansly(t: CellTake) {
+    const next = !t.fansly;
+    fanslyRef.current.set(t.id, next);
+    patch(t.id, { fansly: next });
+    if (t.assetId && requestId) {
+      void setAssetFansly(t.assetId, requestId, next).catch(() => toast.error("Could not switch that take"));
+    }
   }
 
   return (
@@ -638,23 +659,10 @@ function CellSheet({
                       : "No takes yet"}
             </p>
 
-            {rows.length > 0 && (
-              <ul className="mt-3 space-y-1">
-                {rows.map((r, i) => (
-                  <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                    {r.status === "uploading" && <span className="tabular-nums">{r.pct}%</span>}
-                    {r.status === "done" && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                    {r.status === "error" && <span className="text-rose-400">failed</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-
             <input
               ref={fileRef}
               type="file"
-              accept="video/*,image/*"
+              accept="video/*,image/*,.mov,.MOV"
               multiple
               className="hidden"
               onChange={(e) => {
@@ -664,15 +672,18 @@ function CellSheet({
             />
             {cell.state !== "posted" && cell.state !== "edited" && (
               <div className="mt-5 space-y-2">
-                <Button
-                  variant={takes > 0 ? "outline" : "default"}
-                  className="h-12 w-full text-base"
-                  disabled={busy}
-                  onClick={() => fileRef.current?.click()}
-                >
-                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                  {takes > 0 ? "Add more takes" : "Upload takes"}
-                </Button>
+                <TakeGrid
+                  takes={list}
+                  maxMb={MAX_UPLOAD_MB}
+                  disabled={finishing}
+                  onAdd={() => fileRef.current?.click()}
+                  onRemove={(t) => {
+                    if (t.assetId) return void toast.message("Stored takes are removed on the job page");
+                    setList((l) => l.filter((x) => x.id !== t.id));
+                  }}
+                  onRetry={() => fileRef.current?.click()}
+                  onFansly={toggleFansly}
+                />
                 {!finished && takes > 0 && (
                   <Button
                     className="h-12 w-full text-base"

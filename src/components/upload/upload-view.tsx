@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { Film, Loader2, X, Link as LinkIcon, CheckCircle2, Plus, FileText } from "lucide-react";
+import { Loader2, Link as LinkIcon, CheckCircle2, Plus, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -11,7 +11,8 @@ import {
   getNextReelTitle,
 } from "@/app/(app)/vault/actions";
 import { createAssetRecord } from "@/app/(app)/requests/[id]/actions";
-import { quickVideoFrame, safeStorageName, thumbnailPathFor } from "@/lib/thumbnails";
+import { safeStorageName, thumbnailPathFor } from "@/lib/thumbnails";
+import { TakeGrid, takeFrames } from "@/components/upload/take-grid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -76,44 +77,6 @@ type Take = {
 
 // Upload a few takes side by side, not all at once.
 const CONCURRENCY = 3;
-
-// Phones decode one video at a time well; several at once stall them all.
-let thumbQueue: Promise<unknown> = Promise.resolve();
-// The frame each card grabbed, kept so Send can store it as the take's thumbnail.
-const frames = new WeakMap<File, Blob>();
-
-/** What the model sees of a take: the photo itself, or a video's first
- *  frame grabbed onto a canvas. */
-function TakeThumb({ file }: { file: File }) {
-  // null while grabbing, "" when the frame could not be read
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let made: string | null = null;
-    if (resolveMime(file).startsWith("image/")) {
-      made = URL.createObjectURL(file);
-      setUrl(made);
-    } else {
-      const job = thumbQueue.then(() => (cancelled ? null : quickVideoFrame(file)));
-      thumbQueue = job.catch(() => null);
-      job.then((blob) => {
-        if (cancelled) return;
-        if (!blob) return setUrl("");
-        frames.set(file, blob);
-        made = URL.createObjectURL(blob);
-        setUrl(made);
-      });
-    }
-    return () => {
-      cancelled = true;
-      if (made) URL.revokeObjectURL(made);
-    };
-  }, [file]);
-  if (url === null) return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
-  if (!url) return <Film className="h-6 w-6 text-muted-foreground" />;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover" />;
-}
 
 function extOf(name: string): string {
   const i = name.lastIndexOf(".");
@@ -385,7 +348,7 @@ export function UploadView({ personaId }: { personaId: string }) {
         try {
           // The frame the card already shows, so the job page has a picture
           // at once; a take without one gets it there later.
-          const frame = frames.get(t.file);
+          const frame = takeFrames.get(t.file);
           let thumbnail_path: string | null = null;
           if (frame) {
             const tPath = thumbnailPathFor(t.path);
@@ -430,7 +393,6 @@ export function UploadView({ personaId }: { personaId: string }) {
   const sentBytes = takes.reduce((a, t) => a + (t.file.size * t.pct) / 100, 0);
   const pct = Math.round((sentBytes / totalBytes) * 100);
   const doneCount = takes.filter((t) => t.status === "done").length;
-  const fanslyCount = takes.filter((t) => t.fansly).length;
 
   // ── Success state ──
   if (doneInfo) {
@@ -584,96 +546,16 @@ export function UploadView({ personaId }: { personaId: string }) {
           }}
         />
 
-        {takes.length > 0 && (
-          <p className="text-[11px] text-muted-foreground">
-            Tap <span className="font-semibold text-foreground">IG</span> on every take you shot in a Fansly
-            outfit — it turns <span className="font-semibold text-sky-300">Fansly</span>.
-            {fanslyCount > 0 && <span className="ml-1 font-medium text-sky-300">{fanslyCount} Fansly</span>}
-          </p>
-        )}
-        <div className="grid grid-cols-3 gap-2">
-          {takes.map((t, i) => {
-            const tooBig = t.file.size > MAX_UPLOAD_BYTES;
-            return (
-              <div
-                key={t.id}
-                className={`relative flex aspect-[9/16] items-center justify-center overflow-hidden rounded-xl border-2 bg-muted/40 ${
-                  tooBig ? "border-red-500" : t.fansly ? "border-sky-400" : "border-transparent"
-                }`}
-              >
-                <TakeThumb file={t.file} />
-                <span className="absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  Take {i + 1}
-                </span>
-                {!submitting && (
-                  <button
-                    type="button"
-                    onClick={() => removeTake(t)}
-                    className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                {t.status === "done" ? (
-                  <span className="absolute bottom-10 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60">
-                    <CheckCircle2 className="h-4 w-4 text-green-400" />
-                  </span>
-                ) : t.status === "error" ? (
-                  <button
-                    type="button"
-                    onClick={() => retry(t)}
-                    className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-white"
-                  >
-                    <X className="h-7 w-7 text-red-400" />
-                    <span className="px-2 text-center text-[10px] font-semibold">
-                      {tooBig ? `Too large — max ${MAX_UPLOAD_MB} MB` : "Failed — tap to retry"}
-                    </span>
-                  </button>
-                ) : (
-                  // Upload progress of the whole file, from the moment she picks it.
-                  <div className="absolute inset-x-1.5 bottom-10 rounded-md bg-black/60 px-1.5 py-1">
-                    <div className="flex justify-between text-[9px] font-semibold tabular-nums text-white">
-                      <span>{t.status === "waiting" ? "waiting" : "uploading"}</span>
-                      <span>{t.pct}%</span>
-                    </div>
-                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/20">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all duration-300"
-                        style={{ width: `${t.pct}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {/* Instagram or Fansly: one tap per take, so the editor
-                    can tell the Fansly-outfit takes apart. */}
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => patchTake(t.id, { fansly: !t.fansly })}
-                  className={`absolute inset-x-1.5 bottom-1.5 rounded-lg py-1.5 text-[11px] font-semibold backdrop-blur ${
-                    t.fansly ? "bg-sky-500 text-white" : "bg-black/60 text-white/90"
-                  }`}
-                >
-                  {t.fansly ? "Fansly" : "IG"}
-                </button>
-              </div>
-            );
-          })}
-          {!submitting && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={`flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed transition-colors ${
-                dragOver
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border/60 text-muted-foreground hover:border-primary/40"
-              }`}
-            >
-              <Plus className="h-8 w-8" />
-              {takes.length === 0 && <span className="text-[11px] font-medium">Add takes</span>}
-            </button>
-          )}
-        </div>
+        <TakeGrid
+          takes={takes}
+          maxMb={MAX_UPLOAD_MB}
+          disabled={submitting}
+          dragOver={dragOver}
+          onAdd={() => fileInputRef.current?.click()}
+          onRemove={removeTake}
+          onRetry={retry}
+          onFansly={(t) => patchTake(t.id, { fansly: !t.fansly })}
+        />
       </div>
 
       {/* Sticky submit on mobile */}

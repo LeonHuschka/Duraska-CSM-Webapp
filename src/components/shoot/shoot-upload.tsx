@@ -2,32 +2,38 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, CheckCircle2, Loader2, Plus, RotateCw, X } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { shootSend, shootUploadUrls } from "@/app/shoot/[token]/actions";
 import { MAX_UPLOAD_MB, isMediaFile, putWithProgress, resolveMime } from "@/lib/upload-takes";
-import { generateThumbnail } from "@/lib/thumbnails";
+import { TakeGrid, takeFrames, type GridTake } from "@/components/upload/take-grid";
 
-type Take = {
-  id: string;
-  file: File;
-  status: "waiting" | "uploading" | "done" | "error";
-  pct: number;
-  path: string | null;
-  thumbPath: string | null;
-  fansly: boolean;
-};
+type Take = GridTake & { path: string | null; thumbPath: string | null; thumbUrl: string | null };
 
-const CONCURRENCY = 2;
+const CONCURRENCY = 3;
+const MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 /**
  * The takes of one reel, from the phone straight into storage, then one
- * tap to make the job. Big buttons, nothing to type — she came here from
- * Telegram with a camera roll, not a keyboard.
+ * tap to make the job. The same cards as the upload page — SFW / NSFW,
+ * IG / Fansly per take — but nothing to type: she came here from Telegram
+ * and the link and notes are already known.
  */
-export function ShootUpload({ token, existingTitle }: { token: string; existingTitle: string | null }) {
+export function ShootUpload({
+  token,
+  existingTitle,
+  askNsfw = true,
+}: {
+  token: string;
+  existingTitle: string | null;
+  /** Off for a trial box — its job is the trial's. */
+  askNsfw?: boolean;
+}) {
   const [takes, setTakes] = useState<Take[]>([]);
+  const [isNsfw, setIsNsfw] = useState(false);
   const [sending, setSending] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [sent, setSent] = useState<{ title: string | null; count: number } | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
@@ -54,64 +60,67 @@ export function ShootUpload({ token, existingTitle }: { token: string; existingT
         const next = queue.shift();
         if (!next) return;
         const { t, slot } = next;
-        patch(t.id, { status: "uploading", pct: 0, path: slot.path });
+        patch(t.id, { status: "uploading", pct: 0, path: slot.path, thumbPath: slot.thumbPath, thumbUrl: slot.thumbUrl });
         try {
-          const mime = resolveMime(t.file);
-          await putWithProgress(slot.url, t.file, mime, (loaded) =>
+          await putWithProgress(slot.url, t.file, resolveMime(t.file), (loaded) =>
             patch(t.id, { pct: Math.round((loaded / (t.file.size || 1)) * 100) })
           );
-          let thumbPath: string | null = null;
-          if (slot.thumbUrl) {
-            const blob = await generateThumbnail(t.file, mime).catch(() => null);
-            if (blob) {
-              const ok = await fetch(slot.thumbUrl, {
-                method: "PUT",
-                headers: { "content-type": "image/jpeg", "x-upsert": "true" },
-                body: blob,
-              })
-                .then((r) => r.ok)
-                .catch(() => false);
-              if (ok) thumbPath = slot.thumbPath;
-            }
-          }
-          patch(t.id, { status: "done", pct: 100, thumbPath });
+          patch(t.id, { status: "done", pct: 100 });
         } catch (err) {
           patch(t.id, { status: "error" });
-          toast.error(`${t.file.name}: ${err instanceof Error ? err.message : "upload failed"} — tap ↻ to try again`);
+          toast.error(`A take did not upload: ${err instanceof Error ? err.message : "upload failed"} — tap it to try again`);
         }
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, lane));
   }
 
-  function add(files: FileList | null) {
+  function add(files: FileList | File[] | null) {
     const picked = Array.from(files ?? []).filter(isMediaFile);
-    if (!picked.length) return;
-    const tooBig = picked.filter((f) => f.size > MAX_UPLOAD_MB * 1024 * 1024);
-    if (tooBig.length) toast.error(`${tooBig.length} take(s) are over ${MAX_UPLOAD_MB} MB and were left out`);
-    const fresh: Take[] = picked
-      .filter((f) => f.size <= MAX_UPLOAD_MB * 1024 * 1024)
-      .map((file) => ({ id: crypto.randomUUID(), file, status: "waiting", pct: 0, path: null, thumbPath: null, fansly: false }));
+    if (!picked.length) return void toast.error("Those files aren't photos or videos");
+    if (picked.some((f) => f.size > MAX_BYTES)) {
+      toast.error(`Take(s) over the ${MAX_UPLOAD_MB} MB limit — send those via Telegram`, { duration: 8000 });
+    }
+    const fresh: Take[] = picked.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      fansly: false,
+      status: file.size > MAX_BYTES ? "error" : "waiting",
+      pct: 0,
+      path: null,
+      thumbPath: null,
+      thumbUrl: null,
+    }));
     setTakes((l) => [...l, ...fresh]);
-    if (fresh.length) void upload(fresh);
+    const go = fresh.filter((t) => t.status === "waiting");
+    if (go.length) void upload(go);
   }
 
   async function send() {
     setSending(true);
     try {
-      const res = await shootSend(
-        token,
-        done.map((t) => ({
-          path: t.path!,
-          name: t.file.name,
-          mime: resolveMime(t.file),
-          size: t.file.size,
-          thumbPath: t.thumbPath,
-          fansly: t.fansly,
-        }))
+      // The frame each card shows becomes the take's picture, as on the upload page.
+      const ready = await Promise.all(
+        done.map(async (t) => {
+          const frame = takeFrames.get(t.file);
+          let thumbPath: string | null = null;
+          if (frame && t.thumbUrl) {
+            const ok = await fetch(t.thumbUrl, {
+              method: "PUT",
+              headers: { "content-type": "image/jpeg", "x-upsert": "true" },
+              body: frame,
+            })
+              .then((r) => r.ok)
+              .catch(() => false);
+            if (ok) thumbPath = t.thumbPath;
+          }
+          return { path: t.path!, name: t.file.name, mime: resolveMime(t.file), size: t.file.size, thumbPath, fansly: t.fansly };
+        })
       );
+      const res = await shootSend(token, ready, { nsfw: isNsfw });
       if (res.error) return void toast.error(res.error);
-      setSent({ title: res.title, count: done.length });
+      if (ready.length < takes.length) toast.warning(`${takes.length - ready.length} take(s) failed and were left out`);
+      setSent({ title: res.title, count: ready.length });
       setTakes([]);
     } finally {
       setSending(false);
@@ -136,77 +145,90 @@ export function ShootUpload({ token, existingTitle }: { token: string; existingT
   }
 
   const total = takes.reduce((a, t) => a + t.file.size, 0) || 1;
-  const pct = Math.round(takes.reduce((a, t) => a + (t.file.size * t.pct) / 100, 0) / total * 100);
+  const pct = Math.round((takes.reduce((a, t) => a + (t.file.size * t.pct) / 100, 0) / total) * 100);
 
   return (
-    <div className="space-y-3">
-      <input
-        ref={input}
-        type="file"
-        accept="video/*,image/*"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          add(e.target.files);
-          e.target.value = "";
+    <div className="space-y-4">
+      {askNsfw && !existingTitle && (
+        <button
+          type="button"
+          onClick={() => setIsNsfw((v) => !v)}
+          disabled={sending}
+          className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
+            isNsfw ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-green-500/40 bg-green-500/10 text-green-400"
+          }`}
+        >
+          <span>{isNsfw ? "NSFW" : "SFW"}</span>
+          <span className="text-[11px] uppercase tracking-wider opacity-70">tap to switch</span>
+        </button>
+      )}
+
+      <div
+        className="space-y-2"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
         }}
-      />
-      <Button
-        variant={takes.length ? "outline" : "default"}
-        className="h-14 w-full text-base"
-        onClick={() => input.current?.click()}
-        disabled={sending}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          add(e.dataTransfer.files);
+        }}
       >
-        <Plus className="mr-2 h-5 w-5" />
-        {takes.length ? "Add more takes" : "Choose the takes"}
+        <Label>Takes</Label>
+        <input
+          ref={input}
+          type="file"
+          accept="video/*,image/*,.mov,.MOV"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            add(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <TakeGrid
+          takes={takes}
+          maxMb={MAX_UPLOAD_MB}
+          disabled={sending}
+          dragOver={dragOver}
+          onAdd={() => input.current?.click()}
+          onRemove={(t) => setTakes((l) => l.filter((x) => x.id !== t.id))}
+          onRetry={(t) => {
+            if (t.file.size > MAX_BYTES) return;
+            patch(t.id, { status: "waiting", pct: 0 });
+            void upload([t]);
+          }}
+          onFansly={(t) => patch(t.id, { fansly: !t.fansly })}
+        />
+      </div>
+
+      {busy && (
+        <div className="space-y-1">
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-center text-[11px] text-muted-foreground">
+            {pct}% · {done.length}/{takes.length} takes uploaded — keep this page open
+          </p>
+        </div>
+      )}
+      <Button className="h-12 w-full text-base" disabled={busy || sending || done.length === 0} onClick={send}>
+        {sending ? (
+          <>
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Sending…
+          </>
+        ) : existingTitle ? (
+          `Add ${done.length || ""} take${done.length === 1 ? "" : "s"} to ${existingTitle}`
+        ) : (
+          `Send ${done.length || ""} take${done.length === 1 ? "" : "s"} to editing`
+        )}
       </Button>
-
-      {takes.length > 0 && (
-        <ul className="space-y-1.5">
-          {takes.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 rounded-lg border border-border/40 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate">{t.file.name}</span>
-              <button
-                type="button"
-                onClick={() => patch(t.id, { fansly: !t.fansly })}
-                className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                  t.fansly ? "bg-pink-500/20 text-pink-300" : "bg-muted text-muted-foreground"
-                }`}
-                title="Shot in the Fansly outfit"
-              >
-                Fansly
-              </button>
-              {t.status === "uploading" && <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{t.pct}%</span>}
-              {t.status === "waiting" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-              {t.status === "done" && <Check className="h-4 w-4 text-emerald-400" />}
-              {t.status === "error" && (
-                <button type="button" onClick={() => { patch(t.id, { status: "waiting", pct: 0 }); void upload([t]); }} title="Try again">
-                  <RotateCw className="h-4 w-4 text-rose-400" />
-                </button>
-              )}
-              {t.status !== "uploading" && (
-                <button type="button" onClick={() => setTakes((l) => l.filter((x) => x.id !== t.id))} title="Remove">
-                  <X className="h-4 w-4 text-muted-foreground" />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {takes.length > 0 && (
-        <Button className="h-14 w-full text-base" disabled={busy || sending || done.length === 0} onClick={send}>
-          {sending || busy ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Check className="mr-2 h-5 w-5" />}
-          {busy
-            ? `Uploading… ${pct}%`
-            : existingTitle
-              ? `Add ${done.length} take${done.length === 1 ? "" : "s"} to ${existingTitle}`
-              : `Send ${done.length} take${done.length === 1 ? "" : "s"} to editing`}
-        </Button>
-      )}
-      <p className="text-center text-[11px] text-muted-foreground">
-        {busy ? "Keep this page open until the upload is done." : "The inspo link and the notes go with the job on their own."}
-      </p>
+      <p className="text-center text-[11px] text-muted-foreground">The inspo link and the notes go with the job on their own.</p>
     </div>
   );
 }

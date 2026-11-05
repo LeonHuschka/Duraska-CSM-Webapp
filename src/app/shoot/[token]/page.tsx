@@ -125,7 +125,7 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
       </div>
 
       {running ? (
-        <ShootUpload token={token} existingTitle={cell.title} />
+        <ShootUpload token={token} existingTitle={cell.title} askNsfw={false} />
       ) : (
         <p className="rounded-xl border border-border/50 bg-card p-3 text-sm">This round is over — nothing more to shoot for this box.</p>
       )}
