@@ -3,12 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePersonaId } from "@/lib/persona";
 import { postShootList, refreshShootList } from "@/lib/shoot-list";
+import { setMyCommands } from "@/lib/telegram";
 
 /**
  * Today's SHOOTING list, drawn again in its message — for when the way it
  * reads changed after it went out. Opened in a browser signed in as an
  * owner or manager. `?new=1` picks the reels anew and posts a fresh
- * message instead, like `/list` in the topic.
+ * message instead, like `/list` in the topic. `?commands=1` publishes the
+ * bot's "/" menu.
  */
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,10 @@ export async function GET(req: Request) {
   if (!allowed) return NextResponse.json({ error: "owners and managers only" }, { status: 403 });
 
   const admin = createAdminClient();
+  if (new URL(req.url).searchParams.get("commands") === "1") {
+    const res = await setMyCommands();
+    return NextResponse.json({ ok: res.ok, error: res.error ?? null });
+  }
   if (new URL(req.url).searchParams.get("new") === "1") {
     return NextResponse.json({ ok: true, list: await postShootList(admin, personaId, true) });
   }

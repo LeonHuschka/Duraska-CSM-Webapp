@@ -360,8 +360,11 @@ export async function getWebhookInfo() {
 export async function setMyCommands() {
   return call("setMyCommands", {
     commands: [
-      { command: "check", description: "Tote Inspo-Links jetzt aufräumen" },
-      { command: "id", description: "Chat- und Topic-ID anzeigen" },
+      { command: "shoot", description: "Reply to an inspo: on today's list as #1 (/shoot 3 drops #3)" },
+      { command: "note", description: "Reply to an inspo: replace its note (empty clears it)" },
+      { command: "list", description: "In SHOOTING: pick and post today's list anew" },
+      { command: "check", description: "In the requests topic: take every 💔 back off the links" },
+      { command: "id", description: "Show the chat and topic ID" },
     ],
   });
 }

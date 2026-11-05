@@ -15,6 +15,7 @@ import {
   deleteMessage,
   sendMessage,
   setMessageReaction,
+  setMyCommands,
   REACTION,
 } from "@/lib/telegram";
 
@@ -138,6 +139,8 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await postShootList(supabase, cfg.persona_id)] as const)
   );
   summary.shoot = Object.fromEntries(shoot);
+  // The "/" menu, kept as the code has it.
+  summary.commands = (await setMyCommands()).ok;
   // Auto-posting tokens run 60 days; renewed well before.
   summary.igTokens = await refreshIgTokens(supabase).catch((err) => [String(err)]);
 
