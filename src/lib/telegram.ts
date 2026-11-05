@@ -184,6 +184,21 @@ export async function editMessageText(opts: {
   });
 }
 
+/**
+ * Whether a message the bot sent is still there. Telegram has no "get
+ * message", but asking to clear the buttons of one tells: a message that
+ * is gone answers "not found", one that is there is changed in nothing
+ * (it had none) or says so.
+ */
+export async function messageExists(chatId: number | string, messageId: number): Promise<boolean> {
+  const res = await call("editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [] },
+  });
+  return res.ok || !/not found/i.test(res.error ?? "");
+}
+
 /** Pin a message in its chat, quietly. Needs the bot to be an admin who may pin. */
 export async function pinChatMessage(opts: { chat_id: number | string; message_id: number }) {
   return call("pinChatMessage", { ...opts, disable_notification: true });

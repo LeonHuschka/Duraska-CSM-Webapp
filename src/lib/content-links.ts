@@ -25,7 +25,7 @@ export async function linkInspoToRequest(opts: {
     const supabase = createAdminClient();
     const q = supabase
       .from("content_links")
-      .select("id, chat_id, message_id, status")
+      .select("id, chat_id, message_id, status, url_key")
       .eq("persona_id", opts.personaId)
       .in("status", ["open", "shot"]);
     const { data: link } = await (opts.linkId
@@ -34,20 +34,27 @@ export async function linkInspoToRequest(opts: {
     ).maybeSingle();
     if (!link) return;
 
-    await supabase
+    // The same reel posted more than once is shot once: every open
+    // posting of it goes along, or the others stay in the backlog for ever.
+    const { data: same } = await supabase
       .from("content_links")
       .update({
         status: "uploaded",
         request_id: opts.requestId,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", link.id);
+      .eq("persona_id", opts.personaId)
+      .eq("url_key", link.url_key)
+      .in("status", ["open", "shot"])
+      .select("chat_id, message_id");
 
-    await setMessageReaction({
-      chat_id: link.chat_id,
-      message_id: Number(link.message_id),
-      emoji: REACTION.uploaded,
-    });
+    for (const m of same?.length ? same : [link]) {
+      await setMessageReaction({
+        chat_id: m.chat_id,
+        message_id: Number(m.message_id),
+        emoji: REACTION.uploaded,
+      });
+    }
     await refreshShootList(supabase, opts.personaId);
   } catch (err) {
     console.warn("[content-links] linking failed", err);

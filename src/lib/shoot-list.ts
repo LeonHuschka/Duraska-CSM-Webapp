@@ -1,9 +1,18 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { berlinDay } from "@/lib/berlin-day";
-import { deleteMessage, editMessageText, messageLink, pinChatMessage, sendMessage, type LinkButton } from "@/lib/telegram";
+import {
+  deleteMessage,
+  editMessageText,
+  instagramKey,
+  messageExists,
+  messageLink,
+  pinChatMessage,
+  sendMessage,
+  type LinkButton,
+} from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { DIM_META, cellName, type Dimension } from "@/lib/trials";
+import { APP_URL, DIM_META, cellName, type Dimension } from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
 
 /**
@@ -13,8 +22,9 @@ import { accountLabel } from "@/lib/account-analytics";
  * yesterday first, then the oldest open links, and two of the newest so a
  * fresh trend does not wait for the backlog. Each line has a button to its
  * upload page and one to the inspo in the requests topic, and the message
- * is edited as the reels get shot. Under them, the boxes of the running
- * Trial-Maxxing round that still wait for takes, each with its upload page.
+ * is edited as the reels get shot. Under them, the running Trial-Maxxing
+ * rounds, each with a button to its matrix in the app. There is only ever
+ * one list in the topic: the morning's replaces yesterday's.
  */
 export const SHOOT_PER_DAY = 5;
 
@@ -24,28 +34,67 @@ const DONE = new Set(["shot", "uploaded", "edited"]);
 
 /**
  * What is left of yesterday, then the oldest open links, then the newest.
- * Only links whose reel the bot holds a copy of: an old link without one
- * is mostly a post that is gone, and there is nothing to shoot from it.
+ * A reel goes in once, whatever number of times its link was posted, and
+ * not at all once any posting of it is shot or has a job. Only links whose
+ * reel the bot holds and reposted itself — an old link without a copy is
+ * mostly a post that is gone — and whose message is still in the requests
+ * topic: one deleted there is gone for the model too, and is let go.
  */
 async function pick(db: Db, personaId: string, carry: string[]): Promise<string[]> {
-  const { data } = await db
-    .from("content_links")
-    .select("id")
-    .eq("persona_id", personaId)
-    .eq("status", "open")
-    .not("link_ok", "is", false)
-    .not("video_path", "is", null)
-    .order("posted_at", { ascending: true })
-    .limit(2000);
-  const open = (data ?? []).map((l) => l.id);
-  const openSet = new Set(open);
-  const kept = carry.filter((id) => openSet.has(id)).slice(0, SHOOT_PER_DAY);
-  const rest = open.filter((id) => !kept.includes(id));
-  const need = SHOOT_PER_DAY - kept.length;
+  const [{ data: open }, { data: done }, { data: jobs }] = await Promise.all([
+    db
+      .from("content_links")
+      .select("id, url_key, chat_id, message_id, video_message_id")
+      .eq("persona_id", personaId)
+      .eq("status", "open")
+      .not("link_ok", "is", false)
+      .not("video_path", "is", null)
+      .not("video_message_id", "is", null)
+      .order("posted_at", { ascending: true })
+      .limit(2000),
+    db.from("content_links").select("url_key").eq("persona_id", personaId).in("status", ["shot", "uploaded", "edited"]).limit(5000),
+    db.from("content_requests").select("inspo_link").eq("persona_id", personaId).not("inspo_link", "is", null).limit(5000),
+  ]);
+  const taken = new Set<string>((done ?? []).map((l) => l.url_key));
+  for (const j of jobs ?? []) {
+    const k = j.inspo_link ? instagramKey(j.inspo_link) : null;
+    if (k) taken.add(k);
+  }
+  type L = NonNullable<typeof open>[number];
+  const seen = new Set<string>();
+  const candidates: L[] = [];
+  for (const l of open ?? []) {
+    if (Number(l.message_id) !== Number(l.video_message_id) || taken.has(l.url_key) || seen.has(l.url_key)) continue;
+    seen.add(l.url_key);
+    candidates.push(l);
+  }
+
+  // The message is checked only for the links that would go in.
+  const alive = async (l: L) => {
+    if (await messageExists(Number(l.chat_id), Number(l.message_id))) return true;
+    await db
+      .from("content_links")
+      .update({ status: "dead", checked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", l.id);
+    console.log("[shoot-list] inspo message gone from the requests topic, link let go:", l.id);
+    return false;
+  };
+  const chosen: string[] = [];
+  const take = async (list: L[], n: number) => {
+    for (const l of list) {
+      if (n <= 0) return;
+      if (chosen.includes(l.id) || !(await alive(l))) continue;
+      chosen.push(l.id);
+      n--;
+    }
+  };
+  const byId = new Map(candidates.map((l) => [l.id, l]));
+  await take(carry.map((id) => byId.get(id)).filter((l): l is L => !!l), SHOOT_PER_DAY);
+  const need = SHOOT_PER_DAY - chosen.length;
   const fresh = need >= 4 ? 2 : need >= 2 ? 1 : 0;
-  const oldest = rest.slice(0, need - fresh);
-  const newest = fresh > 0 ? rest.slice(oldest.length).slice(-fresh) : [];
-  return [...kept, ...oldest, ...newest];
+  await take(candidates, need - fresh);
+  await take([...candidates].reverse(), SHOOT_PER_DAY - chosen.length);
+  return chosen;
 }
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -115,14 +164,14 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
       : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
   const foot =
     `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo in the requests topic.` +
-    (trial.lines.length ? `\n🧪 opens a trial box — its takes go straight to editing.` : "");
+    (trial.lines.length ? `\n🧪 opens the trial's matrix in the app.` : "");
   return {
     text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
     keyboard: [...keyboard, ...trial.keyboard],
   };
 }
 
-/** The running Trial-Maxxing rounds: per trial what is shot, and a button for each box still open. */
+/** The running Trial-Maxxing rounds: per trial what is shot, and a button to its matrix. */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
     .from("trials")
@@ -157,13 +206,7 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
       `${DIM_META[d].emoji} ${esc(who)} · ${DIM_META[d].title} — <b>${round.length - open.length}/${round.length}</b>` +
         (open.length ? `\n   to shoot: ${open.map((c) => esc(name(c))).join(", ")}` : " 🎉")
     );
-    const buttons = open
-      .map((c) => {
-        const url = shootUrl(c.id, "cell");
-        return url ? { text: `🧪 ${name(c)}${trials.length > 1 && who ? ` · ${who}` : ""}`, url } : null;
-      })
-      .filter((b): b is LinkButton => !!b);
-    for (let i = 0; i < buttons.length; i += 2) keyboard.push(buttons.slice(i, i + 2));
+    keyboard.push([{ text: `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` }]);
   }
   return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
 }
@@ -172,7 +215,8 @@ const name = (c: { dimension: string; slot: number; label: string | null }) =>
   cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label });
 
 /**
- * The morning's list, once a day: a new message in SHOOTING, pinned. Run
+ * The morning's list, once a day: a new message in SHOOTING, pinned, in
+ * place of yesterday's. Run
  * again the same day it only brings the message up to date — unless
  * `fresh`, which starts today's list over in a new message (when the
  * topic is first set, or on `/list` in it).
@@ -190,7 +234,8 @@ export async function postShootList(db: Db, personaId: string, fresh = false): P
     return "already posted today";
   }
 
-  if (fresh && cfg.shoot_list_day === today && cfg.shoot_list_message_id) {
+  // One list in the topic, ever: the old one goes before the new one comes.
+  if (cfg.shoot_list_message_id) {
     await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(cfg.shoot_list_message_id) });
   }
   const ids = await pick(db, personaId, cfg.shoot_list_links ?? []);
