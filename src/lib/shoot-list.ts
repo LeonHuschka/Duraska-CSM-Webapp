@@ -12,7 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
+import { APP_URL, DIMENSIONS, DIM_META, type Dimension } from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
 
 /**
@@ -180,10 +180,9 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
 }
 
 /**
- * The running Trial-Maxxing trials: per trial each round that has begun —
- * shot so far, what is left, the winner once picked — and a button to its
- * matrix. A round is shot ahead of its phase as often as not, so the
- * rounds are read from the boxes, not from the phase alone.
+ * The running Trial-Maxxing trials: per trial the round it is at and how
+ * much of it is shot, and a button to its matrix. A round is shot ahead of
+ * its phase as often as not, so it is read from the boxes, not the phase.
  */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
@@ -198,7 +197,7 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   const [{ data: cells }, { data: accounts }] = await Promise.all([
     db
       .from("trial_cells")
-      .select("id, trial_id, dimension, slot, label, finished_at, winner")
+      .select("id, trial_id, dimension, finished_at")
       .in("trial_id", trials.map((t) => t.id))
       .order("slot"),
     accIds.length
@@ -211,32 +210,20 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   const keyboard: LinkButton[][] = [];
   for (const t of trials) {
     const mine = (cells ?? []).filter((c) => c.trial_id === t.id);
-    const rounds: string[] = [];
+    // The round it is at: the furthest one begun, which is often ahead of the phase.
+    let at: { d: Dimension; done: number; of: number } | null = null;
     for (const d of DIMENSIONS) {
       const round = mine.filter((c) => c.dimension === d);
-      if (!round.length) continue;
-      const open = round.filter((c) => !c.finished_at);
-      const won = round.filter((c) => c.winner);
-      if (d !== t.phase && open.length === round.length && !won.length) continue; // not begun
-      const head = `${DIM_META[d].emoji} ${DIM_META[d].title} — <b>${round.length - open.length}/${round.length}</b>`;
-      rounds.push(
-        won.length
-          ? `${head} · 🏆 ${won.map((c) => esc(name(c))).join(", ")}`
-          : open.length
-            ? `${head}\n      to shoot: ${open.map((c) => esc(name(c))).join(", ")}`
-            : `${head} · winner not picked yet`
-      );
+      const done = round.filter((c) => c.finished_at).length;
+      if (round.length && (d === t.phase || done > 0)) at = { d, done, of: round.length };
     }
-    if (!rounds.length) continue;
+    if (!at) continue;
     const who = t.account_id ? accName.get(t.account_id) ?? "" : "";
-    lines.push(`<b>${esc(who || "Trial")}</b>\n${rounds.map((r) => `   ${r}`).join("\n")}`);
+    lines.push(`${DIM_META[at.d].emoji} ${esc(who)} · ${DIM_META[at.d].title} <b>${at.done}/${at.of}</b>`);
     keyboard.push([{ text: `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` }]);
   }
   return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
 }
-
-const name = (c: { dimension: string; slot: number; label: string | null }) =>
-  cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label });
 
 /**
  * The morning's list, once a day: a new message in SHOOTING, pinned, in
