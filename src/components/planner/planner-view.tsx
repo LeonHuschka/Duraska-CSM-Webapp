@@ -39,7 +39,6 @@ import {
   addDays,
   addMonths,
   atTime,
-  bestTimes,
   dayKey,
   hhmm,
   postingTimes,
@@ -106,8 +105,7 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
  * gaps are visible at a glance.
  *
  * Everything runs on the account's clock (a US account plans in New York
- * time), and its free times come from its own reels once they say when
- * they do best.
+ * time), and its free times are the researched ones (see postingTimes).
  */
 export function PlannerView({
   account,
@@ -169,9 +167,9 @@ export function PlannerView({
   const [composer, setComposer] = useState<Date | null>(null);
   const [fill, setFill] = useState<FillItem[] | null>(null);
 
-  // The account's own best times when its reels say enough, else the usual ones.
-  const learned = useMemo(() => bestTimes(windows, account.perDay), [windows, account.perDay]);
-  const times = learned ?? postingTimes(account.perDay);
+  // The researched posting times; Friday and Saturday shift theirs.
+  const times = postingTimes(account.perDay);
+  const timesOn = (day: string) => postingTimes(account.perDay, day);
   const canPlan = migrated;
   const canPublish = migrated && !!connection;
 
@@ -258,7 +256,7 @@ export function PlannerView({
   };
   const freeTimes = (day: string): Date[] => {
     const taken = (byDay.get(day) ?? []).map((p) => new Date(p.at).getTime());
-    return times
+    return timesOn(day)
       .map((t) => atTime(day, t, tz))
       .filter((d) => d.getTime() > Date.now() + 5 * 60_000)
       .filter((d) => !taken.some((x) => Math.abs(x - d.getTime()) < 45 * 60_000));
@@ -266,7 +264,7 @@ export function PlannerView({
   const suggestFor = (day: string): Date => {
     const free = freeTimes(day)[0];
     if (free) return free;
-    if (day !== today) return atTime(day, times[times.length - 1], tz);
+    if (day !== today) return atTime(day, timesOn(day).at(-1)!, tz);
     const base = new Date(Date.now() + 30 * 60_000);
     base.setMinutes(Math.ceil(base.getMinutes() / 15) * 15, 0, 0);
     return base;
@@ -416,7 +414,7 @@ export function PlannerView({
         />
       </div>
 
-      <BestTimes windows={windows} ownReels={ownReels} times={times} learned={!!learned} tz={tz} label={account.label} />
+      <BestTimes windows={windows} ownReels={ownReels} times={times} tz={tz} label={account.label} />
 
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         {/* The vault */}
@@ -732,7 +730,9 @@ export function PlannerView({
             ))}
             <span className="flex items-center gap-1">
               <span className="h-2 w-4 rounded border border-dashed border-muted-foreground/50" /> Free posting time ({times.join(", ")}{" "}
-              {tzLabel(tz)})
+              {tzLabel(tz)}
+              {mounted && tz !== "Europe/Berlin" && ` = ${times.map((t) => hhmm(atTime(today, t, tz), "Europe/Berlin")).join(", ")} Berlin`}
+              ; Fri/Sat evening 21:30)
             </span>
           </div>
         </section>
@@ -1050,21 +1050,19 @@ function Settings({ accountId, tz, perDay }: { accountId: string; tz: string; pe
 
 /**
  * When the account's reels do best, by the two hours they went up in:
- * the median against its usual reach. The free times follow the best
- * windows once enough of them have reels.
+ * the median against its usual reach — beside the researched free times,
+ * to see whether the account agrees with them.
  */
 function BestTimes({
   windows,
   ownReels,
   times,
-  learned,
   tz,
   label,
 }: {
   windows: HourWindow[];
   ownReels: number;
   times: string[];
-  learned: boolean;
   tz: string;
   label: string;
 }) {
@@ -1077,11 +1075,8 @@ function BestTimes({
           Best times · {tzLabel(tz)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          {learned
-            ? `From ${ownReels} reels of ${label}: free times sit in the best windows`
-            : ownReels
-              ? `${ownReels} reels of ${label} so far — too few per window; using lunch and evening until they say more`
-              : `No scraped reels of ${label} yet — using lunch and evening (the usual best for a US audience)`}
+          Free times: evening, lunch and morning for a US audience (posting-time research) · bars:{" "}
+          {ownReels ? `how ${ownReels} reels of ${label} did by the hour they went up` : `no scraped reels of ${label} yet`}
         </p>
       </div>
       <div className="grid grid-cols-12 gap-1">

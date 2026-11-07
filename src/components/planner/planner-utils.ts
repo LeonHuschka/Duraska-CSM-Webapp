@@ -109,45 +109,39 @@ export function whenLabel(d: Date, tz: string, withTime = true): string {
 }
 
 /**
- * The day's posting times when the account's own reels do not say better:
- * lunch and evening for one audience, spread wider the more posts a day.
- * Studies disagree past that — the account's own numbers decide once there
- * are enough (see bestTimes).
+ * The day's posting times, on the account's clock — for a US account in
+ * New York time. From the posting-time research of 07.11.2026 (Buffer,
+ * Sprout, Hootsuite, Metricool, Later, agency practice): the main reel in
+ * the evening, 19:30–20:30 ET, when the East Coast is off work and the
+ * West Coast at dinner; a second at lunch, 12:30–13:00; a third in the
+ * morning, 08:30; past that, 23:30 (midnight reels get the most views)
+ * and late morning. Never 02:00–05:00, the dead hours of every study.
+ * Friday and Saturday evenings peak later, 21–22; Saturday mornings are
+ * slow, so its first post waits until 11:00.
  */
-export function postingTimes(perDay: number): string[] {
-  const n = Math.min(6, Math.max(1, perDay || 2));
-  const sets: Record<number, string[]> = {
-    1: ["19:00"],
-    2: ["12:00", "19:00"],
-    3: ["09:00", "13:00", "19:00"],
-    4: ["09:00", "12:00", "17:00", "20:00"],
-    5: ["08:00", "11:00", "14:00", "17:00", "20:00"],
-    6: ["08:00", "10:30", "13:00", "16:00", "19:00", "21:30"],
-  };
-  return sets[n];
+export const DEFAULT_PER_DAY = 3;
+
+const SLOT_SETS: Record<number, string[]> = {
+  1: ["20:30"],
+  2: ["12:30", "20:30"],
+  3: ["08:30", "13:00", "20:30"],
+  4: ["08:30", "13:00", "19:30", "23:30"],
+  5: ["08:30", "11:00", "13:30", "19:30", "23:30"],
+  6: ["08:30", "10:30", "13:00", "15:00", "19:30", "23:30"],
+};
+
+/** The posting times of a day — of `day` ("2026-11-03") when given, with Friday's and Saturday's shifts. */
+export function postingTimes(perDay: number, day?: string): string[] {
+  const n = Math.min(6, Math.max(1, perDay || DEFAULT_PER_DAY));
+  let times = SLOT_SETS[n];
+  const wd = day ? weekday(day) : -1;
+  if (wd === 4 || wd === 5) times = times.map((t) => (t === "19:30" || t === "20:30" ? "21:30" : t));
+  if (wd === 5) times = times.map((t) => (t === "08:30" ? (times.includes("11:00") ? "09:30" : "11:00") : t));
+  return [...times].sort();
 }
 
 /** Two-hour windows of the day, with how reels posted in them did. */
 export type HourWindow = { from: number; reels: number; lift: number | null };
-
-/**
- * The posting times from the account's own reels: the best windows, at
- * least three hours apart, as many as it posts a day. Null while too few
- * windows have enough reels to say anything.
- */
-export function bestTimes(windows: HourWindow[], perDay: number): string[] | null {
-  const n = Math.min(6, Math.max(1, perDay || 2));
-  const rated = windows.filter((w) => w.lift != null).sort((a, b) => b.lift! - a.lift!);
-  if (rated.length < Math.max(3, n)) return null;
-  const picked: number[] = [];
-  for (const w of rated) {
-    const mid = w.from + 1;
-    if (picked.every((p) => Math.abs(p - mid) >= 3 && 24 - Math.abs(p - mid) >= 3)) picked.push(mid);
-    if (picked.length === n) break;
-  }
-  if (picked.length < n) return null;
-  return picked.sort((a, b) => a - b).map((h) => `${String(h).padStart(2, "0")}:00`);
-}
 
 export type PostState = "scheduled" | "overdue" | "publishing" | "posted" | "manual" | "failed";
 
