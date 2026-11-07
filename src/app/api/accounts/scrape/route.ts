@@ -5,6 +5,7 @@ import { getActivePersonaId } from "@/lib/persona";
 import { probeInstagramPosts, probeInstagramReels, scrapeAccounts } from "@/lib/account-scrape";
 import { storeCovers } from "@/lib/stored-images";
 import { announceWinners } from "@/lib/winners";
+import { readOwnMedia } from "@/lib/ig-own-media";
 
 /**
  * Read every posting account now, as the person who is logged in.
@@ -68,6 +69,9 @@ export async function GET(req: Request) {
   }
   const probe = params.get("probe");
   if (probe) return NextResponse.json({ ok: true, probe: await probeInstagramReels(probe, 3) });
+  // ?own=1 reads the auto-posted accounts' own reels through their API
+  // (trial reels too) and nothing else.
+  if (params.get("own") === "1") return NextResponse.json({ ok: true, own: await readOwnMedia(admin, personaId) });
   // ?covers=1 copies covers into storage from the latest readings and
   // scrapes nothing — to finish what a run left for later.
   if (params.get("covers") === "1") {

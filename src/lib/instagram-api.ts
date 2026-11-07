@@ -193,3 +193,77 @@ export async function latestMedia(igUserId: string, token: string): Promise<{ id
   const m = res?.data?.[0];
   return m ? { id: m.id, permalink: m.permalink ?? null } : null;
 }
+
+export type OwnMedia = {
+  id: string;
+  shortcode: string | null;
+  permalink: string | null;
+  timestamp: string | null;
+  caption: string | null;
+  kind: string | null;
+  thumbnail: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+};
+
+/**
+ * One of the account's own posts with its numbers, as its owner sees them —
+ * trial reels too, which no outside reader gets: they are not on the
+ * profile.
+ */
+export async function ownMedia(mediaId: string, token: string): Promise<OwnMedia | null> {
+  const host = graphFor(token);
+  const m = await igFetch<{
+    id: string;
+    shortcode?: string;
+    permalink?: string;
+    timestamp?: string;
+    caption?: string;
+    media_product_type?: string;
+    media_type?: string;
+    thumbnail_url?: string;
+    media_url?: string;
+    like_count?: number;
+    comments_count?: number;
+  }>(
+    `${host}/${mediaId}?${new URLSearchParams({
+      fields: "id,shortcode,permalink,timestamp,caption,media_product_type,media_type,thumbnail_url,media_url,like_count,comments_count",
+      access_token: token,
+    })}`
+  ).catch(() => null);
+  if (!m) return null;
+  // Views where Instagram has them; a picture without them still has the rest.
+  const insights = async (metric: string) =>
+    igFetch<{ data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] }>(
+      `${host}/${mediaId}/insights?${new URLSearchParams({ metric, access_token: token })}`
+    ).catch(() => null);
+  const ins = (await insights("views,likes,comments,shares")) ?? (await insights("likes,comments,shares"));
+  const val = (name: string) => {
+    const d = ins?.data?.find((x) => x.name === name);
+    const v = d?.total_value?.value ?? d?.values?.[0]?.value;
+    return typeof v === "number" ? v : null;
+  };
+  return {
+    id: m.id,
+    shortcode: m.shortcode ?? m.permalink?.match(/\/(?:reel|p)\/([A-Za-z0-9_-]+)/)?.[1] ?? null,
+    permalink: m.permalink ?? null,
+    timestamp: m.timestamp ?? null,
+    caption: m.caption ?? null,
+    kind: m.media_product_type ?? m.media_type ?? null,
+    thumbnail: m.thumbnail_url ?? (m.media_type === "IMAGE" ? m.media_url ?? null : null),
+    views: val("views"),
+    likes: val("likes") ?? m.like_count ?? null,
+    comments: val("comments") ?? m.comments_count ?? null,
+    shares: val("shares"),
+  };
+}
+
+/** The ids of the account's newest posts on its profile. */
+export async function recentMediaIds(igUserId: string, token: string, limit = 25): Promise<string[]> {
+  const res = await igFetch<{ data?: { id: string }[] }>(
+    `${graphFor(token)}/${igUserId}/media?${new URLSearchParams({ fields: "id", limit: String(limit), access_token: token })}`
+  ).catch(() => null);
+  return (res?.data ?? []).map((m) => m.id);
+}

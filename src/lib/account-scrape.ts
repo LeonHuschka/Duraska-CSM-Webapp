@@ -3,6 +3,7 @@ import { apifyRunSync } from "@/lib/apify";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { storeCovers, storeImage } from "@/lib/stored-images";
+import { readOwnMedia } from "@/lib/ig-own-media";
 
 /**
  * Read each posting account off its platform once a day.
@@ -218,6 +219,7 @@ type Account = {
   handle: string;
   platform: string;
   avatar_updated_at?: string | null;
+  avatar_path?: string | null;
   stories_per_day?: number;
 };
 
@@ -901,7 +903,7 @@ export async function scrapeAccounts(
   const perPage = opts.fbPerPage ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : FB_REELS_PER_PAGE);
   let query = supabase
     .from("accounts")
-    .select("id, handle, platform, status, avatar_updated_at, stories_per_day")
+    .select("id, handle, platform, status, avatar_updated_at, avatar_path, stories_per_day")
     .eq("persona_id", personaId);
   if (opts.paused) query = query.eq("status", "paused");
   else query = query.not("status", "in", '("dead","paused")');
@@ -1013,16 +1015,33 @@ export async function scrapeAccounts(
     else posts += r.posts.length;
   }
 
-  // Profile pictures, at most once a week per account — they rarely change.
+  // The auto-posted accounts' own reels, trial reels included, from their API.
+  if (!opts.paused && !opts.accountIds?.length) {
+    const own = await readOwnMedia(supabase, personaId).catch((err) => ({ reels: 0, notes: [String(err)] }));
+    posts += own.reels;
+    notes.push(...own.notes);
+  }
+
+  // Profile pictures, kept under the picture's own name: a new one (a
+  // fresh account's first, say) is stored the morning it appears, the same
+  // one is never fetched twice. Once a week regardless, should the name
+  // not tell.
   const weekAgo = Date.now() - 7 * 86_400_000;
   for (const r of readings) {
     if (!r.avatarUrl) continue;
+    let path0 = "";
+    try {
+      path0 = new URL(r.avatarUrl).pathname;
+    } catch {
+      /* not a URL — the weekly rule decides */
+    }
+    const pic = (path0.split("/").pop() ?? "").replace(/\.[a-z]+$/i, "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
     const last = r.account.avatar_updated_at ? new Date(r.account.avatar_updated_at).getTime() : 0;
-    if (last > weekAgo) continue;
+    if (pic ? r.account.avatar_path?.endsWith(`avatar-${pic}.jpg`) : last > weekAgo) continue;
     const path = await storeImage(
       supabase,
       r.avatarUrl,
-      `personas/${personaId}/accounts/${r.account.id}/avatar-${today}.jpg`
+      `personas/${personaId}/accounts/${r.account.id}/avatar-${pic || today}.jpg`
     );
     if (path) {
       await supabase
