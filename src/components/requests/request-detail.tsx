@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/select";
 import { AssetUpload } from "@/components/requests/asset-upload";
 import { AssetGallery } from "@/components/requests/asset-gallery";
+import { CapCutDownload } from "@/components/requests/capcut-download";
 import { EditNotes } from "@/components/requests/edit-notes";
 import { useThumbBackfill } from "@/components/requests/use-thumb-backfill";
 import { InspoSlot, PosterVideo } from "@/components/requests/inspo-videos";
@@ -313,17 +314,22 @@ export function RequestDetail({
       {/* Upload sections */}
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Raw Takes {rawAssets.length > 0 && (
-                <span className="text-sm font-normal text-muted-foreground">
-                  ({rawAssets.length})
-                </span>
-              )}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              All takes the model shot for this reel
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">
+                Raw Takes {rawAssets.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    ({rawAssets.length})
+                  </span>
+                )}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                All takes the model shot for this reel
+              </p>
+            </div>
+            {rawAssets.length > 0 && (
+              <CapCutDownload title={request.title} inspoUrl={inspoVideoUrl} viralUrl={viralVideoUrl} takes={rawAssets} />
+            )}
           </div>
           <AssetUpload
             requestId={request.id}
