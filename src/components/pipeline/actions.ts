@@ -261,6 +261,26 @@ export async function setAccountDisabled(accountId: string, disabled: boolean) {
 }
 
 /**
+ * Paused by us: the account posts nothing any more but stays up — out of
+ * the daily read, the charts, winners and trials; read on Sundays in case
+ * an old reel takes off again. Resuming makes it a posting account again.
+ */
+export async function setAccountPaused(accountId: string, paused: boolean) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const who = await requireStaff(supabase, personaId);
+  if ("error" in who) return { error: who.error };
+  const { error } = await supabase
+    .from("accounts")
+    .update({ status: paused ? "paused" : "graduated", updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .eq("persona_id", personaId);
+  if (error) return { error: error.message };
+  revalidatePath("/");
+  return { error: null };
+}
+
+/**
  * Everything a person sets on an account, saved at once from the open
  * tile: the name it goes by here, the handle the scrape reads it by, who
  * runs it, and how many reels a day it posts.

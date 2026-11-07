@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  PauseCircle,
   ArrowUpRight,
   CalendarDays,
   ChevronDown,
@@ -38,6 +39,7 @@ import {
 import { AddAccountDialog } from "@/components/pipeline/accounts-actions-bar";
 import {
   setAccountDisabled,
+  setAccountPaused,
   setAccountLink,
   setAccountOrder,
   updateAccountSettings,
@@ -105,6 +107,8 @@ export type AccountTileData = {
   stale: boolean;
   /** Disabled by the platform: kept for its history, out of everything else. */
   disabled: boolean;
+  /** Paused by us: not posting, read once a week in case an old reel takes off again. */
+  paused: boolean;
   linkedId: string | null;
   sortOrder: number | null;
   profileUrl: string | null;
@@ -140,8 +144,8 @@ const short = (n: number) =>
       ? `${Math.round(n / 1000)}k`
       : nf.format(n);
 
-/** Not posting: disabled by the platform, or parked at 0 reels a day and not auto-posting either. */
-const inactive = (a: AccountTileData) => a.disabled || (a.perDay === 0 && !a.autopost);
+/** Not posting: disabled by the platform, paused by us, or parked at 0 reels a day and not auto-posting either. */
+const inactive = (a: AccountTileData) => a.disabled || a.paused || (a.perDay === 0 && !a.autopost);
 
 type Group = {
   key: string;
@@ -160,7 +164,7 @@ type Group = {
  *   Meta       one row per Meta setup, the Facebook page and its Instagram
  *   Views      active accounts by views
  *   Followers  active accounts by followers
- *   Inactive   disabled and parked accounts, kept for their history
+ *   Inactive   disabled, paused and parked accounts, kept for their history
  */
 export function AccountBoard({
   accounts,
@@ -456,7 +460,7 @@ export function AccountBoard({
                 {g.tiles.length === 0 && (
                   <p className="col-span-full py-6 text-center text-xs text-muted-foreground">
                     {sort === "inactive"
-                      ? "No disabled or parked accounts."
+                      ? "No disabled, paused or parked accounts."
                       : "No accounts here."}
                   </p>
                 )}
@@ -542,7 +546,7 @@ function AccountTile({
   onDrop: () => void;
 }) {
   const [over, setOver] = useState(false);
-  const parked = a.perDay === 0 && !a.disabled && !a.autopost;
+  const parked = a.perDay === 0 && !a.disabled && !a.paused && !a.autopost;
   return (
     <div
       id={`account-${a.id}`}
@@ -574,7 +578,7 @@ function AccountTile({
           ? "border-primary/70 ring-2 ring-primary/40"
           : "border-border/50 hover:border-border"
       } ${dragging ? "opacity-40" : ""} ${over ? "ring-2 ring-primary/60" : ""} ${parked ? "opacity-70" : ""} ${
-        a.disabled ? "opacity-50 grayscale" : ""
+        a.disabled || a.paused ? "opacity-50 grayscale" : ""
       }`}
       style={{
         background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card))`,
@@ -644,7 +648,7 @@ function AccountTile({
         </span>
       </div>
 
-      {!a.disabled && (
+      {!a.disabled && !a.paused && (
         <PostingStrip
           posting={a.posting}
           need={{ r: a.perDay, t: a.trialPerDay, s: a.storiesPerDay }}
@@ -654,7 +658,12 @@ function AccountTile({
       {a.autopost && <AutopostStrip accountId={a.id} auto={a.autopost} />}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
-        {a.disabled ? (
+        {a.paused && !a.disabled ? (
+          <span className="flex items-center gap-1 font-medium text-slate-300">
+            <PauseCircle className="h-3 w-3 shrink-0" />
+            paused · checked on Sundays
+          </span>
+        ) : a.disabled ? (
           <span className="flex items-center gap-1 font-medium text-rose-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             disabled by{" "}
@@ -1021,6 +1030,26 @@ function AccountPanel({
                 Cancel
               </Button>
             )}
+            {!a.disabled && (
+              <button
+                type="button"
+                disabled={switching}
+                onClick={() =>
+                  startSwitch(async () => {
+                    const res = await setAccountPaused(a.id, !a.paused);
+                    if (res.error) toast.error(res.error);
+                    else onChanged();
+                  })
+                }
+                className={`ml-auto h-8 rounded-md border px-3 text-xs transition-colors ${
+                  a.paused
+                    ? "border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10"
+                    : "border-slate-500/40 text-slate-300 hover:bg-slate-500/10"
+                }`}
+              >
+                {switching ? "…" : a.paused ? "Resume account" : "Pause account"}
+              </button>
+            )}
             <button
               type="button"
               disabled={switching}
@@ -1038,7 +1067,7 @@ function AccountPanel({
                   else onChanged();
                 });
               }}
-              className={`ml-auto h-8 rounded-md border px-3 text-xs transition-colors ${
+              className={`${a.disabled ? "ml-auto " : ""}h-8 rounded-md border px-3 text-xs transition-colors ${
                 a.disabled
                   ? "border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10"
                   : "border-rose-500/40 text-rose-400 hover:bg-rose-500/10"

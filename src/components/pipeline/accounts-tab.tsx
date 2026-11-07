@@ -360,10 +360,13 @@ export async function AccountsTab({
 
   // The summary is about the accounts being worked. One that posts nothing
   // would otherwise be the whole chart: every other line a floor under it.
-  // Disabled accounts keep their tile and history, and leave the charts.
+  // Disabled and paused accounts keep their tile and history, and leave the charts.
   const dead = (r: (typeof rows)[number]) => r.a.status === "dead";
-  const posting = rows.filter((r) => !dead(r) && Number(r.a.posts_per_day ?? 0) > 0);
-  const parked = rows.filter((r) => !dead(r) && Number(r.a.posts_per_day ?? 0) === 0);
+  const isPaused = (r: (typeof rows)[number]) => r.a.status === "paused";
+  const off = (r: (typeof rows)[number]) => dead(r) || isPaused(r);
+  const posting = rows.filter((r) => !off(r) && Number(r.a.posts_per_day ?? 0) > 0);
+  const parked = rows.filter((r) => !off(r) && Number(r.a.posts_per_day ?? 0) === 0);
+  const paused = rows.filter((r) => isPaused(r) && !dead(r));
   const disabled = rows.filter(dead);
 
   const analytics = computeAnalytics(
@@ -412,8 +415,9 @@ export async function AccountsTab({
       lastSeen: r.lastSeen,
       // Read before, and not for two days while the others were. An account
       // never read yet is not stuck — its first read is still to come.
-      stale: !dead(r) && last > 0 && Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
+      stale: !off(r) && last > 0 && Number(r.a.posts_per_day ?? 0) > 0 && newest - last > 2 * DAY,
       disabled: dead(r),
+      paused: isPaused(r),
       linkedId: r.a.linked_account_id,
       sortOrder: r.a.sort_order,
       profileUrl: r.profileUrl,
@@ -449,6 +453,12 @@ export async function AccountsTab({
               <>
                 {" · "}
                 {parked.map((r) => r.a.display_name || displayHandle(r.a.handle)).join(", ")} parked (0 reels a day), left out of the charts
+              </>
+            )}
+            {paused.length > 0 && (
+              <>
+                {" · "}
+                {paused.map((r) => r.a.display_name || displayHandle(r.a.handle)).join(", ")} paused (checked on Sundays), left out of the charts
               </>
             )}
             {disabled.length > 0 && (
