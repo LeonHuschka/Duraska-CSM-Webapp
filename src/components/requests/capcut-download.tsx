@@ -4,13 +4,14 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { FolderDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { zipStore } from "@/lib/zip-store";
 
 /**
  * Everything the editor needs for one reel in one go: the inspo and every
  * raw take, numbered in order, so the folder can be dragged into CapCut as
  * it is. In Chrome and Edge it writes a folder named after the reel into
- * a folder the editor picks (the picker remembers it); elsewhere the files
- * download one after another into Downloads, named the same way.
+ * a folder the editor picks (the picker remembers it); elsewhere one ZIP
+ * of that folder, which Safari unpacks into Downloads by itself.
  */
 type Item = { url: string; name: string };
 type Take = { signedUrl: string; file_name: string; fansly?: boolean | null };
@@ -68,26 +69,32 @@ export function CapCutDownload({
     toast.success(`Folder "${folder}" is ready — drag it into CapCut`);
   }
 
-  async function oneByOne() {
-    // Storage names the file itself when asked to; the browser asks once
-    // whether this page may download several files.
+  async function asZip() {
+    // Safari opens a downloaded ZIP by itself: a folder named after the reel
+    // lands in Downloads.
+    const files: { name: string; data: Uint8Array }[] = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       setProgress(`${i + 1}/${items.length}`);
-      const a = document.createElement("a");
-      a.href = `${it.url}${it.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(it.name)}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      await new Promise((r) => setTimeout(r, 700));
+      const res = await fetch(it.url);
+      if (!res.ok) throw new Error(`${it.name} could not be loaded`);
+      files.push({ name: `${folder}/${it.name}`, data: new Uint8Array(await res.arrayBuffer()) });
     }
-    toast.success(`${items.length} files are downloading into Downloads — all start with "${folder}"`);
+    const url = URL.createObjectURL(zipStore(files));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${folder}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    toast.success(`"${folder}" is in Downloads — drag the folder into CapCut`);
   }
 
   async function run() {
     try {
       const pick = (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker;
-      await (pick ? toFolder(pick.bind(window)) : oneByOne());
+      await (pick ? toFolder(pick.bind(window)) : asZip());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "The download failed");
     } finally {
