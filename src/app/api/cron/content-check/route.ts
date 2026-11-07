@@ -5,7 +5,7 @@ import { pipelineCounts } from "@/lib/pipeline-counts";
 import { buildAlert, type Cfg } from "@/lib/pipeline-alert";
 import { fingerprintPending } from "@/lib/fingerprint-job";
 import { scrapeAccounts } from "@/lib/account-scrape";
-import { announceWinners } from "@/lib/winners";
+import { announceComebacks, announceWinners } from "@/lib/winners";
 import { sendPostingFocus } from "@/lib/posting-focus";
 import { postShootList } from "@/lib/shoot-list";
 import { refreshIgTokens } from "@/lib/auto-publish";
@@ -98,6 +98,16 @@ export async function GET(req: Request) {
     (configs ?? []).map(async (cfg) => [cfg.persona_id, await announceWinners(supabase, cfg.persona_id)] as const)
   );
   summary.winners = Object.fromEntries(winners);
+  // Sundays the paused accounts get their look, in case an old reel took off again.
+  if (new Date().toLocaleDateString("en-US", { timeZone: "Europe/Berlin", weekday: "short" }) === "Sun") {
+    const comebacks = await Promise.all(
+      (configs ?? []).map(async (cfg) => {
+        await scrapeAccounts(supabase, cfg.persona_id, { paused: true });
+        return [cfg.persona_id, await announceComebacks(supabase, cfg.persona_id)] as const;
+      })
+    );
+    summary.comebacks = Object.fromEntries(comebacks);
+  }
   // Inspo reels that could not be fetched when they were posted — most
   // often Apify out of its monthly budget — get another go every morning.
   const videos = await Promise.all(

@@ -19,8 +19,12 @@ import { APP_URL, decideTrial, ensureTrial, notifyProposal } from "@/lib/trials"
  * a video so the model can watch what worked and shoot it again.
  */
 const DAY = 86_400_000;
-/** A reel older than this is history, not a new winner. */
-const FRESH_DAYS = 30;
+/**
+ * A reel older than this is history, not a new winner: a reel takes off in
+ * its first days, and one that crosses the line weeks later is old news to
+ * shoot again. One without a known date is left out for the same reason.
+ */
+const FRESH_DAYS = 10;
 /**
  * A reel younger than this is still collecting plays and stays out of the
  * account's usual reach: a day of fresh posts with a few hundred plays each
@@ -71,10 +75,13 @@ export async function announceWinners(
   const minViews = Number(cfg.viral_min_views ?? 10_000);
 
   const [{ data: accounts }, { data: rows }, { data: known }] = await Promise.all([
+    // Only the accounts in use: a paused one gets its weekly look in
+    // announceComebacks, never a trial.
     supabase
       .from("accounts")
       .select("id, handle, platform, posts_per_day")
-      .eq("persona_id", personaId),
+      .eq("persona_id", personaId)
+      .not("status", "in", '("dead","paused")'),
     supabase
       .from("reel_metrics")
       .select("account_id, shortcode, views, captured_at, posted_at, post_url, caption, request_id, tile_path, cover_path")
@@ -122,7 +129,7 @@ export async function announceWinners(
       const v = Number(r.views);
       if (v < minViews || median <= 0 || v < lift * median) continue;
       if (seen.has(r.shortcode!)) continue;
-      if (!opts.includeOld && r.posted_at && new Date(r.posted_at).getTime() < freshSince) continue;
+      if (!opts.includeOld && (!r.posted_at || new Date(r.posted_at).getTime() < freshSince)) continue;
       candidates.push({ reel: r, median, lift: v / median });
     }
   });
@@ -324,4 +331,74 @@ function message(x: {
   ];
   if (x.url) lines.push(`🔗 Link: ${esc(x.url)}`);
   return lines.join("\n");
+}
+
+/**
+ * The paused accounts' weekly look: they post nothing any more, but their
+ * reels are still up, and an old one can take off again. A reel that
+ * gained at least the winner floor in plays since the last look is
+ * reported in the winners topic — as news only, no trial: the account is
+ * not posting, the reel can be shot again on one that is.
+ */
+export async function announceComebacks(supabase: Db, personaId: string): Promise<WinnersSummary> {
+  const out: WinnersSummary = { found: 0, announced: 0, notes: [] };
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("chat_id, winners_thread_id, viral_min_views")
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!cfg?.chat_id || cfg.winners_thread_id == null) return out;
+  const minViews = Number(cfg.viral_min_views ?? 10_000);
+
+  const { data: accounts } = await supabase
+    .from("accounts")
+    .select("id, handle, platform")
+    .eq("persona_id", personaId)
+    .eq("status", "paused");
+  if (!accounts?.length) return out;
+  const { data: rows } = await supabase
+    .from("reel_metrics")
+    .select("account_id, shortcode, views, captured_at, post_url, caption")
+    .in("account_id", accounts.map((a) => a.id))
+    .eq("source", "scrape")
+    .not("shortcode", "is", null)
+    .not("views", "is", null)
+    .gte("captured_at", new Date(Date.now() - 21 * DAY).toISOString())
+    .order("captured_at", { ascending: false })
+    .limit(5000);
+
+  // Per reel: today's reading, and the one before it at least five days back.
+  type Row = NonNullable<typeof rows>[number];
+  const byReel = new Map<string, Row[]>();
+  for (const r of rows ?? []) {
+    const key = `${r.account_id}|${r.shortcode}`;
+    byReel.set(key, [...(byReel.get(key) ?? []), r]);
+  }
+  const nf = new Intl.NumberFormat("de-DE");
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  for (const list of Array.from(byReel.values())) {
+    const now = list[0];
+    if (Date.now() - new Date(now.captured_at).getTime() > DAY) continue; // not read today
+    const before = list.find((r) => new Date(now.captured_at).getTime() - new Date(r.captured_at).getTime() >= 5 * DAY);
+    if (!before) continue;
+    const gain = Number(now.views) - Number(before.views);
+    if (gain < minViews) continue;
+    out.found++;
+    const account = accounts.find((a) => a.id === now.account_id)!;
+    const title = now.caption ? `"${now.caption.slice(0, 60)}${now.caption.length > 60 ? "…" : ""}"` : "A reel";
+    const sent = await sendMessage({
+      chat_id: cfg.chat_id,
+      message_thread_id: cfg.winners_thread_id,
+      text: [
+        `📈 <b>Old account took off again: ${esc(accountLabel(account.handle))} (${platformName(account.platform)})</b>`,
+        `${esc(title)} · +${nf.format(gain)} plays this week · ${nf.format(Number(now.views))} in all`,
+        ``,
+        `The account is paused — worth shooting again on one of the new accounts.`,
+        ...(now.post_url ? [`🔗 Link: ${esc(now.post_url)}`] : []),
+      ].join("\n"),
+    });
+    if (sent.ok) out.announced++;
+    else out.notes.push(`${now.shortcode}: not announced — ${sent.error}`);
+  }
+  return out;
 }

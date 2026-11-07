@@ -893,6 +893,8 @@ export async function scrapeAccounts(
     accountIds?: string[];
     /** Reel codes to read by URL as well, per account — a one-off backfill. */
     extraCodes?: Record<string, string[]>;
+    /** The paused accounts instead — their weekly look, in case an old reel took off again. */
+    paused?: boolean;
   } = {}
 ): Promise<ScrapeSummary> {
   const perAccount = opts.igPerAccount ?? (opts.full ? FULL_POSTS_PER_ACCOUNT : IG_POSTS_PER_ACCOUNT);
@@ -900,10 +902,12 @@ export async function scrapeAccounts(
   let query = supabase
     .from("accounts")
     .select("id, handle, platform, status, avatar_updated_at, stories_per_day")
-    .eq("persona_id", personaId)
-    .not("status", "in", '("dead","paused")');
+    .eq("persona_id", personaId);
+  if (opts.paused) query = query.eq("status", "paused");
+  else query = query.not("status", "in", '("dead","paused")');
   // A list of accounts reads only those — a freshly added one, say.
   if (opts.accountIds?.length) query = query.in("id", opts.accountIds);
+  else if (opts.paused) query = query.gte("posts_per_day", 0);
   // A parked account (0 reels a day) posts nothing and is out of every
   // chart; reading it every morning was money for nothing. Named on
   // purpose — a first read of a fresh account — it is still read.
