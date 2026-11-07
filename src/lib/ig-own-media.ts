@@ -9,8 +9,9 @@ type Sb = SupabaseClient<Database>;
  * The reels of the accounts connected for auto-posting, read through the
  * account's own API access after the morning scrape. The scrape sees what
  * anyone sees on the profile; a trial reel is not on the profile, so only
- * this way do its plays arrive. A reel both read is kept as the API says —
- * its numbers are the account's own. The planner's posts bring their job
+ * this way do its plays arrive. A reel both read is kept as the API says
+ * when the API has its plays — its numbers are the account's own — and as
+ * the scrape read it when not. The planner's posts bring their job
  * along, so they need no matching.
  */
 const DAYS = 45;
@@ -36,10 +37,23 @@ export async function readOwnMedia(supabase: Sb, personaId: string): Promise<{ r
     const job = new Map((slots ?? []).map((s) => [s.ig_media_id!, s]));
     const ids = Array.from(new Set([...Array.from(job.keys()), ...(await recentMediaIds(c.ig_user_id, c.access_token))]));
 
+    // What the scrape read of this account today: kept unless the API has plays.
+    const { data: scraped } = await supabase
+      .from("reel_metrics")
+      .select("shortcode")
+      .eq("account_id", c.account_id)
+      .eq("source", "scrape")
+      .gte("captured_at", `${today}T00:00:00Z`);
+    const have = new Set((scraped ?? []).map((r) => r.shortcode));
+
     const rows: Database["public"]["Tables"]["reel_metrics"]["Insert"][] = [];
     for (const id of ids) {
       const m = await ownMedia(id, c.access_token);
       if (!m || !m.shortcode || m.kind !== "REELS") continue;
+      if (m.insightsError && !out.notes.some((n) => n.includes(m.insightsError!))) {
+        out.notes.push(`${c.account_id}: no plays from the API — ${m.insightsError}`);
+      }
+      if (m.views == null && have.has(m.shortcode)) continue;
       if (m.timestamp && Date.now() - new Date(m.timestamp).getTime() > DAYS * 86_400_000) continue;
       const s = job.get(id);
       rows.push({

@@ -206,6 +206,8 @@ export type OwnMedia = {
   likes: number | null;
   comments: number | null;
   shares: number | null;
+  /** Why Instagram gave no numbers, when it gave none. */
+  insightsError: string | null;
 };
 
 /**
@@ -235,10 +237,14 @@ export async function ownMedia(mediaId: string, token: string): Promise<OwnMedia
   ).catch(() => null);
   if (!m) return null;
   // Views where Instagram has them; a picture without them still has the rest.
+  let insightsError: string | null = null;
   const insights = async (metric: string) =>
     igFetch<{ data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] }>(
       `${host}/${mediaId}/insights?${new URLSearchParams({ metric, access_token: token })}`
-    ).catch(() => null);
+    ).catch((err) => {
+      insightsError = err instanceof Error ? err.message : String(err);
+      return null;
+    });
   const ins = (await insights("views,likes,comments,shares")) ?? (await insights("likes,comments,shares"));
   const val = (name: string) => {
     const d = ins?.data?.find((x) => x.name === name);
@@ -257,6 +263,7 @@ export async function ownMedia(mediaId: string, token: string): Promise<OwnMedia
     likes: val("likes") ?? m.like_count ?? null,
     comments: val("comments") ?? m.comments_count ?? null,
     shares: val("shares"),
+    insightsError: ins ? null : insightsError,
   };
 }
 
