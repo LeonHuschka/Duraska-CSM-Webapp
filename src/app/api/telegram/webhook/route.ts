@@ -819,7 +819,19 @@ async function handleReaction(r: TgReactionUpdate) {
     return;
   }
 
-  // Any other reaction means the model has filmed it.
+  // Any other reaction means the model has filmed it — hers only. The team
+  // reacts to links too (a 👍 for "seen"), and that must not take a reel
+  // nobody shot off the list.
+  const { data: cfg } = await supabase
+    .from("telegram_config")
+    .select("model_username")
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  const model = (cfg?.model_username ?? "").replace(/^@/, "").toLowerCase();
+  if (!model || (r.user?.username ?? "").toLowerCase() !== model) {
+    console.log(`[telegram] reaction by @${r.user?.username ?? "?"} — not the model, not counted as shot`);
+    return;
+  }
   // Don't walk the status backwards once it's further along.
   const open = links.filter((l) => l.status === "open").map((l) => l.id);
   if (open.length === 0) return;
