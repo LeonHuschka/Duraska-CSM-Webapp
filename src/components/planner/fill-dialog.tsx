@@ -30,7 +30,7 @@ export function planFill({
   posts: PlannerPost[];
   plannedCuts: Set<string | null>;
 }): FillItem[] {
-  const free = cuts.filter((c) => c.usedOn.length === 0 && !c.queued && !plannedCuts.has(c.id));
+  const free = cuts.filter((c) => c.usedOn.length === 0 && !c.postedHere && !c.queued && !plannedCuts.has(c.id));
   const byReel = new Map<string, PlannerCut[]>();
   for (const c of free) byReel.set(c.requestId, [...(byReel.get(c.requestId) ?? []), c]);
   const reels = Array.from(byReel, ([id, takes]) => ({

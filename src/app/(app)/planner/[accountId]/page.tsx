@@ -64,7 +64,7 @@ export default async function PlannerPage({
     supabase.from("accounts").select("post_timezone").eq("id", account.id).maybeSingle(),
     supabase
       .from("reel_metrics")
-      .select("account_id, shortcode, views, captured_at, posted_at, request_id")
+      .select("account_id, shortcode, views, captured_at, posted_at, request_id, asset_id")
       .eq("persona_id", account.persona_id)
       .eq("source", "scrape")
       .eq("needs_review", false)
@@ -198,6 +198,24 @@ export default async function PlannerPage({
     }
   }
 
+  // What already went out on this account, per reel: the planner's posts
+  // and what the scrape found on the profile (posted by hand), one each.
+  const hereCuts = new Set<string>();
+  const hereByReel = new Map<string, Set<string>>();
+  const here = (requestId: string | null, key: string, assetId: string | null) => {
+    if (!requestId) return;
+    if (!hereByReel.has(requestId)) hereByReel.set(requestId, new Set());
+    hereByReel.get(requestId)!.add(key);
+    if (assetId) hereCuts.add(assetId);
+  };
+  for (const s of slots) {
+    if (s.account_id !== account.id || s.status !== "posted") continue;
+    here(s.request_id, s.post_url?.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/)?.[1] ?? s.id, s.asset_id);
+  }
+  latest.forEach((r) => {
+    if (r.account_id === account.id && r.shortcode) here(r.request_id, r.shortcode, r.asset_id);
+  });
+
   const assetOf = new Map(all.map((a) => [a.id, a]));
   const variant = (a: { id: string; request_id: string }) => {
     const ids = order.get(a.request_id) ?? [];
@@ -215,6 +233,8 @@ export default async function PlannerPage({
       video: signed.get(a.file_path)!,
       uploadedAt: a.uploaded_at,
       usedOn: Array.from(usedOn.get(a.id) ?? []),
+      postedHere: hereCuts.has(a.id),
+      reelPostedHere: hereByReel.get(a.request_id)?.size ?? 0,
       queued: queued.has(a.id),
       lift: reelLift.get(a.request_id) ?? null,
     }));

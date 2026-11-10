@@ -63,6 +63,10 @@ export type PlannerCut = {
   uploadedAt: string;
   /** Accounts this cut already went out on. */
   usedOn: string[];
+  /** This cut already went out on this account — by the planner or by hand. */
+  postedHere: boolean;
+  /** How many takes of its reel went out on this account. */
+  reelPostedHere: number;
   /** Planned for auto-posting somewhere. */
   queued: boolean;
   /** The reel's best plays against its account's usual reach, anywhere. */
@@ -191,14 +195,14 @@ export function PlannerView({
   const shownCuts = useMemo(() => {
     const q = search.trim().toLowerCase();
     return cuts.filter((c) => {
-      if (filter === "free" && (c.usedOn.length > 0 || c.queued || plannedCuts.has(c.id))) return false;
+      if (filter === "free" && (c.usedOn.length > 0 || c.postedHere || c.queued || plannedCuts.has(c.id))) return false;
       return !q || c.title.toLowerCase().includes(q);
     });
   }, [cuts, filter, search, plannedCuts]);
 
   // One tile per reel: its newest shown take on top, with how many it has.
   const reels = useMemo(() => {
-    const isFree = (c: PlannerCut) => c.usedOn.length === 0 && !c.queued && !plannedCuts.has(c.id);
+    const isFree = (c: PlannerCut) => c.usedOn.length === 0 && !c.postedHere && !c.queued && !plannedCuts.has(c.id);
     const total = new Map<string, { all: number; free: number }>();
     for (const c of cuts) {
       const t = total.get(c.requestId) ?? { all: 0, free: 0 };
@@ -521,6 +525,7 @@ export function PlannerView({
                     title={r.title}
                     all={r.all}
                     free={r.free}
+                    postedHere={r.cover.reelPostedHere}
                     draggable={canPlan}
                     onDragStart={() => setDrag({ kind: "cut", id: r.cover.id })}
                     onDragEnd={() => {
@@ -776,6 +781,7 @@ function ReelTile({
   title,
   all,
   free,
+  postedHere,
   draggable,
   onDragStart,
   onDragEnd,
@@ -785,6 +791,8 @@ function ReelTile({
   title: string;
   all: number;
   free: number;
+  /** Takes of it already out on this account. */
+  postedHere: number;
   draggable: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -815,6 +823,14 @@ function ReelTile({
       <span className="absolute right-1 top-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white">
         {all} take{all === 1 ? "" : "s"}
       </span>
+      {postedHere > 0 && (
+        <span
+          className="absolute left-1 top-1 rounded bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-black"
+          title={`${postedHere} take${postedHere === 1 ? "" : "s"} of this reel already posted on this account`}
+        >
+          {postedHere}× here
+        </span>
+      )}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-1.5 pt-6">
         <p className="truncate text-[11px] font-semibold text-white">{title}</p>
         <p className={`truncate text-[9px] ${free > 0 ? "text-emerald-300" : "text-white/60"}`}>
@@ -868,14 +884,19 @@ function CutTile({
           {cut.variant ? `cut ${cut.variant}` : "single cut"}
           {cut.usedOn.length > 0 && ` · on ${cut.usedOn.join(", ")}`}
         </p>
+        {cut.reelPostedHere > 0 && (
+          <p className="truncate text-[9px] font-medium text-amber-300">
+            {cut.reelPostedHere}× of this reel on this account
+          </p>
+        )}
       </div>
-      {(planned || cut.usedOn.length > 0) && (
+      {(planned || cut.postedHere || cut.usedOn.length > 0) && (
         <span
           className={`absolute left-1 top-1 rounded px-1 py-0.5 text-[9px] font-semibold ${
-            planned ? "bg-sky-500/90 text-white" : "bg-black/70 text-white/80"
+            planned ? "bg-sky-500/90 text-white" : cut.postedHere ? "bg-amber-500/90 text-black" : "bg-black/70 text-white/80"
           }`}
         >
-          {planned ? "Planned" : "Used"}
+          {planned ? "Planned" : cut.postedHere ? "Posted here" : "Used"}
         </span>
       )}
     </button>
