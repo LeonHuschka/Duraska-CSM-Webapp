@@ -884,11 +884,6 @@ function CutTile({
           {cut.variant ? `cut ${cut.variant}` : "single cut"}
           {cut.usedOn.length > 0 && ` · on ${cut.usedOn.join(", ")}`}
         </p>
-        {cut.reelPostedHere > 0 && (
-          <p className="truncate text-[9px] font-medium text-amber-300">
-            {cut.reelPostedHere}× of this reel on this account
-          </p>
-        )}
       </div>
       {(planned || cut.postedHere || cut.usedOn.length > 0) && (
         <span
