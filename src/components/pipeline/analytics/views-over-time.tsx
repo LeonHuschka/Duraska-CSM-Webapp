@@ -88,8 +88,17 @@ export function ViewsOverTime({
       now: idx(l.seam + 1, days.length - 1),
     };
   };
+  // Soft curves: each step a cubic with flat handles, which never
+  // overshoots — a cumulative line stays a rising one.
   const pathOf = (seg: { x: number; y: number }[]) =>
-    seg.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+    seg
+      .map((p, i) => {
+        if (i === 0) return `M${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+        const q = seg[i - 1];
+        const mx = ((q.x + p.x) / 2).toFixed(1);
+        return `C${mx},${q.y.toFixed(1)} ${mx},${p.y.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      })
+      .join(" ");
 
   const xTicks: number[] = [];
   const stepX = Math.max(1, Math.round(days.length / Math.max(2, Math.floor(W / 130))));
@@ -122,8 +131,8 @@ export function ViewsOverTime({
               onClick={() => toggle(l.id)}
               onMouseEnter={() => setFocus(l.id)}
               onMouseLeave={() => setFocus(null)}
-              className={`flex items-center gap-1.5 rounded-full border px-1.5 py-0.5 pr-2.5 text-[11px] transition-colors ${
-                off ? "border-border/30 text-muted-foreground/50" : "border-border/60 text-foreground"
+              className={`flex items-center gap-1.5 rounded-full border px-1.5 py-1 pr-3 text-[11px] font-medium transition-colors ${
+                off ? "border-white/10 text-white/40" : "border-white/20 bg-white/10 text-white hover:bg-white/15"
               }`}
               title={off ? "Show this line" : "Hide this line"}
             >
@@ -153,7 +162,7 @@ export function ViewsOverTime({
           viewBox={`0 0 ${W} ${H}`}
           width={W}
           height={H}
-          className="glass-glow block max-w-full"
+          className="block max-w-full"
           onMouseLeave={() => setHover(null)}
           onMouseMove={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -172,8 +181,8 @@ export function ViewsOverTime({
         >
           {ticks.map((v) => (
             <g key={v}>
-              <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="stroke-border/50" strokeWidth="1" />
-              <text x={L - 8} y={y(v) + 3} textAnchor="end" className="fill-muted-foreground" fontSize="10">
+              <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="stroke-white/[0.07]" strokeWidth="1" strokeDasharray="2 4" />
+              <text x={L - 8} y={y(v) + 3} textAnchor="end" className="fill-white/40" fontSize="10">
                 {compact(v)}
               </text>
             </g>
@@ -189,11 +198,25 @@ export function ViewsOverTime({
               strokeDasharray="3 3"
             />
           )}
+          <defs>
+            {shown.map((l) => (
+              <linearGradient key={l.id} id={`vot-${l.id}`} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={l.color} stopOpacity="0.22" />
+                <stop offset="100%" stopColor={l.color} stopOpacity="0" />
+              </linearGradient>
+            ))}
+          </defs>
           {shown.map((l) => {
             const { old, now } = partsOf(l);
             const dim = focus && focus !== l.id;
             return (
               <g key={l.id} opacity={dim ? 0.15 : 1}>
+                {now.length > 1 && (
+                  <path
+                    d={`${pathOf(now)} L${now[now.length - 1].x.toFixed(1)},${H - B} L${now[0].x.toFixed(1)},${H - B} Z`}
+                    fill={`url(#vot-${l.id})`}
+                  />
+                )}
                 {old.length > 1 && (
                   <path d={pathOf(old)} fill="none" stroke={l.color} strokeOpacity={0.5} strokeWidth="1.5" strokeDasharray="4 3" />
                 )}
@@ -202,34 +225,34 @@ export function ViewsOverTime({
                     d={pathOf(now)}
                     fill="none"
                     stroke={l.color}
-                    strokeWidth={focus === l.id ? 3 : 2}
+                    strokeWidth={focus === l.id ? 3 : 2.25}
                     strokeLinejoin="round"
                     strokeLinecap="round"
                   />
                 )}
                 {now.length > 0 && (
-                  <circle cx={now[now.length - 1].x} cy={now[now.length - 1].y} r="3" fill={l.color} />
+                  <circle cx={now[now.length - 1].x} cy={now[now.length - 1].y} r="4" fill={l.color} stroke="white" strokeWidth="1.5" />
                 )}
               </g>
             );
           })}
           {hover != null && (
             <>
-              <line x1={x(days[hover])} x2={x(days[hover])} y1={T} y2={H - B} className="stroke-foreground/30" strokeWidth="1" />
+              <line x1={x(days[hover])} x2={x(days[hover])} y1={T} y2={H - B} className="stroke-white/25" strokeWidth="1" strokeDasharray="3 3" />
               {atHover.map(({ l, v }) => (
-                <circle key={l.id} cx={x(days[hover])} cy={y(v)} r="3.5" fill={l.color} />
+                <circle key={l.id} cx={x(days[hover])} cy={y(v)} r="4.5" fill={l.color} stroke="white" strokeWidth="1.5" />
               ))}
             </>
           )}
           {xTicks.map((t) => (
-            <text key={t} x={x(t)} y={H - 8} textAnchor="middle" className="fill-muted-foreground" fontSize="10">
+            <text key={t} x={x(t)} y={H - 8} textAnchor="middle" className="fill-white/40" fontSize="10">
               {fmtDate(t)}
             </text>
           ))}
         </svg>
         {hover != null && atHover.length > 0 && (
           <div
-            className="pointer-events-none absolute top-2 min-w-44 rounded-md border border-border/60 bg-card px-2.5 py-2 text-[11px] shadow"
+            className="pointer-events-none absolute top-2 min-w-44 rounded-xl border border-white/15 bg-popover px-3 py-2 text-[11px] shadow-xl"
             style={{
               left: `${Math.min(88, Math.max(0, (x(days[hover]) / W) * 100))}%`,
               transform: x(days[hover]) / W > 0.6 ? "translateX(-105%)" : "translateX(8px)",

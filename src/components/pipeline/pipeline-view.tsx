@@ -245,7 +245,8 @@ export function AccountsPie({
       <div className="flex items-center gap-5">
         <div className="relative shrink-0">
           <svg viewBox="0 0 100 100" className="glass-glow h-28 w-28 -rotate-90">
-            <circle cx="50" cy="50" r={R} fill="none" strokeWidth="9" className="stroke-muted" />
+            <circle cx="50" cy="50" r={R} fill="none" strokeWidth="6" className="stroke-white/[0.08]" />
+          <circle cx="50" cy="50" r={R - 8} fill="none" strokeWidth="0.6" className="stroke-white/15" />
             {arcs.map((a) =>
               a.len <= 0 ? null : (
                 <circle
@@ -254,8 +255,8 @@ export function AccountsPie({
                   cy="50"
                   r={R}
                   fill="none"
-                  strokeWidth="9"
-                  strokeDasharray={`${a.len} ${a.gap}`}
+                  strokeWidth="6"
+                  strokeDasharray={arcs.filter((x) => x.len > 0).length > 1 ? `${Math.max(0, a.len - 2.5)} ${a.gap + 2.5}` : `${a.len} ${a.gap}`}
                   strokeDashoffset={-a.offset}
                   className={TONE[a.platform] ?? "stroke-muted-foreground"}
                 />

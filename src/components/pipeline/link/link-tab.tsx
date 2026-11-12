@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { DoorOpen, Eye, Smartphone, MousePointerClick, Pencil, Percent, type LucideIcon } from "lucide-react";
+import { ChangeChip, StatTile, type Tone } from "@/components/ui/stat-tile";
 import { createClient } from "@/lib/supabase/server";
 import { funnelDashboard, type Period } from "@/lib/funnel-dashboard";
 import { WorldMap } from "./world-map";
@@ -145,11 +146,13 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
 
       {/* KPIs against the period before */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi label="Page views" value={nf.format(d.views)} delta={change(d.views, d.prev.views)} />
-        <Kpi label="Made it to the real page" value={nf.format(d.opened)} delta={change(d.opened, d.prev.opened)} />
-        <Kpi label="Link clicks" value={nf.format(d.clicks)} delta={change(d.clicks, d.prev.clicks)} />
-        <Kpi label="Click rate" value={d.ctr == null ? "—" : `${(d.ctr * 100).toFixed(1)}%`} delta={change(d.ctr, d.prev.ctr)} />
+        <Kpi icon={Eye} tone="violet" label="Page views" value={nf.format(d.views)} delta={change(d.views, d.prev.views)} spark={d.daily.map((r) => r[1])} />
+        <Kpi icon={DoorOpen} tone="blue" label="Made it to the real page" value={nf.format(d.opened)} delta={change(d.opened, d.prev.opened)} />
+        <Kpi icon={MousePointerClick} tone="rose" label="Link clicks" value={nf.format(d.clicks)} delta={change(d.clicks, d.prev.clicks)} spark={d.daily.map((r) => r[2])} />
+        <Kpi icon={Percent} tone="green" label="Click rate" value={d.ctr == null ? "—" : `${(d.ctr * 100).toFixed(1)}%`} delta={change(d.ctr, d.prev.ctr)} />
         <Kpi
+          icon={Smartphone}
+          tone="amber"
           label="From the Instagram app"
           value={d.views > 0 ? `${Math.round((d.inApp / d.views) * 100)}%` : "—"}
           hint={`${nf.format(d.inApp)} of the views`}
@@ -179,7 +182,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
                   </span>
                 </div>
                 <div className="ml-6 h-1 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-violet-400" style={{ width: `${(c.views / totalViews) * 100}%` }} />
+                  <div className="h-full rounded-full bg-blue-400" style={{ width: `${(c.views / totalViews) * 100}%` }} />
                 </div>
               </li>
             ))}
@@ -203,7 +206,7 @@ export async function LinkTab({ personaId, days, canEdit }: { personaId: string;
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="rounded-2xl border border-border/50 bg-card p-5">
           <h3 className="mb-3 text-sm font-medium">Traffic sources</h3>
-          <Bars rows={d.sources} total={totalViews} color="bg-violet-400" empty="No views yet." />
+          <Bars rows={d.sources} total={totalViews} color="bg-blue-400" empty="No views yet." />
         </div>
         <div className="rounded-2xl border border-border/50 bg-card p-5">
           <h3 className="mb-3 text-sm font-medium">Devices</h3>
@@ -256,22 +259,41 @@ function change(now: number | null, prev: number | null): number | null {
   return (now - prev) / prev;
 }
 
-function Kpi({ label, value, delta, hint }: { label: string; value: string; delta?: number | null; hint?: string }) {
+function Kpi({
+  label,
+  value,
+  delta,
+  hint,
+  icon,
+  tone,
+  spark,
+}: {
+  label: string;
+  value: string;
+  delta?: number | null;
+  hint?: string;
+  icon: LucideIcon;
+  tone: Tone;
+  spark?: number[];
+}) {
   return (
-    <div className="rounded-2xl border border-border/50 bg-card p-4">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
-      <p className="mt-1 text-[11px] tabular-nums">
-        {delta != null ? (
-          <span className={delta > 0 ? "text-emerald-400" : delta < 0 ? "text-rose-400" : "text-muted-foreground"}>
-            {delta > 0 ? "▲" : delta < 0 ? "▼" : ""} {Math.abs(delta * 100).toFixed(0)}%{" "}
-            <span className="text-muted-foreground">vs previous</span>
-          </span>
+    <StatTile
+      icon={icon}
+      tone={tone}
+      label={label}
+      value={value}
+      spark={spark}
+      change={
+        delta != null ? (
+          <>
+            <ChangeChip value={delta}>{Math.abs(delta * 100).toFixed(0)}%</ChangeChip>
+            <span>vs previous</span>
+          </>
         ) : (
-          <span className="text-muted-foreground">{hint ?? "no previous period yet"}</span>
-        )}
-      </p>
-    </div>
+          <span>{hint ?? "no previous period yet"}</span>
+        )
+      }
+    />
   );
 }
 

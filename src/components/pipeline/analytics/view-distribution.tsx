@@ -29,7 +29,8 @@ export function ViewDistribution({ slices }: { slices: Slice[] }) {
     <div className="flex flex-col items-center gap-5 sm:flex-row">
       <div className="relative shrink-0">
         <svg viewBox="0 0 100 100" className="glass-glow h-36 w-36 -rotate-90">
-          <circle cx="50" cy="50" r={R} fill="none" strokeWidth="9" className="stroke-muted" />
+          <circle cx="50" cy="50" r={R} fill="none" strokeWidth="6" className="stroke-white/[0.08]" />
+          <circle cx="50" cy="50" r={R - 8} fill="none" strokeWidth="0.6" className="stroke-white/15" />
           {arcs.map((a) => (
             <circle
               key={a.id}
@@ -37,10 +38,10 @@ export function ViewDistribution({ slices }: { slices: Slice[] }) {
               cy="50"
               r={R}
               fill="none"
-              strokeWidth={hover === a.id ? 11 : 9}
+              strokeWidth={hover === a.id ? 8 : 6}
               stroke={a.color}
               strokeOpacity={hover && hover !== a.id ? 0.35 : 1}
-              strokeDasharray={`${a.len} ${a.gap}`}
+              strokeDasharray={arcs.filter((x) => x.len > 0).length > 1 ? `${Math.max(0, a.len - 2.5)} ${a.gap + 2.5}` : `${a.len} ${a.gap}`}
               strokeDashoffset={-a.offset}
               onMouseEnter={() => setHover(a.id)}
               onMouseLeave={() => setHover(null)}

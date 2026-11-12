@@ -62,7 +62,9 @@ export default async function AppLayout({
               isModel={activePersona.role === "model"}
               withNav
             />
-            <main className={`flex-1 overflow-auto p-4 pb-28 md:p-6 md:pb-8 ${activePersona.role === "model" ? "" : "md:pl-24"}`}>{children}</main>
+            <main className={`flex-1 overflow-auto p-4 pb-28 md:p-6 md:pb-8 ${activePersona.role === "model" ? "" : "md:pl-24"}`}>
+              <div className="mx-auto w-full max-w-[1480px]">{children}</div>
+            </main>
             <MobileBottomNav />
           </div>
         </PersonaProvider>

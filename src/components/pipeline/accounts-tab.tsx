@@ -471,7 +471,13 @@ export async function AccountsTab({
         </div>
         <PeriodSelector period={period} />
       </div>
-      <KpiRow kpis={analytics.kpis} hasPeriod={hasPeriod} />
+      <KpiRow
+        kpis={analytics.kpis}
+        hasPeriod={hasPeriod}
+        spark={{
+          views: analytics.series.total.filter((_, i) => analytics.series.days[i] >= analytics.start),
+        }}
+      />
       {hasPeriod && analytics.scrapeSince != null && analytics.start < analytics.scrapeSince && (
         <p className="-mt-2 text-[11px] text-muted-foreground">
           Views gained are counted since the first scrape on{" "}

@@ -45,8 +45,8 @@ export function PipelineDonut({
             cy="50"
             r={R}
             fill="none"
-            strokeWidth="9"
-            className="stroke-muted"
+            strokeWidth="6"
+            className="stroke-white/[0.08]"
           />
           {total > 0 &&
             arcs.map((a) =>
@@ -57,8 +57,8 @@ export function PipelineDonut({
                   cy="50"
                   r={R}
                   fill="none"
-                  strokeWidth="9"
-                  strokeDasharray={`${a.len} ${a.gap}`}
+                  strokeWidth="6"
+                  strokeDasharray={arcs.filter((x) => x.len > 0).length > 1 ? `${Math.max(0, a.len - 2.5)} ${a.gap + 2.5}` : `${a.len} ${a.gap}`}
                   strokeDashoffset={-a.offset}
                   className={a.color}
                 />

@@ -8,21 +8,23 @@ import {
   type PeriodKey,
 } from "@/lib/account-analytics";
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
+import { BarChart3, Eye, Film, Heart, Users, type LucideIcon } from "lucide-react";
+import { ChangeChip, StatTile, type Tone } from "@/components/ui/stat-tile";
 
 const nf = new Intl.NumberFormat("de-DE");
 
 export function PeriodSelector({ period }: { period: PeriodKey }) {
   return (
-    <div className="flex gap-1 rounded-lg bg-muted/40 p-0.5">
+    <div className="glass-pill flex gap-1 rounded-full p-1">
       {PERIODS.map((p) => (
         <Link
           key={p.key}
           href={`/?tab=accounts&period=${p.key}`}
           scroll={false}
-          className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+          className={`rounded-full px-3 py-1 text-[11px] font-medium transition-all ${
             p.key === period
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
+              ? "bg-white text-neutral-900 shadow-[0_4px_14px_-4px_rgba(255,255,255,0.5)]"
+              : "text-white/70 hover:bg-white/15 hover:text-white"
           }`}
         >
           {p.label}
@@ -55,8 +57,29 @@ function fmt(v: number | null, f: "int" | "pct" | "x"): string {
   return nf.format(Math.round(v));
 }
 
+const KPI_LOOK: Record<string, { icon: LucideIcon; tone: Tone }> = {
+  views: { icon: Eye, tone: "blue" },
+  followers: { icon: Users, tone: "green" },
+  avg: { icon: BarChart3, tone: "amber" },
+  reels: { icon: Film, tone: "violet" },
+  engagement: { icon: Heart, tone: "rose" },
+};
+
+function pct(v: number): string {
+  return `${Math.abs(v * 100).toFixed(Math.abs(v * 100) >= 100 ? 0 : 1)}%`;
+}
+
 /** The five numbers that say how the network is doing, with what moved. */
-export function KpiRow({ kpis, hasPeriod }: { kpis: Kpi[]; hasPeriod: boolean }) {
+export function KpiRow({
+  kpis,
+  hasPeriod,
+  spark = {},
+}: {
+  kpis: Kpi[];
+  hasPeriod: boolean;
+  /** A history per figure, where there is one, drawn as a small curve. */
+  spark?: Record<string, number[]>;
+}) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
       {kpis.map((k) => {
@@ -65,29 +88,39 @@ export function KpiRow({ kpis, hasPeriod }: { kpis: Kpi[]; hasPeriod: boolean })
         // period's own figure, compared with the period before.
         const stock = k.delta != null;
         const gainChange = stock ? change(k.delta, k.deltaPrev) : change(k.value, k.deltaPrev);
+        const look = KPI_LOOK[k.key] ?? { icon: BarChart3, tone: "sky" as Tone };
         return (
-          <div key={k.key} className="rounded-2xl border border-border/50 bg-card p-4">
-            <p className="text-[11px] text-muted-foreground">{k.label}</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{fmt(k.value, k.format)}</p>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] tabular-nums [&>span]:whitespace-nowrap">
-              {hasPeriod ? (
+          <StatTile
+            key={k.key}
+            icon={look.icon}
+            tone={look.tone}
+            label={k.label}
+            value={fmt(k.value, k.format)}
+            spark={spark[k.key]}
+            change={
+              hasPeriod ? (
                 <>
-                  {stock && (
-                    <span className={k.delta! > 0 ? "text-emerald-400" : k.delta! < 0 ? "text-rose-400" : "text-muted-foreground"}>
+                  {stock ? (
+                    <ChangeChip value={k.delta}>
                       {k.delta! > 0 ? "+" : ""}
                       {fmt(k.delta, k.deltaFormat)}
-                    </span>
+                    </ChangeChip>
+                  ) : (
+                    <ChangeChip value={gainChange}>{gainChange == null ? "—" : pct(gainChange)}</ChangeChip>
                   )}
-                  {(gainChange != null || !stock) && <Delta value={gainChange} />}
-                  <span className="text-muted-foreground">
-                    {stock ? "in period" : "vs previous"}
+                  <span>
+                    {stock
+                      ? gainChange != null
+                        ? `${gainChange > 0 ? "+" : gainChange < 0 ? "−" : ""}${pct(gainChange)} vs previous`
+                        : "in period"
+                      : "vs previous"}
                   </span>
                 </>
               ) : (
-                <span className="text-muted-foreground">{k.hint}</span>
-              )}
-            </p>
-          </div>
+                <span>{k.hint}</span>
+              )
+            }
+          />
         );
       })}
     </div>

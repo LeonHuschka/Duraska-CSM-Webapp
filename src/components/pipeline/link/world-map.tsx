@@ -15,11 +15,10 @@ export function WorldMap({ countries }: { countries: Countries }) {
   const max = Math.max(1, ...Object.values(countries).map((c) => c.views));
   const shade = (code: string) => {
     const c = countries[code];
-    if (!c || c.views === 0) return "#2a2a30";
+    if (!c || c.views === 0) return "rgba(255,255,255,0.07)";
     const t = Math.sqrt(c.views / max);
-    // from a dim violet to a bright one
-    const l = 30 + t * 40;
-    return `hsl(262 70% ${l}%)`;
+    // Glass blue: faint where few came from, clear and bright where most did.
+    return `hsla(214 95% ${62 + t * 10}% / ${0.25 + t * 0.75})`;
   };
   const data = world as { w: number; h: number; c: Record<string, { n: string; d: string }> };
   const active = hover ? countries[hover] : null;
@@ -32,7 +31,7 @@ export function WorldMap({ countries }: { countries: Countries }) {
             key={code}
             d={d}
             fill={shade(code)}
-            stroke="#0f0f12"
+            stroke="rgba(255,255,255,0.12)"
             strokeWidth="0.6"
             opacity={hover && hover !== code && countries[code] ? 0.7 : 1}
             onMouseEnter={() => setHover(code)}
@@ -52,7 +51,7 @@ export function WorldMap({ countries }: { countries: Countries }) {
         <span>fewer</span>
         <span className="flex h-2 w-24 overflow-hidden rounded-full">
           {[0.1, 0.3, 0.5, 0.7, 0.9].map((t) => (
-            <span key={t} className="flex-1" style={{ background: `hsl(262 70% ${30 + t * 40}%)` }} />
+            <span key={t} className="flex-1" style={{ background: `hsla(214 95% ${62 + t * 10}% / ${0.25 + t * 0.75})` }} />
           ))}
         </span>
         <span>more</span>

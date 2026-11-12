@@ -581,7 +581,11 @@ function AccountTile({
         a.disabled || a.paused ? "opacity-50 grayscale" : ""
       }`}
       style={{
-        background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card) / var(--card-a, 1))`,
+        // Nearly solid: a tile per account reads as a card of its own, the
+        // room only a breath behind it.
+        background: `${PLATFORM_BG[a.platform] ?? ""}, rgba(36, 36, 42, 0.94)`,
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
       }}
     >
       <div className="flex items-start gap-3">
