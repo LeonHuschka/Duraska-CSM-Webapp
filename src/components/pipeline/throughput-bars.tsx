@@ -5,29 +5,46 @@ import { cn } from "@/lib/utils";
 import { ChangeChip } from "@/components/ui/stat-tile";
 import type { WeekPoint } from "@/components/pipeline/pipeline-view";
 
-const SERIES = [
-  { key: "shot", label: "Shot" },
-  { key: "edited", label: "Cut" },
-  { key: "posted", label: "Posted" },
-] as const;
-type Key = (typeof SERIES)[number]["key"];
-
 /**
- * Reels per week as tall glass bars, the running week lit blue — one
- * measure at a time, picked in the pill on top.
+ * The three measures nest from the outside in, widest first: shot is the
+ * outer glass, cut sits inside it, posted is the bright core. Each keeps
+ * its own colour, so one bar per week tells whether the machine keeps up.
  */
+const SERIES = [
+  {
+    key: "shot",
+    label: "Shot",
+    dot: "bg-violet-400",
+    width: "100%",
+    bar: "border-violet-300/35 bg-gradient-to-b from-violet-400/45 to-violet-500/[0.08]",
+  },
+  {
+    key: "edited",
+    label: "Cut",
+    dot: "bg-emerald-400",
+    width: "64%",
+    bar: "border-emerald-300/40 bg-gradient-to-b from-emerald-400/75 to-emerald-500/20",
+  },
+  {
+    key: "posted",
+    label: "Posted",
+    dot: "bg-blue-400",
+    width: "32%",
+    bar: "border-blue-200/50 bg-gradient-to-b from-blue-300 to-blue-500/60 shadow-[0_0_18px_-2px_rgba(59,130,246,0.7)]",
+  },
+] as const;
+
 export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
-  const [key, setKey] = useState<Key>("posted");
   const [hover, setHover] = useState<number | null>(null);
-  const values = weeks.map((w) => w[key]);
-  const max = Math.max(1, ...values);
+  const max = Math.max(1, ...weeks.flatMap((w) => [w.shot, w.edited, w.posted]));
   const top = Math.max(4, Math.ceil(max / 4) * 4);
   // The running week is still filling, so the chip compares the last full
-  // week with the one before it.
-  const last = values[values.length - 2] ?? 0;
-  const before = values[values.length - 3] ?? 0;
+  // week's posts with the week before it.
+  const last = weeks[weeks.length - 2]?.posted ?? 0;
+  const before = weeks[weeks.length - 3]?.posted ?? 0;
   const change = before > 0 ? (last - before) / before : null;
   const H = 230;
+  const h = (v: number) => (v > 0 ? Math.max(10, (v / top) * H) : 0);
 
   return (
     <div className="rounded-3xl border border-border/50 bg-card p-5">
@@ -36,28 +53,21 @@ export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
           <h2 className="text-base font-semibold">Throughput</h2>
           <p className="text-xs text-white/55">Reels per week, last 8 weeks</p>
         </div>
-        <div className="flex items-center gap-2">
-          {change != null && (
-            <ChangeChip value={change}>
-              {change > 0 ? "+" : ""}
-              {Math.round(change * 100)}% vs last week
-            </ChangeChip>
-          )}
-          <div className="glass-pill flex gap-0.5 rounded-full p-0.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-3 text-[11px] text-white/70">
             {SERIES.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => setKey(s.key)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-[11px] font-medium transition-all",
-                  key === s.key ? "bg-white text-neutral-900" : "text-white/65 hover:text-white"
-                )}
-              >
+              <span key={s.key} className="flex items-center gap-1.5">
+                <span className={cn("h-2 w-2 rounded-full", s.dot)} />
                 {s.label}
-              </button>
+              </span>
             ))}
           </div>
+          {change != null && (
+            <ChangeChip value={change}>
+              Posted {change > 0 ? "+" : ""}
+              {Math.round(change * 100)}% vs week before
+            </ChangeChip>
+          )}
         </div>
       </div>
 
@@ -76,9 +86,8 @@ export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
           </div>
           <div className="relative flex items-end justify-around gap-2 sm:gap-4" style={{ height: H }}>
             {weeks.map((w, i) => {
-              const v = values[i];
               const current = i === weeks.length - 1;
-              const h = Math.max(12, (v / top) * H);
+              const tallest = Math.max(h(w.shot), h(w.edited), h(w.posted));
               return (
                 <div
                   key={w.label}
@@ -86,23 +95,39 @@ export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
                   onMouseEnter={() => setHover(i)}
                   onMouseLeave={() => setHover(null)}
                 >
-                  {(hover === i || current) && (
-                    <span
-                      className="absolute z-10 -translate-y-full rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold tabular-nums text-neutral-900 shadow"
-                      style={{ bottom: h + 6 }}
+                  {hover === i && (
+                    <div
+                      className="absolute z-10 -translate-y-full whitespace-nowrap rounded-xl border border-white/15 bg-popover px-2.5 py-1.5 text-[11px] tabular-nums shadow-xl"
+                      style={{ bottom: tallest + 8 }}
                     >
-                      {v}
-                    </span>
+                      {SERIES.map((s) => (
+                        <div key={s.key} className="flex items-center gap-1.5">
+                          <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+                          <span className="text-white/60">{s.label}</span>
+                          <span className="ml-auto pl-3 font-semibold">{w[s.key]}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  <div
-                    className={cn(
-                      "w-full max-w-[52px] rounded-[16px] border transition-all duration-500",
-                      current
-                        ? "border-blue-300/40 bg-gradient-to-b from-blue-400 to-blue-600/50 shadow-[0_0_30px_-4px_rgba(59,130,246,0.65)]"
-                        : "border-white/15 bg-gradient-to-b from-white/35 to-white/[0.06] hover:from-white/45"
+                  <div className={cn("relative h-full w-full max-w-[56px]", current && "drop-shadow-[0_0_14px_rgba(255,255,255,0.18)]")}>
+                    {SERIES.map((s) => {
+                      const v = w[s.key];
+                      if (v <= 0) return null;
+                      return (
+                        <div
+                          key={s.key}
+                          className={cn(
+                            "absolute bottom-0 left-1/2 -translate-x-1/2 rounded-[16px] border transition-all duration-500",
+                            s.bar
+                          )}
+                          style={{ width: s.width, height: h(v) }}
+                        />
+                      );
+                    })}
+                    {w.shot + w.edited + w.posted === 0 && (
+                      <div className="absolute bottom-0 left-1/2 h-1.5 w-full -translate-x-1/2 rounded-full bg-white/10" />
                     )}
-                    style={{ height: h }}
-                  />
+                  </div>
                 </div>
               );
             })}
