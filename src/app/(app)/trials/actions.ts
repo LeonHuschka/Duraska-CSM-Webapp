@@ -167,7 +167,7 @@ export async function openCellJob(cellId: string) {
       title,
       // Short on purpose: the trial page holds the brief, and a round has
       // as many reshoots as the team set, not what a sentence would freeze.
-      description: `🧪 Trial-Maxxing · ${name} · ${acc}`,
+      description: `🧪 Trial-Maxxing · ${name} · ${acc}${cell.brief?.trim() ? `\n\n${cell.brief.trim()}` : ""}`,
       inspo_link: trial.post_url,
       status: "requested",
       position: (maxRow?.position ?? 0) + 1,
@@ -284,6 +284,35 @@ export async function setCellLabel(cellId: string, label: string) {
   return { error: null };
 }
 
+/**
+ * What the model is to do in a variation, or the team's own notes on it.
+ * The brief also goes into the job's description, so the editor reads it.
+ */
+export async function setCellText(cellId: string, field: "brief" | "notes", text: string) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers write here" };
+  const value = text.trim().slice(0, 1000) || null;
+  const { data: cell } = await supabase
+    .from("trial_cells")
+    .update(field === "brief" ? { brief: value, updated_at: new Date().toISOString() } : { notes: value, updated_at: new Date().toISOString() })
+    .eq("id", cellId)
+    .select("trial_id, request_id, dimension, slot, label")
+    .maybeSingle();
+  if (!cell) return { error: "No such variation" };
+  if (field === "brief" && cell.request_id) {
+    const { data: req } = await supabase.from("content_requests").select("description").eq("id", cell.request_id).maybeSingle();
+    const head = (req?.description ?? "").split("\n\n")[0] || `🧪 Trial-Maxxing · ${cellName({ dimension: cell.dimension as Dimension, slot: cell.slot, label: cell.label })}`;
+    await supabase
+      .from("content_requests")
+      .update({ description: value ? `${head}\n\n${value}` : head })
+      .eq("id", cell.request_id);
+  }
+  touch(cell.trial_id);
+  return { error: null };
+}
+
 export async function toggleWinner(cellId: string) {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
@@ -296,10 +325,7 @@ export async function toggleWinner(cellId: string) {
   return { error: null };
 }
 
-/**
- * Decide the round and open the next one. Without winners picked by hand
- * the two posted cells with the most views win.
- */
+/** Decide the round and open the next one — with the winners the team picked. */
 export async function advanceTrial(trialId: string) {
   const supabase = await createClient();
   const personaId = await requireActivePersonaId();
@@ -310,12 +336,7 @@ export async function advanceTrial(trialId: string) {
   if (t.phase === "done") return { error: "This trial is finished" };
   const d = t.phase as Dimension;
   const row = t.cells.filter((c) => c.dimension === d);
-  if (!row.some((c) => c.winner)) {
-    const ranked = row.filter((c) => c.state === "posted" && c.views != null).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-    if (ranked.length === 0) return { error: "Nothing in this round has been posted and read yet — pick winners by hand" };
-    const top = ranked.slice(0, 2).map((c) => c.id);
-    await supabase.from("trial_cells").update({ winner: true }).in("id", top);
-  }
+  if (!row.some((c) => c.winner)) return { error: "Pick the winner of this round first" };
   const after = DIMENSIONS[DIMENSIONS.indexOf(d) + 1] as Dimension | undefined;
   const next = (after ?? "done") as Phase;
   await supabase

@@ -56,7 +56,17 @@ export type CellView = {
   winner: boolean;
   /** The first take, signed, for drawing a picture when the cell has none. */
   firstTake: { url: string; mime: string | null } | null;
+  /** What she plays on the tile: the first cut, else the first take. */
+  video: { url: string; cut: boolean } | null;
+  /** Plays of each post of the job, per account, biggest first. */
+  plays: CellPlays[];
+  /** What the model is to do in this variation (the team writes it, she reads it). */
+  brief: string | null;
+  /** The team's own notes; left out of the page for the model. */
+  notes: string | null;
 };
+
+export type CellPlays = { accountId: string; label: string; avatar: string | null; platform: string; views: number; url: string | null };
 
 export type TrialView = {
   id: string;
@@ -189,7 +199,7 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
         supabase.from("schedule_slots").select("request_id, status, posted_at, scheduled_for").in("request_id", ids).eq("status", "posted"),
         supabase
           .from("reel_metrics")
-          .select("request_id, account_id, shortcode, views, captured_at")
+          .select("request_id, account_id, shortcode, post_url, views, captured_at")
           .in("request_id", ids)
           .eq("source", "scrape")
           .order("captured_at", { ascending: false }),
@@ -200,8 +210,10 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
   const cuts = new Map<string, number>();
   const firstThumb = new Map<string, string>();
   const firstRaw = new Map<string, { path: string; mime: string | null }>();
+  const firstCut = new Map<string, string>();
   for (const a of (assets.data ?? []) as { request_id: string; stage: string; thumbnail_path: string | null; file_path: string; mime_type: string | null }[]) {
     if (a.stage === "raw" && !firstRaw.has(a.request_id)) firstRaw.set(a.request_id, { path: a.file_path, mime: a.mime_type });
+    if (a.stage === "edited" && !firstCut.has(a.request_id)) firstCut.set(a.request_id, a.file_path);
     if (a.stage === "raw") takes.set(a.request_id, (takes.get(a.request_id) ?? 0) + 1);
     else cuts.set(a.request_id, (cuts.get(a.request_id) ?? 0) + 1);
     if (a.thumbnail_path && !firstThumb.has(a.request_id)) firstThumb.set(a.request_id, a.thumbnail_path);
@@ -211,16 +223,26 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
     const at = s.posted_at ?? s.scheduled_for ?? "";
     if (!postedAt.has(s.request_id) || at < postedAt.get(s.request_id)!) postedAt.set(s.request_id, at);
   }
-  // Views: the latest reading of each post of the job on the trial's account, summed.
-  const latest = new Map<string, number>();
+  // Views: the latest reading of each post of the job, per account. The
+  // tile's headline number is the trial's own account; every account shows.
+  const latest = new Set<string>();
   const viewsByReq = new Map<string, number>();
-  for (const r of (reels.data ?? []) as { request_id: string; account_id: string | null; shortcode: string | null; views: number | null }[]) {
-    if (accountId && r.account_id !== accountId) continue;
+  const perAccount = new Map<string, Map<string, { views: number; url: string | null }>>();
+  for (const r of (reels.data ?? []) as { request_id: string; account_id: string | null; shortcode: string | null; post_url: string | null; views: number | null }[]) {
     const k = `${r.request_id}|${r.shortcode}`;
-    if (latest.has(k) || r.views == null) continue;
-    latest.set(k, r.views);
-    viewsByReq.set(r.request_id, (viewsByReq.get(r.request_id) ?? 0) + r.views);
+    if (latest.has(k) || r.views == null || !r.account_id) continue;
+    latest.add(k);
+    if (!accountId || r.account_id === accountId) viewsByReq.set(r.request_id, (viewsByReq.get(r.request_id) ?? 0) + r.views);
+    const m = perAccount.get(r.request_id) ?? new Map<string, { views: number; url: string | null }>();
+    const had = m.get(r.account_id);
+    m.set(r.account_id, { views: (had?.views ?? 0) + r.views, url: had?.url ?? r.post_url });
+    perAccount.set(r.request_id, m);
   }
+  const accIds = Array.from(new Set(Array.from(perAccount.values()).flatMap((m) => Array.from(m.keys()))));
+  const { data: accRows } = accIds.length
+    ? await supabase.from("accounts").select("id, handle, display_name, platform, avatar_path").in("id", accIds)
+    : { data: [] as { id: string; handle: string; display_name: string | null; platform: string; avatar_path: string | null }[] };
+  const accOf = new Map((accRows ?? []).map((a) => [a.id, a]));
 
   const thumbPaths = cells
     .map((c) => c.thumb_path ?? (c.request_id ? firstThumb.get(c.request_id) : undefined))
@@ -229,8 +251,19 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
   const needPicture = cells
     .filter((c) => !c.thumb_path && c.request_id && !firstThumb.has(c.request_id) && firstRaw.has(c.request_id))
     .map((c) => firstRaw.get(c.request_id!)!.path);
-  const signed = await sign(supabase, [...thumbPaths, ...needPicture]);
+  const videoPaths = cells
+    .map((c) => (c.request_id ? firstCut.get(c.request_id) ?? firstRaw.get(c.request_id)?.path : undefined))
+    .filter((p): p is string => !!p);
+  const avatarPaths = (accRows ?? []).map((a) => a.avatar_path).filter((p): p is string => !!p);
+  const signed = await sign(supabase, [...thumbPaths, ...needPicture, ...videoPaths, ...avatarPaths]);
 
+  const videoOf = (rid: string | null) => {
+    if (!rid) return null;
+    const cut = firstCut.get(rid);
+    if (cut && signed.has(cut)) return { url: signed.get(cut)!, cut: true };
+    const raw = firstRaw.get(rid);
+    return raw && signed.has(raw.path) ? { url: signed.get(raw.path)!, cut: false } : null;
+  };
   return cells.map((c) => {
     const req = c.request_id ? reqById.get(c.request_id) : undefined;
     const n = c.request_id ? takes.get(c.request_id) ?? 0 : 0;
@@ -263,6 +296,22 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
         !thumbPath && c.request_id && firstRaw.has(c.request_id) && signed.has(firstRaw.get(c.request_id)!.path)
           ? { url: signed.get(firstRaw.get(c.request_id)!.path)!, mime: firstRaw.get(c.request_id)!.mime }
           : null,
+      video: videoOf(c.request_id),
+      plays: Array.from((c.request_id ? perAccount.get(c.request_id) : undefined)?.entries() ?? [])
+        .map(([id, v]) => {
+          const a = accOf.get(id);
+          return {
+            accountId: id,
+            label: a ? a.display_name || accountLabel(a.handle) : "account gone",
+            avatar: a?.avatar_path ? signed.get(a.avatar_path) ?? null : null,
+            platform: a?.platform ?? "instagram",
+            views: v.views,
+            url: v.url,
+          };
+        })
+        .sort((a, b) => b.views - a.views),
+      brief: c.brief ?? null,
+      notes: c.notes ?? null,
     };
   });
 }

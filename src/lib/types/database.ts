@@ -1197,6 +1197,8 @@ export type Database = {
           thumb_path: string | null;
           finished_at: string | null;
           winner: boolean;
+          brief: string | null;
+          notes: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1210,6 +1212,8 @@ export type Database = {
           thumb_path?: string | null;
           finished_at?: string | null;
           winner?: boolean;
+          brief?: string | null;
+          notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1223,6 +1227,8 @@ export type Database = {
           thumb_path?: string | null;
           finished_at?: string | null;
           winner?: boolean;
+          brief?: string | null;
+          notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };

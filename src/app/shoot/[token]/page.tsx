@@ -119,6 +119,12 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
         </a>
       )}
 
+      {cell.brief && (
+        <div className="rounded-xl border border-primary/40 bg-primary/10 p-3">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-primary">What to do in this one</p>
+          <p className="mt-1 whitespace-pre-line text-sm">{cell.brief}</p>
+        </div>
+      )}
       <div className="rounded-xl border border-border/50 bg-card p-3">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">This round</p>
         <p className="mt-1 text-sm">{brief}</p>

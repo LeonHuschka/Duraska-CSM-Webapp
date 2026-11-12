@@ -77,7 +77,8 @@ export default async function TrialPage({
         phase: t.phase,
         status: t.status,
         reshoots: t.reshoots,
-        cells: t.cells,
+        // The team's notes stay off the model's page.
+        cells: staff ? t.cells : t.cells.map((c) => ({ ...c, notes: null })),
         briefs,
       }}
       staff={staff}

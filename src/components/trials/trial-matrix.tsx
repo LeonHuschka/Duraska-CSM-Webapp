@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowUpRight, Check, ChevronDown, Film, Loader2, Lock, Minus, Play, Plus, Trophy } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, Film, Loader2, Minus, Play, Plus, Trophy, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -23,6 +23,7 @@ import {
   openCellJob,
   recordTake,
   setCellLabel,
+  setCellText,
   setCellThumb,
   setTrialReshoots,
   toggleWinner,
@@ -46,6 +47,10 @@ export type MatrixCell = {
   postedAt: string | null;
   winner: boolean;
   firstTake: { url: string; mime: string | null } | null;
+  video: { url: string; cut: boolean } | null;
+  plays: { accountId: string; label: string; avatar: string | null; platform: string; views: number; url: string | null }[];
+  brief: string | null;
+  notes: string | null;
 };
 export type MatrixTrial = {
   id: string;
@@ -67,10 +72,10 @@ export type MatrixTrial = {
 };
 
 const DIMS: Dimension[] = ["outfit", "location", "hook"];
-const META: Record<Dimension, { title: string; one: string }> = {
-  outfit: { title: "Outfits", one: "Outfit" },
-  location: { title: "Locations", one: "Location" },
-  hook: { title: "Hooks", one: "Hook" },
+const META: Record<Dimension, { title: string; one: string; emoji: string }> = {
+  outfit: { title: "Outfits", one: "Outfit", emoji: "👗" },
+  location: { title: "Locations", one: "Location", emoji: "📍" },
+  hook: { title: "Hooks", one: "Hook", emoji: "🪝" },
 };
 const nf = new Intl.NumberFormat("de-DE");
 const short = (n: number) =>
@@ -78,12 +83,22 @@ const short = (n: number) =>
 const name = (c: Pick<MatrixCell, "dimension" | "slot" | "label">) => c.label?.trim() || `${META[c.dimension].one} ${c.slot}`;
 const phaseIdx = (p: Phase) => (p === "done" ? 3 : DIMS.indexOf(p));
 const doneCount = (row: MatrixCell[]) => row.filter((c) => c.state !== "empty" && c.state !== "takes").length;
+const totalPlays = (c: MatrixCell) => c.plays.reduce((a, p) => a + p.views, 0);
+
+const STATE_CHIP: Record<CellState, { label: string; cls: string }> = {
+  empty: { label: "To shoot", cls: "bg-black/60 text-white/80" },
+  takes: { label: "Takes in", cls: "bg-sky-500/90 text-white" },
+  finished: { label: "With editor", cls: "bg-violet-500/90 text-white" },
+  edited: { label: "Cut", cls: "bg-indigo-500/90 text-white" },
+  posted: { label: "Posted", cls: "bg-emerald-500 text-white" },
+};
 
 /**
- * The trial: the outlier and the three rounds of six. On a phone only the
- * round she is in is open; the others are one line each. On a computer
- * it is the table from the whiteboard — a row per round, a column per
- * variation, the outlier on top.
+ * The trial as a work board: the outlier and its numbers on top, then a
+ * round per row — outfits, locations, hooks — with every variation as a
+ * reel to play, its plays on each account, what the model is to do in it
+ * and the team's notes. The team picks each round's winner by hand; the
+ * round is decided only once one is picked.
  */
 export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; staff: boolean; backHref: string }) {
   const router = useRouter();
@@ -105,7 +120,7 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
   }, [trial.video, trial.id, trial.postUrl, router]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-16">
+    <div className="mx-auto max-w-6xl space-y-4 pb-16">
       <div className="flex items-center justify-between gap-3">
         <Link href={backHref} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Back
@@ -118,78 +133,23 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
         )}
       </div>
 
-      {staff && <ReshootCount trialId={trial.id} value={trial.reshoots} onChanged={refresh} />}
+      <Header trial={trial} winners={winners} staff={staff} onChanged={refresh} />
 
-      {/* ── Phone ── */}
-      <div className="space-y-3 md:hidden">
-        <OutlierCard trial={trial} />
-        {DIMS.map((d, i) => (
-          <MobileRound
-            key={d}
-            d={d}
-            index={i}
-            row={rows[i]}
-            state={i < pIdx ? "decided" : i === pIdx ? "now" : "later"}
-            brief={trial.briefs[d]}
-            winners={winners(d)}
-            staff={staff}
-            trialId={trial.id}
-            onOpen={setOpenId}
-          />
-        ))}
-        {trial.phase === "done" && <Pattern trial={trial} winners={winners} />}
-      </div>
-
-      {/* ── Computer: the table ── */}
-      <div className="hidden overflow-hidden rounded-2xl border border-border/50 bg-card md:block">
-        <table className="w-full border-collapse">
-          <tbody>
-            <tr className="border-b border-border/50">
-              <th className="w-44 p-4 text-left align-top text-sm font-medium">Outlier</th>
-              <td className="p-4">
-                <OutlierInline trial={trial} />
-              </td>
-            </tr>
-            {DIMS.map((d, i) => {
-              // Every round can be shot at any time; only the deciding goes in order.
-              const state = i < pIdx ? "decided" : i === pIdx ? "now" : "later";
-              return (
-                <tr key={d} className="border-b border-border/50 last:border-0">
-                  <th className="w-44 p-4 text-left align-top">
-                    <p className="text-sm font-medium">
-                      {rows[i].length} {META[d].title}
-                    </p>
-                    <p className="mt-1 text-[11px] font-normal text-muted-foreground">
-                      {state === "decided" ? "Decided" : `${doneCount(rows[i])} of ${rows[i].length} shot`}
-                    </p>
-                    {state === "decided" && winners(d).length > 0 && (
-                      <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-normal text-amber-300">
-                        <Trophy className="h-3 w-3" /> {winners(d).join(", ")}
-                      </p>
-                    )}
-                    {state === "now" && staff && <DecideButton trialId={trial.id} index={i} row={rows[i]} compact />}
-                  </th>
-                  <td className="p-4">
-                    {state !== "decided" && <p className="mb-3 text-xs text-muted-foreground">{trial.briefs[d]}</p>}
-                    <div
-                      className="grid gap-3"
-                      style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(rows[i].length, 1), 6)}, minmax(0, 1fr))` }}
-                    >
-                      {rows[i].map((c) => (
-                        <CellTile key={c.id} c={c} locked={false} onOpen={() => setOpenId(c.id)} />
-                      ))}
-                    </div>
-                    {staff && rows[i].some((c) => c.views != null) && (
-                      <Ranking row={rows[i]} decided={state === "decided"} />
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className="hidden md:block">{trial.phase === "done" && <Pattern trial={trial} winners={winners} />}</div>
+      {DIMS.map((d, i) => (
+        <Round
+          key={d}
+          d={d}
+          index={i}
+          row={rows[i]}
+          state={i < pIdx ? "decided" : i === pIdx ? "now" : "later"}
+          brief={trial.briefs[d]}
+          winners={winners(d)}
+          trial={trial}
+          staff={staff}
+          onOpen={setOpenId}
+          onChanged={refresh}
+        />
+      ))}
 
       {staff && trial.status === "active" && (
         <div className="text-center">
@@ -208,7 +168,7 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
         </div>
       )}
 
-      <CellSheet cell={open} trial={trial} staff={staff} onClose={() => setOpenId(null)} onChanged={() => router.refresh()} />
+      <CellSheet cell={open} trial={trial} staff={staff} onClose={() => setOpenId(null)} onChanged={refresh} />
     </div>
   );
 }
@@ -253,77 +213,144 @@ function useMissingPictures(trial: MatrixTrial, refresh: () => void) {
   }, [trial.cells, trial.id, trial.personaId, refresh]);
 }
 
-/** The outlier, playable: the reel she is reshooting. */
-function OutlierPlayer({ trial, className }: { trial: MatrixTrial; className: string }) {
+/** A reel in 9:16: its picture, and the video in place once played. */
+function ReelPlayer({
+  video,
+  poster,
+  className = "",
+  onEmpty,
+  children,
+}: {
+  video: string | null;
+  poster: string | null;
+  className?: string;
+  onEmpty?: () => void;
+  children?: React.ReactNode;
+}) {
   const [playing, setPlaying] = useState(false);
   return (
-    <div className={`relative overflow-hidden rounded-xl bg-muted ${className}`}>
-      {playing && trial.video ? (
-        <video src={trial.video} autoPlay controls playsInline className="h-full w-full bg-black object-cover" />
+    <div className={`relative aspect-[9/16] w-full overflow-hidden rounded-xl bg-muted ${className}`}>
+      {playing && video ? (
+        <video src={video} poster={poster ?? undefined} autoPlay controls playsInline className="h-full w-full bg-black object-cover" />
       ) : (
         <button
           type="button"
-          onClick={() => (trial.video ? setPlaying(true) : trial.postUrl && window.open(trial.postUrl, "_blank", "noreferrer"))}
+          onClick={() => (video ? setPlaying(true) : onEmpty?.())}
           className="group block h-full w-full"
+          title={video ? "Play" : undefined}
         >
-          {trial.cover && <img src={trial.cover} alt="" className="h-full w-full object-cover" />}
-          <span className="absolute inset-0 flex items-center justify-center">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-transform group-active:scale-95">
-              {trial.video ? <Play className="h-5 w-5 fill-white text-white" /> : <Loader2 className="h-5 w-5 animate-spin text-white/70" />}
+          {poster && <img src={poster} alt="" className="h-full w-full object-cover" />}
+          {!poster && video && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <Film className="h-6 w-6 text-muted-foreground" />
             </span>
-          </span>
+          )}
+          {video && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm transition-transform group-hover:scale-105 group-active:scale-95">
+                <Play className="h-5 w-5 fill-white text-white" />
+              </span>
+            </span>
+          )}
         </button>
       )}
+      {!playing && children}
     </div>
   );
 }
 
-function OutlierStats({ trial }: { trial: MatrixTrial }) {
+/** The outlier, the bar to beat, and where the trial stands. */
+function Header({
+  trial,
+  winners,
+  staff,
+  onChanged,
+}: {
+  trial: MatrixTrial;
+  winners: (d: Dimension) => string[];
+  staff: boolean;
+  onChanged: () => void;
+}) {
+  const pIdx = phaseIdx(trial.phase);
+  const median = trial.account?.median ?? null;
   return (
-    <div className="min-w-0">
-      <p className="text-[11px] text-muted-foreground">The reel to reshoot</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{trial.views != null ? nf.format(trial.views) : "—"}</p>
-      <p className="text-[11px] text-muted-foreground">
-        plays{trial.lift ? ` · ${trial.lift.toFixed(0)}× the usual` : ""}
-      </p>
-      {trial.caption && <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{trial.caption}</p>}
-      {trial.postUrl && (
-        <a href={trial.postUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
-          Open on {trial.account?.platform === "facebook" ? "Facebook" : "Instagram"} <ArrowUpRight className="h-3 w-3" />
-        </a>
-      )}
+    <div className="flex flex-col gap-5 rounded-2xl border border-border/50 bg-card p-4 sm:flex-row">
+      <div className="w-36 shrink-0 self-center sm:self-start">
+        <ReelPlayer video={trial.video} poster={trial.cover} />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+          <div>
+            <p className="text-[11px] text-muted-foreground">Outlier · the reel to reshoot</p>
+            <p className="text-3xl font-semibold tabular-nums">{trial.views != null ? nf.format(trial.views) : "—"}</p>
+            <p className="text-[11px] text-muted-foreground">
+              plays{trial.lift ? ` · ${trial.lift.toFixed(0)}× the usual` : ""}
+            </p>
+          </div>
+          {median != null && (
+            <div>
+              <p className="text-[11px] text-muted-foreground">Usual on {trial.account?.label}</p>
+              <p className="text-xl font-semibold tabular-nums">{nf.format(median)}</p>
+              <p className="text-[11px] text-muted-foreground">plays a reel</p>
+            </div>
+          )}
+          {trial.postUrl && (
+            <a
+              href={trial.postUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-0.5 pb-0.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Open on {trial.account?.platform === "facebook" ? "Facebook" : "Instagram"} <ArrowUpRight className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+        {trial.caption && <p className="line-clamp-2 text-xs text-muted-foreground">{trial.caption}</p>}
+
+        {/* Where it stands: one step per round, the winners as they are picked. */}
+        <div className="grid grid-cols-3 gap-2">
+          {DIMS.map((d, i) => {
+            const w = winners(d);
+            const state = i < pIdx ? "decided" : i === pIdx ? "now" : "later";
+            return (
+              <div
+                key={d}
+                className={`rounded-xl border px-3 py-2 ${
+                  state === "now" ? "border-primary/60 bg-primary/10" : state === "decided" ? "border-amber-400/40 bg-amber-400/5" : "border-border/50"
+                }`}
+              >
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Round {i + 1} · {state === "decided" ? "decided" : state === "now" ? "now" : "next"}
+                </p>
+                <p className="mt-0.5 truncate text-sm font-medium">
+                  {META[d].emoji} {w.length ? w.join(", ") : META[d].title}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+        {trial.phase === "done" && (
+          <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+            Pattern found: {DIMS.map((d) => winners(d).join(" / ") || "—").join(" · ")}
+          </p>
+        )}
+        {staff && <ReshootCount trialId={trial.id} value={trial.reshoots} onChanged={onChanged} />}
+      </div>
     </div>
   );
 }
 
-function OutlierCard({ trial }: { trial: MatrixTrial }) {
-  return (
-    <div className="flex gap-4 rounded-2xl border border-border/50 bg-card p-3">
-      <OutlierPlayer trial={trial} className="aspect-[9/16] w-28 shrink-0" />
-      <OutlierStats trial={trial} />
-    </div>
-  );
-}
-
-function OutlierInline({ trial }: { trial: MatrixTrial }) {
-  return (
-    <div className="flex gap-5">
-      <OutlierPlayer trial={trial} className="aspect-[9/16] w-32 shrink-0" />
-      <OutlierStats trial={trial} />
-    </div>
-  );
-}
-
-function MobileRound({
+function Round({
   d,
   index,
   row,
   state,
   brief,
   winners,
+  trial,
   staff,
-  trialId,
   onOpen,
+  onChanged,
 }: {
   d: Dimension;
   index: number;
@@ -331,163 +358,281 @@ function MobileRound({
   state: "decided" | "now" | "later";
   brief: string;
   winners: string[];
+  trial: MatrixTrial;
   staff: boolean;
-  trialId: string;
   onOpen: (id: string) => void;
+  onChanged: () => void;
 }) {
-  const [expanded, setExpanded] = useState(state === "now");
   const shot = doneCount(row);
-  const head = (
-    <div className="flex w-full items-center justify-between gap-3">
-      <div className="min-w-0 text-left">
-        <p className="text-sm font-medium">
-          {index + 1}. {META[d].title}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          {state === "decided"
-            ? winners.length
-              ? `Winner: ${winners.join(", ")}`
-              : "Decided"
-            : `${shot} of ${row.length} shot`}
-        </p>
-      </div>
-      {state !== "now" ? (
-        <span className="flex shrink-0 items-center gap-2">
-          {state === "decided" && <Check className="h-4 w-4 text-emerald-400" />}
-          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
-        </span>
-      ) : null}
-    </div>
-  );
+  const posted = row.filter((c) => c.state === "posted").length;
+  // Rank by plays across all accounts — the numbers to decide on.
+  const ranked = row.filter((c) => c.plays.length).sort((a, b) => totalPlays(b) - totalPlays(a));
+  const rank = new Map(ranked.map((c, i) => [c.id, i + 1]));
+  const best = ranked[0] ? totalPlays(ranked[0]) : 0;
   return (
-    <div className="rounded-2xl border border-border/50 bg-card p-4">
-      {state !== "now" ? (
-        <button type="button" className="w-full" onClick={() => setExpanded((x) => !x)}>
-          {head}
-        </button>
-      ) : (
-        head
-      )}
-      {expanded && (
-        <>
-          {state !== "decided" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            {row.map((c) => (
-              <CellTile key={c.id} c={c} locked={false} onOpen={() => onOpen(c.id)} />
-            ))}
-          </div>
-          {staff && row.some((c) => c.views != null) && <Ranking row={row} decided={state === "decided"} />}
-          {staff && state === "now" && <DecideButton trialId={trialId} index={index} row={row} />}
-        </>
-      )}
-    </div>
-  );
-}
-
-function CellTile({ c, locked, onOpen }: { c: MatrixCell; locked: boolean; onOpen: () => void }) {
-  const filled = c.state !== "empty";
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      disabled={locked}
-      className={`relative aspect-[4/5] overflow-hidden rounded-xl text-left transition-transform active:scale-[0.97] ${
-        filled ? "bg-muted" : "border border-dashed border-border bg-muted/20 hover:border-foreground/40"
-      } ${c.winner ? "ring-2 ring-amber-400" : ""}`}
+    <section
+      className={`rounded-2xl border bg-card p-4 ${state === "now" ? "border-primary/40" : "border-border/50"} ${state === "later" ? "opacity-90" : ""}`}
     >
-      {filled && c.thumb && <img src={c.thumb} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-      {filled && !c.thumb && (
-        <span className="absolute inset-0 flex items-center justify-center">
-          <Film className="h-5 w-5 text-muted-foreground" />
-        </span>
-      )}
-      {!filled && (
-        <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-          {locked ? <Lock className="h-4 w-4 opacity-50" /> : <Plus className="h-5 w-5" />}
-        </span>
-      )}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Round {index + 1}
+            {state === "now" ? " · now" : state === "decided" ? " · decided" : ""}
+          </p>
+          <h2 className="text-base font-semibold">
+            {META[d].emoji} {row.length} {META[d].title}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {shot} of {row.length} shot · {posted} posted
+            {winners.length > 0 && <span className="text-amber-300"> · winner: {winners.join(", ")}</span>}
+          </p>
+        </div>
+        {staff && state === "now" && <DecideButton trialId={trial.id} index={index} row={row} />}
+      </div>
+      {state !== "decided" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
 
-      {/* takes · ✓ · 100% */}
-      {c.state === "takes" && (
-        <span className="absolute right-1.5 top-1.5 min-w-5 rounded-full bg-black/70 px-1.5 py-0.5 text-center text-[11px] font-semibold tabular-nums text-white">
-          {c.takes}
-        </span>
-      )}
-      {(c.state === "finished" || c.state === "edited") && (
-        <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white">
-          <Check className="h-3.5 w-3.5" strokeWidth={3} />
-        </span>
-      )}
-      {c.state === "posted" && (
-        <span className="absolute right-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold text-white">100%</span>
-      )}
-      {c.winner && (
-        <span className="absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-black">
-          <Trophy className="h-3 w-3" />
-        </span>
-      )}
-
-      <span
-        className={`absolute inset-x-0 bottom-0 px-2 pb-1.5 pt-4 text-[10px] leading-tight ${
-          filled ? "bg-gradient-to-t from-black/70 to-transparent text-white" : "text-muted-foreground"
-        }`}
-      >
-        <span className="block truncate">{name(c)}</span>
-        {c.views != null && <span className="block font-semibold tabular-nums">{short(c.views)} plays</span>}
-      </span>
-    </button>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        {row.map((c) => (
+          <VariantCard
+            key={c.id}
+            c={c}
+            rank={rank.get(c.id) ?? null}
+            best={best}
+            outlier={trial.views}
+            staff={staff}
+            onOpen={() => onOpen(c.id)}
+            onChanged={onChanged}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
-/** Staff only: the posted variations by plays, with the winner switch. */
-function Ranking({ row, decided }: { row: MatrixCell[]; decided: boolean }) {
-  const router = useRouter();
-  const [, start] = useTransition();
-  const ranked = row.filter((c) => c.views != null).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-  const top = Math.max(1, ...ranked.map((c) => c.views ?? 0));
+/** One variation: the reel, its plays per account, the brief for her, the team's notes. */
+function VariantCard({
+  c,
+  rank,
+  best,
+  outlier,
+  staff,
+  onOpen,
+  onChanged,
+}: {
+  c: MatrixCell;
+  rank: number | null;
+  best: number;
+  outlier: number | null;
+  staff: boolean;
+  onOpen: () => void;
+  onChanged: () => void;
+}) {
+  const [busy, start] = useTransition();
+  const total = totalPlays(c);
+  const chip = STATE_CHIP[c.state];
+  const stateLine =
+    c.state === "empty"
+      ? "Nothing shot yet"
+      : c.state === "takes"
+        ? `${c.takes} take${c.takes === 1 ? "" : "s"} in`
+        : c.state === "finished"
+          ? `With the editor · ${c.takes} takes`
+          : c.state === "edited"
+            ? "Cut — waiting to be posted"
+            : "Posted";
   return (
-    <div className="mt-3 space-y-1">
-      {ranked.map((c) => (
-        <div key={c.id} className="flex items-center gap-2 text-[11px]">
-          <span className="w-24 shrink-0 truncate text-muted-foreground">{name(c)}</span>
-          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-            <span className={`block h-full rounded-full ${c.winner ? "bg-amber-400" : "bg-foreground/40"}`} style={{ width: `${((c.views ?? 0) / top) * 100}%` }} />
+    <div className={`flex min-w-0 flex-col gap-2 rounded-xl p-1.5 ${c.winner ? "bg-amber-400/10 ring-2 ring-amber-400" : ""}`}>
+      <ReelPlayer video={c.video?.url ?? null} poster={c.thumb} onEmpty={onOpen} className={c.state === "empty" ? "border border-dashed border-border bg-muted/20" : ""}>
+        {c.state === "empty" && (
+          <button type="button" onClick={onOpen} className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-foreground">
+            <Plus className="h-5 w-5" />
+            <span className="text-[11px]">Upload takes</span>
+          </button>
+        )}
+        <span className={`pointer-events-none absolute right-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${chip.cls}`}>{chip.label}</span>
+        {c.winner ? (
+          <span className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-black">
+            <Trophy className="h-3 w-3" /> Winner
           </span>
-          <span className="w-12 shrink-0 text-right tabular-nums">{short(c.views ?? 0)}</span>
-          {!decided && (
-            <button
-              type="button"
-              onClick={() =>
-                start(async () => {
-                  const r = await toggleWinner(c.id);
-                  if (r.error) toast.error(r.error);
-                  router.refresh();
-                })
-              }
-              className={`p-0.5 ${c.winner ? "text-amber-400" : "text-muted-foreground/40 hover:text-amber-400"}`}
-              title={c.winner ? "Winner — click to undo" : "Mark as winner"}
-            >
-              <Trophy className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      ))}
+        ) : rank ? (
+          <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white">#{rank}</span>
+        ) : null}
+        {c.video && !c.video.cut && (
+          <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1 text-[9px] text-white/80">raw take</span>
+        )}
+      </ReelPlayer>
+
+      {staff ? <NameField c={c} onChanged={onChanged} /> : <p className="truncate text-sm font-medium">{name(c)}</p>}
+      <p className="-mt-1.5 text-[10px] text-muted-foreground">{stateLine}</p>
+
+      {/* Plays on every account it went out on. */}
+      <div className="rounded-lg bg-muted/40 p-2">
+        {c.plays.length ? (
+          <>
+            <div className="flex items-baseline justify-between gap-1">
+              <span className="text-base font-semibold tabular-nums">{nf.format(total)}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {outlier ? `${Math.round((total / outlier) * 100)}% of outlier` : "plays"}
+              </span>
+            </div>
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+              <span className={`block h-full rounded-full ${c.winner ? "bg-amber-400" : "bg-foreground/50"}`} style={{ width: `${best ? (total / best) * 100 : 0}%` }} />
+            </div>
+            <div className="mt-1.5 space-y-1">
+              {c.plays.map((p) => (
+                <a
+                  key={p.accountId}
+                  href={p.url ?? undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] hover:text-foreground"
+                >
+                  <AccountAvatar src={p.avatar} platform={p.platform} label={p.label} size={14} />
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{p.label}</span>
+                  <span className="tabular-nums">{short(p.views)}</span>
+                </a>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">No plays yet — not posted</p>
+        )}
+      </div>
+
+      {staff ? (
+        <TextNote
+          value={c.brief}
+          placeholder="What she does in this one…"
+          label="For the model"
+          onSave={(t) => setCellText(c.id, "brief", t)}
+          onSaved={onChanged}
+          tone="brief"
+        />
+      ) : (
+        c.brief && (
+          <div className="rounded-lg border border-primary/40 bg-primary/10 p-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-primary">What to do</p>
+            <p className="whitespace-pre-line text-xs">{c.brief}</p>
+          </div>
+        )
+      )}
+      {staff && (
+        <TextNote value={c.notes} placeholder="Your notes on this one…" label="My notes" onSave={(t) => setCellText(c.id, "notes", t)} onSaved={onChanged} />
+      )}
+
+      <div className="mt-auto flex gap-1.5">
+        {staff && (
+          <Button
+            size="sm"
+            variant={c.winner ? "default" : "outline"}
+            disabled={busy}
+            className={`h-8 flex-1 px-2 text-[11px] ${c.winner ? "bg-amber-400 text-black hover:bg-amber-300" : ""}`}
+            onClick={() =>
+              start(async () => {
+                const r = await toggleWinner(c.id);
+                if (r.error) toast.error(r.error);
+                onChanged();
+              })
+            }
+          >
+            <Trophy className="mr-1 h-3.5 w-3.5" />
+            {c.winner ? "Winner" : "Make winner"}
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className="h-8 px-2 text-[11px]" onClick={onOpen} title="Upload takes">
+          <Upload className="h-3.5 w-3.5" />
+          {!staff && <span className="ml-1">Takes</span>}
+        </Button>
+      </div>
     </div>
   );
 }
 
-function DecideButton({ trialId, index, row, compact = false }: { trialId: string; index: number; row: MatrixCell[]; compact?: boolean }) {
+/** The variation's name, edited in place. */
+function NameField({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+  const [v, setV] = useState(c.label ?? "");
+  useEffect(() => setV(c.label ?? ""), [c.label]);
+  const save = async () => {
+    if (v.trim() === (c.label ?? "")) return;
+    const r = await setCellLabel(c.id, v);
+    if (r.error) toast.error(r.error);
+    else onChanged();
+  };
+  return (
+    <input
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      placeholder={`${META[c.dimension].one} ${c.slot} — name it`}
+      className="w-full truncate rounded bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground/70 hover:bg-muted/40 focus:bg-muted/60 focus:px-1"
+    />
+  );
+}
+
+/** A text that saves itself when you leave the field. */
+function TextNote({
+  value,
+  placeholder,
+  label,
+  onSave,
+  onSaved,
+  tone,
+}: {
+  value: string | null;
+  placeholder: string;
+  label: string;
+  onSave: (t: string) => Promise<{ error: string | null }>;
+  onSaved: () => void;
+  tone?: "brief";
+}) {
+  const [v, setV] = useState(value ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  useEffect(() => setV(value ?? ""), [value]);
+  const save = async () => {
+    if (v.trim() === (value ?? "").trim()) return;
+    setState("saving");
+    const r = await onSave(v);
+    if (r.error) {
+      setState("idle");
+      return void toast.error(r.error);
+    }
+    setState("saved");
+    setTimeout(() => setState("idle"), 1500);
+    onSaved();
+  };
+  return (
+    <label className="block">
+      <span className={`flex items-center justify-between text-[10px] font-medium uppercase tracking-wide ${tone === "brief" ? "text-primary" : "text-muted-foreground"}`}>
+        {label}
+        {state === "saving" && <Loader2 className="h-3 w-3 animate-spin" />}
+        {state === "saved" && <Check className="h-3 w-3 text-emerald-400" />}
+      </span>
+      <textarea
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={save}
+        rows={2}
+        placeholder={placeholder}
+        className={`mt-0.5 w-full resize-y rounded-lg border px-2 py-1.5 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-ring ${
+          tone === "brief" ? "border-primary/30 bg-primary/5" : "border-border/50 bg-muted/30"
+        }`}
+      />
+    </label>
+  );
+}
+
+function DecideButton({ trialId, index, row }: { trialId: string; index: number; row: MatrixCell[] }) {
   const router = useRouter();
   const [busy, start] = useTransition();
-  const posted = row.filter((c) => c.state === "posted").length;
+  const picked = row.filter((c) => c.winner).length;
   const next = DIMS[index + 1];
   return (
     <Button
       size="sm"
-      variant="outline"
-      disabled={busy || posted === 0}
-      title={posted === 0 ? "Decide once something of this round is posted" : row.some((c) => c.winner) ? undefined : "Without a pick, the two with most plays win"}
-      className={compact ? "mt-3 h-7 px-2 text-[11px]" : "mt-3 w-full"}
+      disabled={busy || picked === 0}
+      title={picked === 0 ? "Make one of them the winner first" : undefined}
+      className="h-8"
       onClick={() =>
         start(async () => {
           const r = await advanceTrial(trialId);
@@ -498,25 +643,8 @@ function DecideButton({ trialId, index, row, compact = false }: { trialId: strin
       }
     >
       {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trophy className="mr-1.5 h-3.5 w-3.5" />}
-      {next ? `Decide · open ${META[next].title.toLowerCase()}` : "Decide · pattern found"}
+      {picked === 0 ? "Pick a winner to decide" : next ? `Decide · open ${META[next].title.toLowerCase()}` : "Decide · pattern found"}
     </Button>
-  );
-}
-
-function Pattern({ trial, winners }: { trial: MatrixTrial; winners: (d: Dimension) => string[] }) {
-  void trial;
-  return (
-    <div className="rounded-2xl border border-border/50 bg-card p-4">
-      <p className="text-sm font-medium">Pattern found</p>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-        {DIMS.map((d) => (
-          <div key={d} className="rounded-xl bg-muted/40 p-2">
-            <p className="text-[10px] text-muted-foreground">{META[d].one}</p>
-            <p className="font-medium">{winners(d).join(", ") || "—"}</p>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -646,6 +774,12 @@ function CellSheet({
               <SheetTitle>{name(cell)}</SheetTitle>
               <SheetDescription className="text-xs leading-relaxed">{trial.briefs[cell.dimension]}</SheetDescription>
             </SheetHeader>
+            {cell.brief && (
+              <div className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2.5">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-primary">What to do in this one</p>
+                <p className="mt-0.5 whitespace-pre-line text-sm">{cell.brief}</p>
+              </div>
+            )}
 
             <p className="mt-4 text-sm">
               {cell.state === "posted"
