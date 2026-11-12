@@ -1,4 +1,5 @@
 import "server-only";
+import { layoutNote } from "@/lib/note-layout";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { deleteMessage, instagramKey, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
@@ -282,8 +283,15 @@ export function caption(url: string, note: string | null): string {
   return [
     `🔗 <b>Link:</b> ${esc(url)}`,
     // The note starts on its own line under the label.
-    note?.trim() ? `📝 <b>Notes:</b>\n${note.trim()}` : `📝 <b>Notes:</b> —`,
+    note?.trim() ? notesBlock(note.trim(), url.length) : `📝 <b>Notes:</b> —`,
   ].join("\n");
+}
+
+/** The note laid out for the model; as written when the layout would not fit a caption. */
+function notesBlock(note: string, urlLength: number): string {
+  const laid = layoutNote(note);
+  if (laid !== note && laid.length + urlLength + 40 <= 1024) return `\n${laid}`;
+  return `📝 <b>Notes:</b>\n${note}`;
 }
 
 /**
