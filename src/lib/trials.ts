@@ -362,7 +362,7 @@ export async function listTrials(supabase: Sb, personaId: string, includeDone = 
       started: row.filter((c) => c.state === "takes").length,
       toShoot: row.filter((c) => c.state === "empty" || c.state === "takes").length,
       total: row.length,
-      brief: t.phase === "done" ? "Pattern found" : roundBrief(dim, winners, t.reshoots),
+      brief: t.phase === "done" ? "Pattern found" : roundBrief(dim, winners, row.length),
       createdAt: t.createdAt,
     });
   }
@@ -538,7 +538,7 @@ export async function notifyTrial(trialId: string, kind: "round" | "done") {
             return [
               `🏆 <b>${DIM_META[prev ?? "outfit"].title} decided on ${esc(acc)}</b>${won.length ? ` · ${esc(won.join(", "))}` : ""}`,
               ``,
-              `${target.model ? `${target.model}, ` : ""}next up: ${view.reshoots} ${DIM_META[d].many} — ${esc(roundBrief(d, w, view.reshoots))}`,
+              `${target.model ? `${target.model}, ` : ""}next up: ${view.cells.filter((c) => c.dimension === d).length} ${DIM_META[d].many} — ${esc(roundBrief(d, w, view.cells.filter((c) => c.dimension === d).length))}`,
             ];
           })();
     const res = await sendMessage({

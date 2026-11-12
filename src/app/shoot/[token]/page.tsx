@@ -92,7 +92,7 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
   const cell = view?.cells.find((c) => c.id === cellId);
   if (!view || !cell) notFound();
   const running = view.status === "active" && view.phase === cell.dimension;
-  const brief = roundBrief(cell.dimension, winnersOf(view), view.reshoots);
+  const brief = roundBrief(cell.dimension, winnersOf(view), view.cells.filter((c) => c.dimension === cell.dimension).length);
 
   return (
     <main className="mx-auto min-h-dvh max-w-md space-y-5 bg-background px-4 pb-16 pt-6">

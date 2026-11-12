@@ -411,3 +411,102 @@ export async function setTrialReshoots(trialId: string, count: number) {
   touch(trialId);
   return { error: null };
 }
+
+/** The cells of a round numbered 1, 2, 3… again, after one left it. */
+async function compact(supabase: Sb, trialId: string, dimension: string) {
+  const { data: rest } = await supabase
+    .from("trial_cells")
+    .select("id, slot")
+    .eq("trial_id", trialId)
+    .eq("dimension", dimension)
+    .order("slot");
+  // In order, each moves down into a slot already free.
+  const list = rest ?? [];
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].slot !== i + 1) await supabase.from("trial_cells").update({ slot: i + 1 }).eq("id", list[i].id);
+  }
+}
+
+async function nextSlot(supabase: Sb, trialId: string, dimension: string): Promise<number> {
+  const { data } = await supabase
+    .from("trial_cells")
+    .select("slot")
+    .eq("trial_id", trialId)
+    .eq("dimension", dimension)
+    .order("slot", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.slot ?? 0) + 1;
+}
+
+async function staffCell(supabase: Sb, cellId: string) {
+  const { data: cell } = await supabase.from("trial_cells").select("*").eq("id", cellId).maybeSingle();
+  if (!cell) return null;
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", cell.trial_id).maybeSingle();
+  const me = t ? await who(supabase, t.persona_id) : null;
+  return me?.staff ? cell : null;
+}
+
+/** One more variation in a round — rounds need not be the same size. */
+export async function addCell(trialId: string, dimension: Dimension) {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", trialId).maybeSingle();
+  if (!t) return { error: "No such trial" };
+  const me = await who(supabase, t.persona_id);
+  if (!me?.staff) return { error: "Only owners and managers can change the rounds" };
+  if (!DIMENSIONS.includes(dimension)) return { error: "No such round" };
+  const slot = await nextSlot(supabase, trialId, dimension);
+  if (slot > MAX_RESHOOTS) return { error: `A round takes ${MAX_RESHOOTS} at most` };
+  const { error } = await supabase.from("trial_cells").insert({ trial_id: trialId, dimension, slot });
+  if (error) return { error: error.message };
+  touch(trialId);
+  await shootListOf(trialId);
+  return { error: null };
+}
+
+/** A variation into another round, takes and all; it is no one's winner there. */
+export async function moveCell(cellId: string, dimension: Dimension) {
+  const supabase = await createClient();
+  const cell = await staffCell(supabase, cellId);
+  if (!cell) return { error: "Not allowed" };
+  if (!DIMENSIONS.includes(dimension)) return { error: "No such round" };
+  if (cell.dimension === dimension) return { error: null };
+  const slot = await nextSlot(supabase, cell.trial_id, dimension);
+  if (slot > MAX_RESHOOTS) return { error: `A round takes ${MAX_RESHOOTS} at most` };
+  const { error } = await supabase
+    .from("trial_cells")
+    .update({ dimension, slot, winner: false, updated_at: new Date().toISOString() })
+    .eq("id", cellId);
+  if (error) return { error: error.message };
+  await compact(supabase, cell.trial_id, cell.dimension);
+  touch(cell.trial_id);
+  await shootListOf(cell.trial_id);
+  return { error: null };
+}
+
+/** An empty variation out of its round. One with takes stays — move it instead. */
+export async function removeCell(cellId: string) {
+  const supabase = await createClient();
+  const cell = await staffCell(supabase, cellId);
+  if (!cell) return { error: "Not allowed" };
+  if (cell.request_id || cell.winner || cell.finished_at) return { error: "It has takes — move it to another round instead" };
+  const { error } = await supabase.from("trial_cells").delete().eq("id", cellId);
+  if (error) return { error: error.message };
+  await compact(supabase, cell.trial_id, cell.dimension);
+  touch(cell.trial_id);
+  await shootListOf(cell.trial_id);
+  return { error: null };
+}
+
+/** How many variations a round of a new trial starts with. */
+export async function setDefaultReshoots(count: number) {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const me = await who(supabase, personaId);
+  if (!me?.staff) return { error: "Only owners and managers can change this" };
+  const n = Math.round(count);
+  if (!Number.isFinite(n) || n < 1 || n > MAX_RESHOOTS) return { error: `Between 1 and ${MAX_RESHOOTS}` };
+  await createAdminClient().from("personas").update({ trial_reshoots: n }).eq("id", personaId);
+  revalidatePath("/trials");
+  return { error: null };
+}

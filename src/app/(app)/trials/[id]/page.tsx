@@ -50,7 +50,11 @@ export default async function TrialPage({
       replaces = { id: old.id, label: handle ? `${accountLabel(handle)} · ${old.shortcode}` : old.shortcode, views: old.views };
     }
   }
-  const briefs = Object.fromEntries(DIMENSIONS.map((d) => [d, roundBrief(d, w, t.reshoots)])) as Record<Dimension, string>;
+  // Each round as big as it is — rounds need not be the same size.
+  const briefs = Object.fromEntries(
+    DIMENSIONS.map((d) => [d, roundBrief(d, w, t.cells.filter((c) => c.dimension === d).length)])
+  ) as Record<Dimension, string>;
+  const { data: persona } = await supabase.from("personas").select("trial_reshoots").eq("id", t.personaId).maybeSingle();
 
   return (
     <div className="space-y-4">
@@ -76,7 +80,7 @@ export default async function TrialPage({
         sourceTitle: t.sourceTitle,
         phase: t.phase,
         status: t.status,
-        reshoots: t.reshoots,
+        reshoots: persona?.trial_reshoots ?? t.reshoots,
         // The team's notes stay off the model's page.
         cells: staff ? t.cells : t.cells.map((c) => ({ ...c, notes: null })),
         briefs,

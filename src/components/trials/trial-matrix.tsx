@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowUpRight, Check, Film, Loader2, Minus, Play, Plus, Trophy, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, ArrowUpRight, Check, Film, Loader2, Minus, Play, Plus, Trash2, Trophy, Upload } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -16,8 +17,12 @@ import { AccountAvatar } from "@/components/pipeline/account-avatar";
 import { TakeGrid, type GridTake } from "@/components/upload/take-grid";
 import { setAssetFansly } from "@/app/(app)/requests/[id]/actions";
 import {
+  addCell,
   advanceTrial,
   archiveTrial,
+  moveCell,
+  removeCell,
+  setDefaultReshoots,
   fetchOutlierVideo,
   finishCell,
   openCellJob,
@@ -25,7 +30,6 @@ import {
   setCellLabel,
   setCellText,
   setCellThumb,
-  setTrialReshoots,
   toggleWinner,
 } from "@/app/(app)/trials/actions";
 
@@ -84,6 +88,9 @@ const name = (c: Pick<MatrixCell, "dimension" | "slot" | "label">) => c.label?.t
 const phaseIdx = (p: Phase) => (p === "done" ? 3 : DIMS.indexOf(p));
 const doneCount = (row: MatrixCell[]) => row.filter((c) => c.state !== "empty" && c.state !== "takes").length;
 const totalPlays = (c: MatrixCell) => c.plays.reduce((a, p) => a + p.views, 0);
+
+const DRAG_TYPE = "application/x-trial-cell";
+const MAX_PER_ROUND = 12;
 
 const STATE_CHIP: Record<CellState, { label: string; cls: string }> = {
   empty: { label: "To shoot", cls: "bg-black/60 text-white/80" },
@@ -334,7 +341,7 @@ function Header({
             Pattern found: {DIMS.map((d) => winners(d).join(" / ") || "—").join(" · ")}
           </p>
         )}
-        {staff && <ReshootCount trialId={trial.id} value={trial.reshoots} onChanged={onChanged} />}
+        {staff && <ReshootCount value={trial.reshoots} onChanged={onChanged} />}
       </div>
     </div>
   );
@@ -365,13 +372,35 @@ function Round({
 }) {
   const shot = doneCount(row);
   const posted = row.filter((c) => c.state === "posted").length;
+  const [over, setOver] = useState(false);
+  const [adding, startAdd] = useTransition();
   // Rank by plays across all accounts — the numbers to decide on.
   const ranked = row.filter((c) => c.plays.length).sort((a, b) => totalPlays(b) - totalPlays(a));
   const rank = new Map(ranked.map((c, i) => [c.id, i + 1]));
   const best = ranked[0] ? totalPlays(ranked[0]) : 0;
   return (
     <section
-      className={`rounded-2xl border bg-card p-4 ${state === "now" ? "border-primary/40" : "border-border/50"} ${state === "later" ? "opacity-90" : ""}`}
+      onDragOver={(e) => {
+        if (!staff || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={async (e) => {
+        setOver(false);
+        const [id, from] = (e.dataTransfer.getData(DRAG_TYPE) || "").split("|");
+        if (!id || from === d) return;
+        e.preventDefault();
+        const r = await moveCell(id, d);
+        if (r.error) toast.error(r.error);
+        else toast.success(`Moved to ${META[d].title}`);
+        onChanged();
+      }}
+      className={`rounded-2xl border bg-card p-4 transition-colors ${
+        over ? "border-primary bg-primary/5" : state === "now" ? "border-primary/40" : "border-border/50"
+      } ${state === "later" ? "opacity-90" : ""}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -404,7 +433,29 @@ function Round({
             onChanged={onChanged}
           />
         ))}
+        {staff && row.length < MAX_PER_ROUND && (
+          <div className="p-1.5">
+            <button
+              type="button"
+              disabled={adding}
+              onClick={() =>
+                startAdd(async () => {
+                  const r = await addCell(trial.id, d);
+                  if (r.error) toast.error(r.error);
+                  onChanged();
+                })
+              }
+              className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border/70 text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
+            >
+              {adding ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-6 w-6" />}
+              <span className="text-[11px]">Add {META[d].one.toLowerCase()}</span>
+            </button>
+          </div>
+        )}
       </div>
+      {staff && row.length > 0 && (
+        <p className="mt-2 text-[10px] text-muted-foreground/70">Drag a reel onto another round to move it there.</p>
+      )}
     </section>
   );
 }
@@ -442,6 +493,14 @@ function VariantCard({
             : "Posted";
   return (
     <div className={`flex min-w-0 flex-col gap-2 rounded-xl p-1.5 ${c.winner ? "bg-amber-400/10 ring-2 ring-amber-400" : ""}`}>
+      <div
+        draggable={staff}
+        onDragStart={(e) => {
+          e.dataTransfer.setData(DRAG_TYPE, `${c.id}|${c.dimension}`);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        className={staff ? "cursor-grab active:cursor-grabbing" : ""}
+      >
       <ReelPlayer video={c.video?.url ?? null} poster={c.thumb} onEmpty={onOpen} className={c.state === "empty" ? "border border-dashed border-border bg-muted/20" : ""}>
         {c.state === "empty" && (
           <button type="button" onClick={onOpen} className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:text-foreground">
@@ -461,6 +520,7 @@ function VariantCard({
           <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1 text-[9px] text-white/80">raw take</span>
         )}
       </ReelPlayer>
+      </div>
 
       {staff ? <NameField c={c} onChanged={onChanged} /> : <p className="truncate text-sm font-medium">{name(c)}</p>}
       <p className="-mt-1.5 text-[10px] text-muted-foreground">{stateLine}</p>
@@ -543,8 +603,46 @@ function VariantCard({
           <Upload className="h-3.5 w-3.5" />
           {!staff && <span className="ml-1">Takes</span>}
         </Button>
+        {staff && <MoveMenu c={c} onChanged={onChanged} />}
       </div>
     </div>
+  );
+}
+
+/** Into another round, or out of this one while it is still empty. */
+function MoveMenu({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+  const [busy, start] = useTransition();
+  const run = (fn: () => Promise<{ error: string | null }>, ok: string) =>
+    start(async () => {
+      const r = await fn();
+      if (r.error) toast.error(r.error);
+      else toast.success(ok);
+      onChanged();
+    });
+  const empty = c.state === "empty" && !c.requestId && !c.winner;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="h-8 px-2" disabled={busy} title="Move or remove">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="h-3.5 w-3.5" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {DIMS.filter((d) => d !== c.dimension).map((d) => (
+          <DropdownMenuItem key={d} onClick={() => run(() => moveCell(c.id, d), `Moved to ${META[d].title}`)}>
+            {META[d].emoji} Move to {META[d].title}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={!empty}
+          className="text-rose-400"
+          onClick={() => run(() => removeCell(c.id), `${name(c)} removed`)}
+        >
+          <Trash2 className="mr-1.5 h-3.5 w-3.5" /> {empty ? "Remove" : "Remove (has takes — move it instead)"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -871,20 +969,20 @@ function CellSheet({
   );
 }
 
-/** Staff only: how many reshoots each round has — also what new trials start with. */
-function ReshootCount({ trialId, value, onChanged }: { trialId: string; value: number; onChanged: () => void }) {
+/** Staff only: how many variations a round of a new trial starts with. This one is changed with + and the move menu. */
+function ReshootCount({ value, onChanged }: { value: number; onChanged: () => void }) {
   const [pending, start] = useTransition();
   const change = (n: number) =>
     start(async () => {
-      const res = await setTrialReshoots(trialId, n);
+      const res = await setDefaultReshoots(n);
       if (res.error) toast.error(res.error);
       else onChanged();
     });
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-card px-3 py-2">
       <div className="min-w-0">
-        <p className="text-xs font-medium">Reshoots per round</p>
-        <p className="text-[10px] text-muted-foreground">For this trial and every new one</p>
+        <p className="text-xs font-medium">New trials start with</p>
+        <p className="text-[10px] text-muted-foreground">variations per round — this one you change with + and the move menu</p>
       </div>
       <div className="flex items-center gap-1">
         <Button
