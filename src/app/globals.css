@@ -6,7 +6,7 @@
  * Glass: the app sits on a warm evening scene and every surface is frosted
  * glass over it — translucent white, a fine light edge, blur behind. Each
  * colour carries its own base transparency (--x-a), which the opacity
- * modifiers multiply: bg-card is white at 7.5 %, bg-card/80 at 6 %.
+ * modifiers multiply: bg-card is smoked glass at 34 %, bg-card/80 at 27 %.
  */
 @layer base {
   :root {
@@ -40,9 +40,9 @@
   .dark {
     /* Surfaces: white glass of different strength; menus a darker glass. */
     --background: 228 18% 8%;
-    --background-a: 0.32;
-    --card: 0 0% 100%;
-    --card-a: 0.075;
+    --background-a: 0.22;
+    --card: 226 22% 12%;
+    --card-a: 0.34;
     --popover: 228 16% 13%;
     --popover-a: 0.8;
     --secondary: 0 0% 100%;
@@ -63,7 +63,7 @@
     --secondary-foreground: 0 0% 100%;
     --accent-foreground: 0 0% 100%;
     --muted-foreground: 0 0% 100%;
-    --muted-foreground-a: 0.6;
+    --muted-foreground-a: 0.66;
 
     /* Accent: the clear blue of the glass dashboards. */
     --primary: 214 95% 62%;
@@ -92,16 +92,17 @@
     min-height: 100%;
     background-color: #1c1714;
     background-image:
-      radial-gradient(ellipse 120% 90% at 50% 45%, transparent 45%, rgba(8, 6, 5, 0.62) 100%),
-      linear-gradient(180deg, rgba(12, 12, 16, 0.18), rgba(12, 10, 8, 0.38)),
+      radial-gradient(ellipse 130% 95% at 50% 42%, transparent 50%, rgba(8, 6, 5, 0.55) 100%),
+      linear-gradient(180deg, rgba(12, 12, 16, 0.06), rgba(12, 10, 8, 0.28)),
       linear-gradient(90deg, rgba(22, 17, 14, 0.82) 0 0.7%, transparent 0.7% 23.6%, rgba(22, 17, 14, 0.82) 23.6% 24.3%, transparent 24.3% 49.6%, rgba(22, 17, 14, 0.82) 49.6% 50.3%, transparent 50.3% 75.6%, rgba(22, 17, 14, 0.82) 75.6% 76.3%, transparent 76.3% 99.3%, rgba(22, 17, 14, 0.82) 99.3%),
       linear-gradient(180deg, rgba(22, 17, 14, 0.82) 0 1.2%, transparent 1.2% 11%, rgba(22, 17, 14, 0.7) 11% 11.8%, transparent 11.8%),
       linear-gradient(180deg, transparent 63%, #5c4536 63.4%, #3a2c22 78%, #1f1814 100%),
       radial-gradient(70% 9% at 22% 63%, rgba(66, 62, 72, 0.95), transparent 70%),
       radial-gradient(80% 11% at 78% 64%, rgba(58, 54, 64, 0.95), transparent 70%),
-      radial-gradient(55% 20% at 52% 57%, rgba(255, 196, 148, 0.62), transparent 72%),
-      linear-gradient(180deg, #4b5568 0%, #77798a 26%, #b89a8e 44%, #e2b08c 54%, #e9b88f 58%, #8d6e5d 63%, #3a2c22 64%);
-    background-size: 100% 100%, 100% 100%, 100% 63%, 100% 63%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+      radial-gradient(60% 24% at 52% 56%, rgba(255, 204, 150, 0.85), transparent 72%),
+      radial-gradient(40% 30% at 85% 20%, rgba(255, 232, 210, 0.25), transparent 70%),
+      linear-gradient(180deg, #6c7c93 0%, #a2a5b3 22%, #d6b6a0 40%, #f0c29a 51%, #f7ca98 57%, #a8826b 62.5%, #3a2c22 64%);
+    background-size: 100% 100%, 100% 100%, 100% 63%, 100% 63%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
     background-repeat: no-repeat;
     background-attachment: fixed;
   }
