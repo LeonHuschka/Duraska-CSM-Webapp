@@ -1,13 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { dailyDemand } from "@/lib/demand";
-import {
-  StageFunnel,
-  ThroughputChart,
-  OldestWaiting,
-  AccountsPie,
-  PostedCard,
-  StageGauges,
-} from "@/components/pipeline/pipeline-view";
+import { PipelineTiles, SpeedDials } from "@/components/pipeline/pipeline-glass";
+import { ThroughputBars } from "@/components/pipeline/throughput-bars";
+import { TeamTodos } from "@/components/pipeline/team-todos";
+import { stillDone, type RepeatKey } from "@/lib/checklist";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -135,29 +131,6 @@ export async function PipelineTab({
   );
   const toEdit = reqs.filter((r) => r.status === "shooted" && hasRaw.has(r.id)).length;
 
-  // Posted is deliberately absent: it only ever grows, so in a proportional
-  // bar it swallows the three figures that actually move.
-  const stages = [
-    {
-      label: "Open inspo",
-      value: openLinks,
-      tone: "bg-amber-400",
-      note: "links waiting to be shot",
-    },
-    {
-      label: "To edit",
-      value: toEdit,
-      tone: "bg-purple-400",
-      note: "jobs waiting for a cut",
-    },
-    {
-      label: "Ready",
-      value: availableCuts,
-      tone: "bg-emerald-400",
-      note: `cuts nobody has posted · ${availableSfw} SFW`,
-    },
-  ];
-
   // ── Posted, and whether the pace is picking up ──
   const postedTimes: number[] = [];
   for (const s of slots ?? []) {
@@ -169,14 +142,6 @@ export async function PipelineTab({
   const previous7 = postedTimes.filter(
     (t) => t >= Date.now() - 14 * DAY && t < Date.now() - 7 * DAY
   ).length;
-
-  const platformOrder = ["instagram", "facebook", "tiktok", "x"];
-  const platformCounts = platformOrder
-    .map((p) => ({
-      platform: p,
-      count: (accountRows ?? []).filter((a) => a.platform === p).length,
-    }))
-    .filter((p) => p.count > 0);
 
   // ── Throughput, last 8 weeks (Mon–Sun) ──
   const now = new Date();
@@ -289,46 +254,43 @@ export async function PipelineTab({
     },
   ];
 
-  // ── The specific items that have waited longest ──
-  const oldest = reqs
-    .filter((r) => r.status === "shooted" || r.status === "edited")
-    .map((r) => {
-      const waitingSince =
-        r.status === "shooted"
-          ? (firstRaw.get(r.id) ??
-            (r.shooted_at ? new Date(r.shooted_at).getTime() : null))
-          : (firstEdited.get(r.id) ?? null);
-      return {
-        id: r.id,
-        title: r.title,
-        stage: r.status === "shooted" ? "waiting for cut" : "waiting to post",
-        days:
-          waitingSince === null
-            ? 0
-            : Math.floor((Date.now() - waitingSince) / DAY),
-      };
-    })
-    .sort((a, b) => b.days - a.days)
-    .slice(0, 6);
+  // ── The team's own to-do, for those who run the persona ──
+  const { data: todoRows } = canEdit
+    ? await supabase
+        .from("team_todos")
+        .select("id, text, done, done_at, repeat")
+        .eq("persona_id", personaId)
+        .order("position")
+        .order("created_at")
+    : { data: [] };
+  const todos = (todoRows ?? []).map((t) => ({
+    id: t.id,
+    text: t.text,
+    repeat: t.repeat as RepeatKey,
+    done: stillDone(t.done, t.done_at, t.repeat),
+  }));
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 lg:grid-cols-2">
-        <AccountsPie
-          counts={platformCounts}
-          perDay={demand.perDay}
-        />
-        <PostedCard total={postedCuts} last7={last7} previous7={previous7} />
-      </div>
-      <StageGauges
-        legs={legs}
-        endToEndDays={endToEndDays}
-        endToEndCount={endToEndHours.length}
-        editable={canEdit}
+      <PipelineTiles
+        liveAccounts={(accountRows ?? []).length}
+        perDay={demand.perDay}
+        posted={postedCuts}
+        last7={last7}
+        previous7={previous7}
+        openLinks={openLinks}
+        toEdit={toEdit}
+        ready={availableCuts}
+        readySfw={availableSfw}
+        weeks={weeks}
       />
-      <StageFunnel stages={stages} />
-      <ThroughputChart weeks={weeks} />
-      <OldestWaiting items={oldest} />
+      <div className={canEdit ? "grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]" : ""}>
+        <div className="min-w-0 space-y-5">
+          <ThroughputBars weeks={weeks} />
+          <SpeedDials legs={legs} endToEndDays={endToEndDays} endToEndCount={endToEndHours.length} editable={canEdit} />
+        </div>
+        {canEdit && <TeamTodos items={todos} />}
+      </div>
     </div>
   );
 }

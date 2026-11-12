@@ -1465,93 +1465,68 @@ export function VaultView({
         )}
       </div>
 
-      {/* One-tap presets, each carrying its count so the VA sees whether
-          there is anything to do before tapping. Two, because they answer
-          two questions: what can I post at all, and what of it is new to
-          my accounts. */}
-      <div className="flex flex-wrap gap-2">
-        {[
+      {/* One slider for the question a VA opens the Vault with. Each stop
+          sets the three filters below; All clears them. New: free cuts of
+          reels that have not run on any account. Repost: cuts left of a
+          reel that already ran. Fansly: the cuts from the Fansly takes,
+          which never go on Instagram. */}
+      {(() => {
+        const is = (stage: string, nsfw: string, platform: string) =>
+          stageFilter === stage && nsfwFilter === nsfw && platformFilter === platform;
+        const stops = [
+          { key: "all", label: "All", count: null, set: ["edited", "all", "all"], hint: "Every finished cut — the vault as it opens" },
           {
             key: "fresh",
             label: "New",
+            count: fresh.reels,
+            set: [READY_PRESET.stage, READY_PRESET.nsfw, "fresh"],
             hint: "Free cuts of reels that have not run on any of your accounts — post these",
-            dot: "bg-emerald-400",
-            count: fresh,
           },
           {
             key: "available",
-            label: "Available but posted",
+            label: "Repost",
+            count: ready.reels,
+            set: [READY_PRESET.stage, READY_PRESET.nsfw, "available"],
             hint: "Cuts are left, but the reel already ran on one of your accounts — only for a second cut of something that took off",
-            dot: "bg-amber-400",
-            count: ready,
           },
-        ].map((preset) => {
-          const active =
-            stageFilter === READY_PRESET.stage &&
-            nsfwFilter === READY_PRESET.nsfw &&
-            platformFilter === preset.key;
-          return (
-            <button
-              key={preset.key}
-              title={preset.hint}
-              onClick={() => {
-                if (active) {
-                  setStageFilter("all");
-                  setNsfwFilter("all");
-                  setPlatformFilter("all");
-                  return;
-                }
-                setStageFilter(READY_PRESET.stage);
-                setNsfwFilter(READY_PRESET.nsfw);
-                setPlatformFilter(preset.key);
-              }}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                active
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <span className={`h-2.5 w-2.5 rounded-full ${preset.dot}`} />
-              {preset.label}
-              <span className="tabular-nums text-muted-foreground">
-                {preset.count.reels} / {preset.count.cuts}
-              </span>
-              <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
-            </button>
-          );
-        })}
-        {/* Fansly reels: the cuts from the takes she shot in Fansly
-            outfits. Their own section — they never go on Instagram. */}
-        {(() => {
-          const active = stageFilter === "fansly" && nsfwFilter === "all" && platformFilter === "all";
-          return (
-            <button
-              title="Cuts made from the Fansly takes — these go on Fansly, never on Instagram"
-              onClick={() => {
-                if (active) {
-                  setStageFilter("all");
-                  return;
-                }
-                setStageFilter("fansly");
-                setNsfwFilter("all");
-                setPlatformFilter("all");
-              }}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                active
-                  ? "border-sky-400 bg-sky-400/10 text-foreground"
-                  : "border-border/50 bg-card text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <span className="h-2.5 w-2.5 rounded-full bg-sky-400" />
-              Fansly reels
-              <span className="tabular-nums text-muted-foreground">
-                {fanslyCuts.reels} / {fanslyCuts.cuts}
-              </span>
-              <span className="text-[10px] text-muted-foreground/60">reels / cuts</span>
-            </button>
-          );
-        })()}
-      </div>
+          {
+            key: "fansly",
+            label: "Fansly",
+            count: fanslyCuts.reels,
+            set: ["fansly", "all", "all"],
+            hint: "Cuts made from the Fansly takes — these go on Fansly, never on Instagram",
+          },
+        ] as const;
+        return (
+          <div className="glass-pill inline-flex max-w-full gap-1 overflow-x-auto rounded-full p-1">
+            {stops.map((stop) => {
+              const active = is(stop.set[0], stop.set[1], stop.set[2]);
+              return (
+                <button
+                  key={stop.key}
+                  type="button"
+                  title={stop.hint}
+                  onClick={() => {
+                    setStageFilter(stop.set[0]);
+                    setNsfwFilter(stop.set[1]);
+                    setPlatformFilter(stop.set[2]);
+                  }}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-200 ${
+                    active
+                      ? "bg-white text-neutral-900 shadow-[0_6px_20px_-6px_rgba(255,255,255,0.55)]"
+                      : "text-white/75 hover:bg-white/15 hover:text-white"
+                  }`}
+                >
+                  {stop.label}
+                  {stop.count != null && (
+                    <span className={`text-[11px] tabular-nums ${active ? "text-neutral-500" : "text-white/45"}`}>{stop.count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Filters — tap-friendly dropdowns (no horizontal dragging on mobile) */}
       <div className="grid grid-cols-3 gap-2">

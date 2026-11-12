@@ -677,6 +677,12 @@ export type Database = {
         Update: { id?: string; persona_id?: string; text?: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
         Relationships: [];
       };
+      team_todos: {
+        Row: { id: string; persona_id: string; text: string; repeat: "all" | "1d" | "7d" | "30d"; done: boolean; done_at: string | null; done_by: string | null; position: number; created_by: string | null; created_at: string };
+        Insert: { id?: string; persona_id: string; text: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
+        Update: { id?: string; persona_id?: string; text?: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
+        Relationships: [];
+      };
       reel_metrics: {
         Row: {
           id: string;
