@@ -12,7 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { APP_URL, DIMENSIONS, DIM_META, type Dimension } from "@/lib/trials";
+import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
 import { accountLabel } from "@/lib/account-analytics";
 
 /**
@@ -197,7 +197,7 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   const [{ data: cells }, { data: accounts }] = await Promise.all([
     db
       .from("trial_cells")
-      .select("id, trial_id, dimension, finished_at")
+      .select("id, trial_id, dimension, slot, label, brief, finished_at, requested_at")
       .in("trial_id", trials.map((t) => t.id))
       .order("slot"),
     accIds.length
@@ -220,7 +220,25 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
     if (!at) continue;
     const who = t.account_id ? accName.get(t.account_id) ?? "" : "";
     lines.push(`${DIM_META[at.d].emoji} ${esc(who)} · ${DIM_META[at.d].title} <b>${at.done}/${at.of}</b>`);
-    keyboard.push([{ text: `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` }]);
+    // What the team asked her to shoot, with its brief, and a button
+    // straight to its upload — until it is done.
+    const asked = mine
+      .filter((c) => c.requested_at && !c.finished_at)
+      .sort((a, b) => (a.requested_at ?? "").localeCompare(b.requested_at ?? ""))
+      .slice(0, 3);
+    const buttons: LinkButton[] = [];
+    for (const c of asked) {
+      const d = c.dimension as Dimension;
+      const nm = cellName({ dimension: d, slot: c.slot, label: c.label });
+      const brief = (c.brief ?? "").replace(/\s+/g, " ").trim();
+      lines.push(`   👉 <b>${esc(nm)}</b>${brief ? ` — ${esc(brief.length > 160 ? `${brief.slice(0, 157)}…` : brief)}` : ""}`);
+      const url = shootUrl(c.id, "cell");
+      if (url) buttons.push({ text: `${DIM_META[d].emoji} ${nm}`, url });
+    }
+    keyboard.push([
+      { text: buttons.length ? `🧪 ${who || "Trial"}` : `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` },
+      ...buttons,
+    ]);
   }
   return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
 }

@@ -91,7 +91,8 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
   const view = row ? await loadTrial(db, row.trial_id) : null;
   const cell = view?.cells.find((c) => c.id === cellId);
   if (!view || !cell) notFound();
-  const running = view.status === "active" && view.phase === cell.dimension;
+  // Any round can be shot while the trial runs — the team asks ahead.
+  const running = view.status === "active";
   const brief = roundBrief(cell.dimension, winnersOf(view), view.cells.filter((c) => c.dimension === cell.dimension).length);
 
   return (
@@ -133,7 +134,7 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
       {running ? (
         <ShootUpload token={token} existingTitle={cell.title} askNsfw={false} />
       ) : (
-        <p className="rounded-xl border border-border/50 bg-card p-3 text-sm">This round is over — nothing more to shoot for this box.</p>
+        <p className="rounded-xl border border-border/50 bg-card p-3 text-sm">This trial is over — nothing more to shoot for this box.</p>
       )}
     </main>
   );

@@ -17,7 +17,7 @@ export default async function TrialPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ decide?: string }>;
+  searchParams?: Promise<{ decide?: string; view?: string }>;
 }) {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
@@ -34,6 +34,8 @@ export default async function TrialPage({
     supabase.from("persona_members").select("role").eq("persona_id", t.personaId).eq("user_id", user.id).maybeSingle(),
   ]);
   const staff = profile?.global_role === "owner" || membership?.role === "owner" || membership?.role === "manager";
+  // A manager may look at the page as the model sees it.
+  const preview = staff && sp.view === "model";
   const w = winnersOf(t);
 
   // Why it is not simply running, and for a proposal: what it would replace.
@@ -63,7 +65,7 @@ export default async function TrialPage({
       status={t.status}
       note={row?.status_note ?? null}
       replaces={replaces}
-      staff={staff}
+      staff={staff && !preview}
       decide={sp.decide === "keep" ? "keep" : sp.decide === "replace" ? "replace" : null}
     />
     <TrialMatrix
@@ -82,11 +84,12 @@ export default async function TrialPage({
         status: t.status,
         reshoots: persona?.trial_reshoots ?? t.reshoots,
         // The team's notes stay off the model's page.
-        cells: staff ? t.cells : t.cells.map((c) => ({ ...c, notes: null })),
+        cells: staff && !preview ? t.cells : t.cells.map((c) => ({ ...c, notes: null })),
         briefs,
       }}
-      staff={staff}
-      backHref={staff ? "/?tab=accounts" : "/"}
+      staff={staff && !preview}
+      preview={preview}
+      backHref={preview ? "/?view=model" : staff ? "/?tab=accounts" : "/"}
     />
     </div>
   );

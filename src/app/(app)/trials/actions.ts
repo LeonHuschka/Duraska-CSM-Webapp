@@ -510,3 +510,31 @@ export async function setDefaultReshoots(count: number) {
   revalidatePath("/trials");
   return { error: null };
 }
+
+/**
+ * Ask for a variation in her SHOOTING message — its brief and a button to
+ * its upload — or take it out again. Three at a time per trial.
+ */
+export async function requestCell(cellId: string, on: boolean) {
+  const supabase = await createClient();
+  const cell = await staffCell(supabase, cellId);
+  if (!cell) return { error: "Not allowed" };
+  if (on) {
+    const { data: open } = await supabase
+      .from("trial_cells")
+      .select("id")
+      .eq("trial_id", cell.trial_id)
+      .not("requested_at", "is", null)
+      .is("finished_at", null)
+      .neq("id", cellId);
+    if ((open ?? []).length >= 3) return { error: "Three are in SHOOTING already — take one out first" };
+  }
+  const { error } = await supabase
+    .from("trial_cells")
+    .update({ requested_at: on ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
+    .eq("id", cellId);
+  if (error) return { error: error.message };
+  touch(cell.trial_id);
+  await shootListOf(cell.trial_id);
+  return { error: null };
+}

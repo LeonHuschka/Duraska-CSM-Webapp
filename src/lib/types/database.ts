@@ -1199,6 +1199,7 @@ export type Database = {
           winner: boolean;
           brief: string | null;
           notes: string | null;
+          requested_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1214,6 +1215,7 @@ export type Database = {
           winner?: boolean;
           brief?: string | null;
           notes?: string | null;
+          requested_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1229,6 +1231,7 @@ export type Database = {
           winner?: boolean;
           brief?: string | null;
           notes?: string | null;
+          requested_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

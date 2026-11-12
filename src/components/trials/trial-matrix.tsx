@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, ArrowRightLeft, ArrowUpRight, Check, Film, Loader2, Minus, Play, Plus, Trash2, Trophy, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, ArrowUpRight, Check, Eye, Film, Loader2, Minus, Play, Plus, Send, Trash2, Trophy, Upload } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import {
   archiveTrial,
   moveCell,
   removeCell,
+  requestCell,
   setDefaultReshoots,
   fetchOutlierVideo,
   finishCell,
@@ -55,6 +56,7 @@ export type MatrixCell = {
   plays: { accountId: string; label: string; avatar: string | null; platform: string; views: number; url: string | null }[];
   brief: string | null;
   notes: string | null;
+  requestedAt: string | null;
 };
 export type MatrixTrial = {
   id: string;
@@ -107,7 +109,18 @@ const STATE_CHIP: Record<CellState, { label: string; cls: string }> = {
  * and the team's notes. The team picks each round's winner by hand; the
  * round is decided only once one is picked.
  */
-export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; staff: boolean; backHref: string }) {
+export function TrialMatrix({
+  trial,
+  staff,
+  backHref,
+  preview = false,
+}: {
+  trial: MatrixTrial;
+  staff: boolean;
+  backHref: string;
+  /** A manager looking at the page as the model sees it. */
+  preview?: boolean;
+}) {
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
   const open = trial.cells.find((c) => c.id === openId) ?? null;
@@ -126,18 +139,32 @@ export function TrialMatrix({ trial, staff, backHref }: { trial: MatrixTrial; st
     fetchOutlierVideo(trial.id).then((r) => r.ok && router.refresh());
   }, [trial.video, trial.id, trial.postUrl, router]);
 
+  if (!staff) {
+    return (
+      <>
+        <ModelTrial trial={trial} backHref={backHref} preview={preview} onOpen={setOpenId} />
+        <CellSheet cell={open} trial={trial} staff={false} onClose={() => setOpenId(null)} onChanged={refresh} />
+      </>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 pb-16">
       <div className="flex items-center justify-between gap-3">
         <Link href={backHref} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Back
         </Link>
-        {trial.account && (
-          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            <AccountAvatar src={trial.account.avatar} platform={trial.account.platform} label={trial.account.label} size={20} />
-            {trial.account.label}
-          </span>
-        )}
+        <div className="flex items-center gap-4">
+          <Link href={`/trials/${trial.id}?view=model`} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Eye className="h-3.5 w-3.5" /> As the model sees it
+          </Link>
+          {trial.account && (
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <AccountAvatar src={trial.account.avatar} platform={trial.account.platform} label={trial.account.label} size={20} />
+              {trial.account.label}
+            </span>
+          )}
+        </div>
       </div>
 
       <Header trial={trial} winners={winners} staff={staff} onChanged={refresh} />
@@ -336,6 +363,7 @@ function Header({
             );
           })}
         </div>
+        <Overview trial={trial} />
         {trial.phase === "done" && (
           <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
             Pattern found: {DIMS.map((d) => winners(d).join(" / ") || "—").join(" · ")}
@@ -516,7 +544,12 @@ function VariantCard({
         ) : rank ? (
           <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white">#{rank}</span>
         ) : null}
-        {c.video && !c.video.cut && (
+        {c.requestedAt && (c.state === "empty" || c.state === "takes") && (
+          <span className="pointer-events-none absolute inset-x-1.5 bottom-1.5 rounded-full bg-sky-500/90 px-1.5 py-0.5 text-center text-[10px] font-semibold text-white">
+            📲 In SHOOTING
+          </span>
+        )}
+        {c.video && !c.video.cut && !c.requestedAt && (
           <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1 text-[9px] text-white/80">raw take</span>
         )}
       </ReelPlayer>
@@ -606,12 +639,41 @@ function VariantCard({
             <span className="truncate">{c.winner ? "Winner" : "Pick"}</span>
           </Button>
         )}
+        {staff && <RequestButton c={c} onChanged={onChanged} />}
         <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" onClick={onOpen} title="Upload takes">
           <Upload className="h-3.5 w-3.5" />
           {!staff && <span className="ml-1">Takes</span>}
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Into her SHOOTING message — brief and upload button — or out of it again. */
+function RequestButton({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+  const [busy, start] = useTransition();
+  const on = !!c.requestedAt;
+  const done = c.state !== "empty" && c.state !== "takes";
+  if (done) return null;
+  return (
+    <Button
+      size="sm"
+      variant={on ? "default" : "outline"}
+      disabled={busy}
+      className={`h-8 shrink-0 px-2 ${on ? "bg-sky-500 text-white hover:bg-sky-400" : ""}`}
+      title={on ? "In her SHOOTING message — click to take it out" : c.brief ? "Send to her SHOOTING message, with the brief" : "Write what she does first, then send"}
+      onClick={() =>
+        start(async () => {
+          if (!on && !c.brief?.trim()) return void toast.error("Write what she does in this one first");
+          const r = await requestCell(c.id, !on);
+          if (r.error) toast.error(r.error);
+          else toast.success(on ? "Taken out of SHOOTING" : "Sent to SHOOTING 📲");
+          onChanged();
+        })
+      }
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+    </Button>
   );
 }
 
@@ -749,6 +811,193 @@ function DecideButton({ trialId, index, row }: { trialId: string; index: number;
       {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trophy className="mr-1.5 h-3.5 w-3.5" />}
       {picked === 0 ? "Pick a winner to decide" : next ? `Decide · open ${META[next].title.toLowerCase()}` : "Decide · pattern found"}
     </Button>
+  );
+}
+
+/** Where the reshoots stand in numbers: the best one, how far they went out, how much is shot. */
+function overviewOf(trial: MatrixTrial) {
+  const withPlays = trial.cells.filter((c) => c.plays.length);
+  const best = withPlays.sort((a, b) => totalPlays(b) - totalPlays(a))[0] ?? null;
+  const accounts = new Set(trial.cells.flatMap((c) => c.plays.map((p) => p.accountId)));
+  const shot = trial.cells.filter((c) => c.state !== "empty" && c.state !== "takes").length;
+  const posted = trial.cells.filter((c) => c.state === "posted").length;
+  return { best, accounts: accounts.size, shot, posted, total: trial.cells.length };
+}
+
+function Overview({ trial, compact = false }: { trial: MatrixTrial; compact?: boolean }) {
+  const o = overviewOf(trial);
+  const items = [
+    {
+      k: "Best reshoot",
+      v: o.best ? short(totalPlays(o.best)) : "—",
+      sub: o.best ? `${name(o.best)}${o.best.plays[0] ? ` · ${o.best.plays[0].label}` : ""}` : "nothing posted yet",
+    },
+    { k: "Posted on", v: String(o.accounts), sub: o.accounts === 1 ? "account" : "accounts" },
+    { k: "Shot", v: `${o.shot}/${o.total}`, sub: `${o.posted} posted` },
+  ];
+  return (
+    <div className={`grid gap-2 ${compact ? "grid-cols-1" : "grid-cols-3"}`}>
+      {items.map((it) => (
+        <div key={it.k} className="rounded-xl bg-muted/40 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{it.k}</p>
+          <p className="text-lg font-semibold tabular-nums leading-tight">{it.v}</p>
+          <p className="truncate text-[10px] text-muted-foreground">{it.sub}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The model's page, for the phone: the outlier and the numbers side by
+ * side, then what she is asked to shoot — each with its brief, one tap to
+ * upload — and the rounds as small reels with their plays.
+ */
+function ModelTrial({
+  trial,
+  backHref,
+  preview,
+  onOpen,
+}: {
+  trial: MatrixTrial;
+  backHref: string;
+  preview: boolean;
+  onOpen: (id: string) => void;
+}) {
+  const pIdx = phaseIdx(trial.phase);
+  const open = (c: MatrixCell) => c.state === "empty" || c.state === "takes";
+  const asked = trial.cells
+    .filter((c) => c.requestedAt && open(c))
+    .sort((a, b) => (a.requestedAt ?? "").localeCompare(b.requestedAt ?? ""));
+  // Nothing asked for by name: the open boxes of the round she is in.
+  const current = trial.phase === "done" ? [] : trial.cells.filter((c) => c.dimension === trial.phase && open(c)).sort((a, b) => a.slot - b.slot);
+  const jobs = asked.length ? asked : current;
+  return (
+    <div className="mx-auto max-w-md space-y-4 pb-16">
+      {preview && (
+        <div className="flex items-center justify-between rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+          <span>
+            <Eye className="mr-1 inline h-3.5 w-3.5" /> This is what the model sees
+          </span>
+          <Link href={`/trials/${trial.id}`} className="font-medium underline underline-offset-2">
+            Back to yours
+          </Link>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-3">
+        <Link href={backHref} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back
+        </Link>
+        {trial.account && (
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AccountAvatar src={trial.account.avatar} platform={trial.account.platform} label={trial.account.label} size={18} />
+            {trial.account.label}
+          </span>
+        )}
+      </div>
+
+      {/* Left the reel she reshoots, right where the reshoots stand. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-border/50 bg-card p-2">
+          <ReelPlayer video={trial.video} poster={trial.cover} />
+          <p className="mt-2 px-1 text-[10px] uppercase tracking-wide text-muted-foreground">Outlier</p>
+          <p className="px-1 text-xl font-semibold tabular-nums leading-tight">{trial.views != null ? short(trial.views) : "—"}</p>
+          <p className="px-1 text-[10px] text-muted-foreground">plays{trial.lift ? ` · ${trial.lift.toFixed(0)}× usual` : ""}</p>
+        </div>
+        <div className="flex flex-col gap-2 rounded-2xl border border-border/50 bg-card p-2">
+          <Overview trial={trial} compact />
+          <p className="mt-auto px-1 text-[10px] text-muted-foreground">
+            Round {Math.min(pIdx + 1, 3)} of 3{trial.phase !== "done" ? ` · ${META[trial.phase].title}` : " · done"}
+          </p>
+        </div>
+      </div>
+
+      {/* What to shoot now: clear enough to read at a glance. */}
+      <section className="space-y-2">
+        <h2 className="px-1 text-sm font-semibold">{asked.length ? "👉 Shoot these" : trial.phase === "done" ? "All done 🏁" : "👉 Shoot next"}</h2>
+        {jobs.length === 0 && trial.phase !== "done" && (
+          <p className="rounded-2xl border border-dashed border-border/50 px-4 py-5 text-center text-xs text-muted-foreground">
+            Nothing open in this round — well done.
+          </p>
+        )}
+        {jobs.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onOpen(c.id)}
+            className="flex w-full items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-400/5 p-3 text-left active:bg-amber-400/10"
+          >
+            <span className="text-2xl leading-none">{META[c.dimension].emoji}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{name(c)}</span>
+              <span className="mt-0.5 block whitespace-pre-line text-sm leading-snug">
+                {c.brief?.trim() || trial.briefs[c.dimension]}
+              </span>
+              {c.takes > 0 && <span className="mt-1 block text-[11px] text-emerald-300">{c.takes} take{c.takes === 1 ? "" : "s"} in — tap to add or finish</span>}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 self-center rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
+              <Upload className="h-3.5 w-3.5" /> Shoot
+            </span>
+          </button>
+        ))}
+      </section>
+
+      {/* The rounds, small: the reels, their plays, the winner. */}
+      {DIMS.map((d, i) => {
+        const row = trial.cells.filter((c) => c.dimension === d).sort((a, b) => a.slot - b.slot);
+        if (!row.length) return null;
+        const state = i < pIdx ? "decided" : i === pIdx ? "now" : "later";
+        return (
+          <section key={d} className="rounded-2xl border border-border/50 bg-card p-3">
+            <div className="flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold">
+                {META[d].emoji} {META[d].title}
+              </h3>
+              <span className="text-[11px] text-muted-foreground">
+                {doneCount(row)}/{row.length} shot{state === "decided" ? " · decided" : state === "now" ? " · now" : ""}
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {row.map((c) => (
+                <button key={c.id} type="button" onClick={() => onOpen(c.id)} className="min-w-0 text-left">
+                  <div
+                    className={`relative aspect-[9/16] overflow-hidden rounded-lg ${
+                      c.state === "empty" ? "border border-dashed border-border bg-muted/20" : "bg-muted"
+                    } ${c.winner ? "ring-2 ring-amber-400" : ""}`}
+                  >
+                    {c.thumb && <img src={c.thumb} alt="" className="h-full w-full object-cover" />}
+                    {c.state === "empty" && (
+                      <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                        <Plus className="h-4 w-4" />
+                      </span>
+                    )}
+                    {c.winner && (
+                      <span className="absolute left-1 top-1 rounded-full bg-amber-400 px-1 text-[9px] font-bold text-black">🏆</span>
+                    )}
+                    {c.state !== "empty" && (
+                      <span className={`absolute right-1 top-1 rounded-full px-1 text-[9px] font-semibold ${STATE_CHIP[c.state].cls}`}>
+                        {c.state === "posted" ? "✓" : c.state === "takes" ? c.takes : "✓"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 truncate text-[11px] font-medium">{name(c)}</p>
+                  {c.plays.length ? (
+                    c.plays.slice(0, 3).map((p) => (
+                      <p key={p.accountId} className="flex justify-between gap-1 text-[10px] text-muted-foreground">
+                        <span className="truncate">{p.label.replace(/^@/, "")}</span>
+                        <span className="shrink-0 tabular-nums text-foreground">{short(p.views)}</span>
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">{c.state === "empty" ? "to shoot" : "not posted"}</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

@@ -9,9 +9,6 @@ import { AccountAvatar } from "@/components/pipeline/account-avatar";
  * accounts need, and which Trial-Maxxing boxes are waiting for her.
  */
 
-const nf = new Intl.NumberFormat("de-DE");
-const short = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : nf.format(n);
 
 /** Inspo links: how many she has shot, as a ring. */
 export function LinksDonut({ open, shot, topicHref }: { open: number; shot: number; topicHref: string | null }) {
@@ -192,6 +189,13 @@ export type TrialCard = {
   /** Reshoots in the current round. */
   total: number;
   brief: string;
+  /** Every round's boxes: shot, posted, winner, asked for. */
+  rounds: {
+    dimension: "outfit" | "location" | "hook";
+    emoji: string;
+    title: string;
+    cells: { state: "empty" | "takes" | "finished" | "edited" | "posted"; winner: boolean; requested: boolean }[];
+  }[];
 };
 
 const ROUND: Record<TrialCard["phase"], { n: number; label: string; emoji: string }> = {
@@ -218,7 +222,7 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
       ) : (
         trials.map((t) => {
           const r = ROUND[t.phase];
-          const pct = t.total ? Math.round((t.shot / t.total) * 100) : 0;
+          const asked = t.rounds.reduce((a, rd) => a + rd.cells.filter((c) => c.requested).length, 0);
           return (
             <Link
               key={t.id}
@@ -227,38 +231,46 @@ export function TrialJobs({ trials }: { trials: TrialCard[] }) {
             >
               <div className="relative aspect-[9/16] w-16 shrink-0 overflow-hidden rounded-xl bg-muted">
                 {t.cover ? <img src={t.cover} alt="" className="h-full w-full object-cover" /> : null}
-                <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 bg-gradient-to-t from-black/80 to-transparent pb-1 pt-4 text-[10px] font-semibold text-white">
-                  {t.views != null ? short(t.views) : "viral"}
-                </span>
               </div>
-              <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <div className="flex items-center gap-1.5">
                   <AccountAvatar src={t.avatar} platform={t.platform} label={t.accountLabel} size={20} />
                   <span className="truncate text-xs font-medium">{t.accountLabel}</span>
+                  {asked > 0 && (
+                    <span className="ml-auto shrink-0 rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+                      👉 {asked} to shoot
+                    </span>
+                  )}
                 </div>
-                <p className="mt-1.5 text-sm font-medium leading-tight">
-                  Round {r.n} of 3 · {t.phase === "done" ? r.label : `${t.total} ${r.label}`}
+                {/* One row per round: a box per variation, green once shot. */}
+                <div className="space-y-1">
+                  {t.rounds.map((rd) => (
+                    <div key={rd.dimension} className="flex items-center gap-1.5">
+                      <span className="w-4 shrink-0 text-center text-xs" title={rd.title}>
+                        {rd.emoji}
+                      </span>
+                      <div className="flex flex-1 gap-1">
+                        {rd.cells.map((c, i) => (
+                          <span
+                            key={i}
+                            className={`h-2 flex-1 rounded-full ${
+                              c.state === "empty" ? "bg-muted" : c.state === "takes" ? "bg-emerald-400/40" : "bg-emerald-400"
+                            } ${c.winner ? "ring-2 ring-amber-400" : c.requested ? "ring-1 ring-amber-300/80" : ""}`}
+                          />
+                        ))}
+                      </div>
+                      <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                        {rd.cells.filter((c) => c.state !== "empty" && c.state !== "takes").length}/{rd.cells.length}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-auto flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>{t.phase === "done" ? "All rounds decided" : `Round ${r.n} of 3 · ${r.label}`}</span>
+                  <span className="flex items-center font-medium text-foreground">
+                    {t.toShoot > 0 && t.phase !== "done" ? "Shoot" : "Open"} <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                  </span>
                 </p>
-                <div className="mt-auto pt-2">
-                  <div className="flex gap-1">
-                    {Array.from({ length: t.total }, (_, i) => (
-                      <span
-                        key={i}
-                        className={`h-1.5 flex-1 rounded-full ${
-                          i < t.posted ? "bg-emerald-400" : i < t.shot ? "bg-foreground/70" : i < t.shot + t.started ? "bg-foreground/30" : "bg-muted"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>
-                      {t.phase === "done" ? "All rounds decided" : `${t.shot}/${t.total} shot · ${pct}%`}
-                    </span>
-                    <span className="flex items-center font-medium text-foreground">
-                      {t.toShoot > 0 && t.phase !== "done" ? "Shoot" : "Open"} <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-                    </span>
-                  </p>
-                </div>
               </div>
             </Link>
           );

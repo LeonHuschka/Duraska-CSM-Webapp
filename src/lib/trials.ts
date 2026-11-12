@@ -64,6 +64,8 @@ export type CellView = {
   brief: string | null;
   /** The team's own notes; left out of the page for the model. */
   notes: string | null;
+  /** When the team sent it to her SHOOTING message; null when not asked for there. */
+  requestedAt: string | null;
 };
 
 export type CellPlays = { accountId: string; label: string; avatar: string | null; platform: string; views: number; url: string | null };
@@ -312,6 +314,7 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
         .sort((a, b) => b.views - a.views),
       brief: c.brief ?? null,
       notes: c.notes ?? null,
+      requestedAt: c.requested_at ?? null,
     };
   });
 }
@@ -334,6 +337,15 @@ export type TrialSummary = {
   total: number;
   brief: string;
   createdAt: string;
+  /** Every round as it stands: what is shot, posted, asked for in SHOOTING. */
+  rounds: RoundSummary[];
+};
+
+export type RoundSummary = {
+  dimension: Dimension;
+  emoji: string;
+  title: string;
+  cells: { state: CellState; winner: boolean; requested: boolean }[];
 };
 
 /** The active trials of a persona, as cards for the dashboards. */
@@ -364,6 +376,15 @@ export async function listTrials(supabase: Sb, personaId: string, includeDone = 
       total: row.length,
       brief: t.phase === "done" ? "Pattern found" : roundBrief(dim, winners, row.length),
       createdAt: t.createdAt,
+      rounds: DIMENSIONS.map((d) => ({
+        dimension: d,
+        emoji: DIM_META[d].emoji,
+        title: DIM_META[d].title,
+        cells: t.cells
+          .filter((c) => c.dimension === d)
+          .sort((a, b) => a.slot - b.slot)
+          .map((c) => ({ state: c.state, winner: c.winner, requested: !!c.requestedAt && (c.state === "empty" || c.state === "takes") })),
+      })),
     });
   }
   return out;
