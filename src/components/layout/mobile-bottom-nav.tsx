@@ -30,7 +30,7 @@ export function MobileBottomNav() {
   const navItems = allNavItems.filter((item) => item.roles.includes(role));
 
   return (
-    <nav className="md:hidden fixed bottom-3 left-3 right-3 z-50 rounded-3xl border border-border bg-popover/70 safe-area-pb">
+    <nav className="md:hidden fixed bottom-3 left-3 right-3 z-50 glass-rail rounded-3xl safe-area-pb">
       <div className="flex items-center justify-around h-16 px-2">
         {navItems.map((item) => {
           const isActive =

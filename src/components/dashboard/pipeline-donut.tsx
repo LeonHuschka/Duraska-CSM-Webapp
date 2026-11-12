@@ -39,13 +39,13 @@ export function PipelineDonut({
   return (
     <div className="flex items-center gap-5">
       <div className="relative shrink-0">
-        <svg viewBox="0 0 100 100" className="h-32 w-32 -rotate-90">
+        <svg viewBox="0 0 100 100" className="glass-glow h-32 w-32 -rotate-90">
           <circle
             cx="50"
             cy="50"
             r={R}
             fill="none"
-            strokeWidth="12"
+            strokeWidth="9"
             className="stroke-muted"
           />
           {total > 0 &&
@@ -57,7 +57,7 @@ export function PipelineDonut({
                   cy="50"
                   r={R}
                   fill="none"
-                  strokeWidth="12"
+                  strokeWidth="9"
                   strokeDasharray={`${a.len} ${a.gap}`}
                   strokeDashoffset={-a.offset}
                   className={a.color}
@@ -233,13 +233,13 @@ export function WeeklyGoal({
     <div className="rounded-2xl border border-border/50 bg-card p-5">
       <div className="flex items-center gap-5">
         <div className="relative shrink-0">
-          <svg viewBox="0 0 110 110" className="h-28 w-28 -rotate-90">
+          <svg viewBox="0 0 110 110" className="glass-glow h-28 w-28 -rotate-90">
             <circle
               cx="55"
               cy="55"
               r={R}
               fill="none"
-              strokeWidth="10"
+              strokeWidth="7"
               className="stroke-muted"
             />
             <circle
@@ -247,7 +247,7 @@ export function WeeklyGoal({
               cy="55"
               r={R}
               fill="none"
-              strokeWidth="10"
+              strokeWidth="7"
               strokeLinecap="round"
               className={`${tone} transition-all`}
               strokeDasharray={`${filled} ${C - filled}`}
@@ -320,7 +320,7 @@ export function WeekBars({
             {d.value > 0 ? d.value : ""}
           </span>
           <div
-            className={`w-full rounded-t ${d.value > 0 ? "bg-primary" : "bg-muted"}`}
+            className={`w-full rounded-full ${d.value > 0 ? "bg-primary bar-shine" : "bg-muted"}`}
             style={{ height: `${Math.max(3, (d.value / max) * 44)}px` }}
           />
           <span className="text-[9px] text-muted-foreground">{d.label}</span>

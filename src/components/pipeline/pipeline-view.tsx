@@ -100,13 +100,13 @@ export function ThroughputChart({ weeks }: { weeks: WeekPoint[] }) {
       <div className="flex items-end justify-between gap-2">
         {weeks.map((w) => (
           <div key={w.label} className="flex flex-1 flex-col items-center gap-1.5">
-            <div className="flex h-28 w-full items-end justify-center gap-0.5">
+            <div className="flex h-28 w-full items-end justify-center gap-1">
               {series.map((s) => {
                 const v = w[s.key];
                 return (
                   <div
                     key={s.key}
-                    className={`w-full rounded-t ${v > 0 ? s.tone : "bg-muted"}`}
+                    className={`w-full max-w-[12px] rounded-full ${v > 0 ? `${s.tone} bar-shine` : "bg-muted"}`}
                     style={{ height: `${Math.max((v / max) * 100, v > 0 ? 4 : 2)}%` }}
                     title={`${s.label}: ${v}`}
                   />
@@ -244,8 +244,8 @@ export function AccountsPie({
     <Card title="Live accounts" hint="Each one posts at its own rate">
       <div className="flex items-center gap-5">
         <div className="relative shrink-0">
-          <svg viewBox="0 0 100 100" className="h-28 w-28 -rotate-90">
-            <circle cx="50" cy="50" r={R} fill="none" strokeWidth="12" className="stroke-muted" />
+          <svg viewBox="0 0 100 100" className="glass-glow h-28 w-28 -rotate-90">
+            <circle cx="50" cy="50" r={R} fill="none" strokeWidth="9" className="stroke-muted" />
             {arcs.map((a) =>
               a.len <= 0 ? null : (
                 <circle
@@ -254,7 +254,7 @@ export function AccountsPie({
                   cy="50"
                   r={R}
                   fill="none"
-                  strokeWidth="12"
+                  strokeWidth="9"
                   strokeDasharray={`${a.len} ${a.gap}`}
                   strokeDashoffset={-a.offset}
                   className={TONE[a.platform] ?? "stroke-muted-foreground"}
@@ -423,13 +423,13 @@ function Gauge({
   return (
     <div className="text-center">
       <div className="relative mx-auto h-16 w-32">
-        <svg viewBox="0 0 100 56" className="h-full w-full">
+        <svg viewBox="0 0 100 56" className="glass-glow h-full w-full">
           <path
             d="M10,50 A40,40 0 0 1 90,50"
             fill="none"
-            strokeWidth="7"
+            strokeWidth="5"
             strokeLinecap="round"
-            className="stroke-muted"
+            className="stroke-white/15"
           />
           {ratio !== null && (
             <circle cx={cx} cy={cy} r="5.5" className={`${tone} fill-current`} />

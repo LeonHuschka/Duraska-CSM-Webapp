@@ -20,14 +20,14 @@ export function LinksDonut({ open, shot, topicHref }: { open: number; shot: numb
     <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card p-5">
       <div className="relative flex items-center gap-5">
         <div className="relative h-36 w-36 shrink-0">
-          <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-            <circle cx="60" cy="60" r={R} fill="none" strokeWidth="12" className="stroke-amber-400/15" />
+          <svg viewBox="0 0 120 120" className="glass-glow h-full w-full -rotate-90">
+            <circle cx="60" cy="60" r={R} fill="none" strokeWidth="9" className="stroke-white/10" />
             <circle
               cx="60"
               cy="60"
               r={R}
               fill="none"
-              strokeWidth="12"
+              strokeWidth="9"
               strokeLinecap="round"
               className="stroke-emerald-400 transition-all duration-700"
               strokeDasharray={`${C * pct} ${C}`}
@@ -129,7 +129,7 @@ export function WeekVsMust({
               <div className="relative w-full" style={{ height: H }}>
                 {/* The must: faint and dashed — red where a past day fell short */}
                 <div
-                  className={`absolute inset-x-0 bottom-0 rounded-lg border border-dashed ${
+                  className={`absolute inset-x-0 bottom-0 rounded-full border border-dashed ${
                     missed
                       ? "border-rose-400/40 bg-rose-500/[0.07]"
                       : isToday
@@ -141,7 +141,7 @@ export function WeekVsMust({
                 {/* What she shot, laid over it */}
                 {d.value > 0 && (
                   <div
-                    className={`absolute inset-x-[3px] bottom-0 rounded-lg ${
+                    className={`bar-shine absolute inset-x-[3px] bottom-0 rounded-full ${
                       met ? "bg-emerald-400" : "bg-primary"
                     }`}
                     style={{ height: valH }}

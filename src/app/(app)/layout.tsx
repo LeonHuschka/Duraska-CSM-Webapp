@@ -1,10 +1,11 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_PERSONA_COOKIE } from "@/lib/constants";
 import type { PersonaWithRole } from "@/lib/types/database";
 import { PersonaProvider } from "@/hooks/use-persona";
-import { AppSidebar } from "@/components/layout/app-sidebar";
+import { PersonaRail } from "@/components/layout/persona-rail";
 import { TopBar } from "@/components/layout/top-bar";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 
@@ -51,16 +52,17 @@ export default async function AppLayout({
         <PersonaProvider
           value={{ activePersona, personas }}
         >
-          <div className="hidden md:m-3 md:mr-0 md:flex md:w-[248px] md:shrink-0 md:overflow-hidden md:rounded-3xl md:border md:border-border md:bg-card">
-            <AppSidebar />
-          </div>
+          <Suspense fallback={null}>
+            <PersonaRail />
+          </Suspense>
           <div className="flex flex-1 flex-col overflow-hidden">
             <TopBar
               userEmail={user.email ?? ""}
               userName={profile?.full_name ?? null}
               isModel={activePersona.role === "model"}
+              withNav
             />
-            <main className="flex-1 overflow-auto p-4 pb-28 md:p-6 md:pb-6">{children}</main>
+            <main className={`flex-1 overflow-auto p-4 pb-28 md:p-6 md:pb-8 ${activePersona.role === "model" ? "" : "md:pl-24"}`}>{children}</main>
             <MobileBottomNav />
           </div>
         </PersonaProvider>

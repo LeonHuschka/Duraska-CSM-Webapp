@@ -12,16 +12,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import Link from "next/link";
+import Image from "next/image";
 import { MobileSidebar } from "./mobile-sidebar";
+import { TopNav } from "./top-nav";
 
 interface TopBarProps {
   userEmail: string;
   userName: string | null;
   /** The model has no persona to switch between — hide the sidebar trigger. */
   isModel?: boolean;
+  /** The section pills need a persona; without one there is nothing to open. */
+  withNav?: boolean;
 }
 
-export function TopBar({ userEmail, userName, isModel = false }: TopBarProps) {
+export function TopBar({ userEmail, userName, isModel = false, withNav = false }: TopBarProps) {
   const [isPending, startTransition] = useTransition();
 
   function handleSignOut() {
@@ -39,25 +44,33 @@ export function TopBar({ userEmail, userName, isModel = false }: TopBarProps) {
       .toUpperCase() ?? userEmail.charAt(0).toUpperCase();
 
   return (
-    <header className="flex h-16 items-center justify-between px-4 md:justify-end md:px-6">
+    <header className="relative flex h-16 shrink-0 items-center justify-between px-4 md:h-[72px] md:px-5">
       {/* Mobile: hamburger + logo. The hamburger opens the slide-in sidebar,
-          which is the ONLY place the persona switcher lives — without it a
-          phone-only user can never set their active persona. */}
+          which is the ONLY place the persona switcher lives on a phone. */}
       <div className="flex items-center gap-2 md:hidden">
         {!isModel && <MobileSidebar />}
         <span className="text-sm font-semibold tracking-tight text-foreground">
           Duraska
         </span>
       </div>
+      {/* Desktop: the logo as a round glass button, the sections as pills in the middle. */}
+      <Link href="/" className="glass-pill hidden h-10 w-10 items-center justify-center overflow-hidden rounded-full md:flex">
+        <Image src="/Duraska_logo_white.svg" alt="Duraska" width={56} height={56} className="h-14 w-14 max-w-none" />
+      </Link>
+      {withNav && (
+        <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:block">
+          <TopNav />
+        </div>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="gap-2.5 rounded-full border border-border bg-card px-1.5 pr-3.5 hover:bg-white/15">
-            <Avatar className="h-7 w-7">
+          <Button variant="ghost" className="glass-pill h-10 gap-2.5 rounded-full px-1.5 pr-3.5 hover:bg-white/20">
+            <Avatar className="h-7 w-7 ring-2 ring-white/30">
               <AvatarFallback className="bg-gradient-to-br from-amber-300 to-orange-500 text-xs font-semibold text-neutral-900">
                 {initials}
               </AvatarFallback>
             </Avatar>
-            <span className="hidden text-sm font-medium sm:inline-block">
+            <span className="hidden text-sm font-medium sm:inline-block md:hidden xl:inline-block">
               {userName ?? userEmail}
             </span>
           </Button>

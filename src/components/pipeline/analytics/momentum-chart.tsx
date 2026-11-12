@@ -76,7 +76,7 @@ export function MomentumChart({ accounts }: { accounts: AccountStats[] }) {
         viewBox={`0 0 ${W} ${H}`}
         width={W}
         height={H}
-        className="block max-w-full"
+        className="glass-glow block max-w-full"
         onMouseLeave={() => setHover(null)}
       >
         {/* quadrant labels, set into the background; they collide on a phone */}

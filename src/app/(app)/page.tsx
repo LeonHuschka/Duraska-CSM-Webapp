@@ -209,7 +209,7 @@ export default async function DashboardPage({
       {/* Two views of the same operation: the content moving through, and
           the accounts it goes out on. */}
       <div>
-        <div className="flex gap-1 rounded-xl border border-border/50 bg-card p-1">
+        <div className="glass-pill inline-flex gap-1 rounded-full p-1">
           {(
             [
               { key: "pipeline", label: "Pipeline" },
@@ -221,10 +221,10 @@ export default async function DashboardPage({
               key={t.key}
               href={t.key === "pipeline" ? "/" : `/?tab=${t.key}`}
               scroll={false}
-              className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium transition-colors ${
+              className={`rounded-full px-5 py-1.5 text-center text-sm font-medium transition-all duration-200 ${
                 tab === t.key
-                  ? "bg-primary/10 text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-white text-neutral-900 shadow-[0_6px_20px_-6px_rgba(255,255,255,0.55)]"
+                  : "text-white/75 hover:bg-white/15 hover:text-white"
               }`}
             >
               {t.label}

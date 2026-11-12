@@ -41,10 +41,10 @@
     /* Surfaces: white glass of different strength; menus a darker glass. */
     --background: 228 18% 8%;
     --background-a: 0.22;
-    --card: 226 22% 12%;
-    --card-a: 0.34;
-    --popover: 228 16% 13%;
-    --popover-a: 0.8;
+    --card: 0 0% 100%;
+    --card-a: 0.1;
+    --popover: 230 14% 16%;
+    --popover-a: 0.72;
     --secondary: 0 0% 100%;
     --secondary-a: 0.1;
     --muted: 0 0% 100%;
@@ -52,7 +52,7 @@
     --accent: 0 0% 100%;
     --accent-a: 0.12;
     --border: 0 0% 100%;
-    --border-a: 0.14;
+    --border-a: 0.16;
     --input: 0 0% 100%;
     --input-a: 0.18;
 
@@ -63,7 +63,7 @@
     --secondary-foreground: 0 0% 100%;
     --accent-foreground: 0 0% 100%;
     --muted-foreground: 0 0% 100%;
-    --muted-foreground-a: 0.66;
+    --muted-foreground-a: 0.62;
 
     /* Accent: the clear blue of the glass dashboards. */
     --primary: 214 95% 62%;
@@ -85,31 +85,28 @@
     @apply border-border;
   }
 
-  /* The scene behind the glass: an evening room with tall windows — sky,
-     a warm glow on the horizon, hills, window frames, the floor — painted
-     in gradients, darkened at the edges so text on glass stays legible. */
+  /* The scene behind the glass: an evening living room with a window
+     front onto the hills — dimmed a little so white text on glass holds. */
   html {
     min-height: 100%;
-    background-color: #1c1714;
+    background-color: #2a2420;
     background-image:
-      radial-gradient(ellipse 130% 95% at 50% 42%, transparent 50%, rgba(8, 6, 5, 0.55) 100%),
-      linear-gradient(180deg, rgba(12, 12, 16, 0.06), rgba(12, 10, 8, 0.28)),
-      linear-gradient(90deg, rgba(22, 17, 14, 0.82) 0 0.7%, transparent 0.7% 23.6%, rgba(22, 17, 14, 0.82) 23.6% 24.3%, transparent 24.3% 49.6%, rgba(22, 17, 14, 0.82) 49.6% 50.3%, transparent 50.3% 75.6%, rgba(22, 17, 14, 0.82) 75.6% 76.3%, transparent 76.3% 99.3%, rgba(22, 17, 14, 0.82) 99.3%),
-      linear-gradient(180deg, rgba(22, 17, 14, 0.82) 0 1.2%, transparent 1.2% 11%, rgba(22, 17, 14, 0.7) 11% 11.8%, transparent 11.8%),
-      linear-gradient(180deg, transparent 63%, #5c4536 63.4%, #3a2c22 78%, #1f1814 100%),
-      radial-gradient(70% 9% at 22% 63%, rgba(66, 62, 72, 0.95), transparent 70%),
-      radial-gradient(80% 11% at 78% 64%, rgba(58, 54, 64, 0.95), transparent 70%),
-      radial-gradient(60% 24% at 52% 56%, rgba(255, 204, 150, 0.85), transparent 72%),
-      radial-gradient(40% 30% at 85% 20%, rgba(255, 232, 210, 0.25), transparent 70%),
-      linear-gradient(180deg, #6c7c93 0%, #a2a5b3 22%, #d6b6a0 40%, #f0c29a 51%, #f7ca98 57%, #a8826b 62.5%, #3a2c22 64%);
-    background-size: 100% 100%, 100% 100%, 100% 63%, 100% 63%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+      linear-gradient(180deg, rgba(14, 12, 18, 0.42) 0%, rgba(14, 12, 18, 0.22) 38%, rgba(14, 10, 8, 0.5) 100%),
+      url("/bg-room.webp");
+    background-size: cover, cover;
+    background-position: center, center 40%;
     background-repeat: no-repeat;
     background-attachment: fixed;
   }
 
   body {
-    @apply bg-background text-foreground;
-    background-attachment: fixed;
+    @apply text-foreground;
+    background: transparent;
+    letter-spacing: -0.005em;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
   }
 }
 
@@ -117,23 +114,57 @@
 [class*="bg-card"],
 [class*="bg-popover"],
 [class*="bg-background"] {
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
 }
 
-/* A glass card: a light top edge and a soft shadow under it. */
+/* A glass card as in the reel: clear white glass, a light sheen from the
+   top, a bright edge along the top and a soft shadow under it. */
 [class*="bg-card"] {
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  border-color: rgba(255, 255, 255, 0.18);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    0 10px 30px -12px rgba(0, 0, 0, 0.45);
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 32px -14px rgba(0, 0, 0, 0.45);
+}
+/* Glass inside glass stays flat — the sheen belongs to the outer pane. */
+[class*="bg-card"] [class*="bg-card"] {
+  background-image: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 /* Cards that are links lift a little under the pointer. */
 a[class*="bg-card"] {
-  transition: transform 0.2s ease, background-color 0.2s ease;
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s ease;
 }
 a[class*="bg-card"]:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
+}
+
+/* Pills and the rail: round glass buttons floating over the room. */
+.glass-pill,
+.glass-rail {
+  background-color: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+}
+.glass-rail {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.glass-pill-active {
+  background-color: #fff;
+  color: #171717;
+  border-color: #fff;
+  box-shadow: 0 6px 20px -6px rgba(255, 255, 255, 0.55);
+}
+
+/* Big numbers read like the reel: bold, tight, white. */
+.tabular-nums.font-bold,
+.tabular-nums.font-semibold {
+  letter-spacing: -0.02em;
 }
 
 /* Thin, light scrollbars on glass. */
@@ -151,4 +182,14 @@ a[class*="bg-card"]:hover {
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Charts: rings and lines glow faintly over the glass, bars are lit
+   capsules with a sheen from the top. */
+.glass-glow {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.16));
+}
+.bar-shine {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.06) 45%, rgba(0, 0, 0, 0.18) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 0 16px -3px rgba(255, 255, 255, 0.35);
 }

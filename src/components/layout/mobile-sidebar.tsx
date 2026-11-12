@@ -25,7 +25,7 @@ export function MobileSidebar() {
         <Menu className="h-5 w-5" />
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-[280px] p-0 bg-card/95 backdrop-blur-sm">
+        <SheetContent side="left" className="w-[280px] p-0 bg-popover">
           <VisuallyHidden>
             <SheetTitle>Navigation</SheetTitle>
           </VisuallyHidden>
