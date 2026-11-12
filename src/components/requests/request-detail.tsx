@@ -202,7 +202,7 @@ export function RequestDetail({
       </div>
 
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-3xl border border-border/50 bg-card p-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-center gap-2.5">
             {request.is_trial && <TrialBadge size="lg" />}
@@ -312,8 +312,8 @@ export function RequestDetail({
       </div>
 
       {/* Upload sections */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="space-y-4">
+      <div className="grid gap-5 md:grid-cols-2">
+        <div className="min-w-0 space-y-4 rounded-3xl border border-border/50 bg-card p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">
@@ -342,7 +342,7 @@ export function RequestDetail({
           <AssetGallery assets={rawAssets} onDelete={handleDeleteAsset} onToggleFansly={handleToggleFansly} />
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4 rounded-3xl border border-border/50 bg-card p-5">
           <div>
             <h2 className="text-lg font-semibold">
               Final Cuts {editedAssets.length + fanslyCuts.length > 0 && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -15,7 +15,11 @@ import {
   ChevronRight,
   Trash2,
   Loader2,
+  List,
+  LayoutGrid,
+  Play,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +50,20 @@ function timeAgo(iso: string): string {
 
 export function EditingView({ jobs }: { jobs: EditJob[] }) {
   const [tab, setTab] = useState<string>("shooted");
+  // List or cards — remembered per browser, the VA's own preference.
+  const [view, setView] = useState<"list" | "cards">("list");
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("editing-view");
+      if (v === "cards" || v === "list") setView(v);
+    } catch {}
+  }, []);
+  const pickView = (v: "list" | "cards") => {
+    setView(v);
+    try {
+      localStorage.setItem("editing-view", v);
+    } catch {}
+  };
   const [search, setSearch] = useState("");
   const router = useRouter();
   const { activePersona } = usePersona();
@@ -105,29 +123,48 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-border/40 bg-card p-1">
-        {TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              tab === t.value
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-            <span
-              className={`rounded-full px-1.5 text-[10px] ${
-                tab === t.value ? "bg-primary/20" : "bg-muted"
-              }`}
+      {/* Tabs, and beside them how to see the jobs */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="glass-pill inline-flex max-w-full gap-1 overflow-x-auto rounded-full p-1">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-all duration-200",
+                tab === t.value
+                  ? "bg-white text-neutral-900 shadow-[0_6px_20px_-6px_rgba(255,255,255,0.55)]"
+                  : "text-white/75 hover:bg-white/15 hover:text-white"
+              )}
             >
-              {counts[t.value] ?? 0}
-            </span>
-          </button>
-        ))}
+              <t.icon className="h-3.5 w-3.5" />
+              {t.label}
+              <span className={cn("text-[11px] tabular-nums", tab === t.value ? "text-neutral-500" : "text-white/45")}>
+                {counts[t.value] ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="glass-pill inline-flex gap-1 rounded-full p-1">
+          {(
+            [
+              { v: "list", label: "List", icon: List },
+              { v: "cards", label: "Cards", icon: LayoutGrid },
+            ] as const
+          ).map((o) => (
+            <button
+              key={o.v}
+              onClick={() => pickView(o.v)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200",
+                view === o.v ? "bg-white text-neutral-900" : "text-white/70 hover:bg-white/15 hover:text-white"
+              )}
+            >
+              <o.icon className="h-3.5 w-3.5" />
+              {o.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search */}
@@ -164,17 +201,28 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
               : "Jobs move here as they progress."}
           </p>
         </div>
+      ) : view === "cards" ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {filtered.map((job) => (
+            <JobCard key={job.id} job={job} canDelete={canDelete} onDelete={() => setConfirmJob(job)} />
+          ))}
+        </div>
       ) : (
-        <div className="divide-y divide-border/40 overflow-hidden rounded-xl border border-border/40 bg-card">
+        <div className="divide-y divide-white/10 overflow-hidden rounded-2xl border border-border/50 bg-card">
           {filtered.map((job) => (
             <Link
               key={job.id}
               href={`/requests/${job.id}`}
-              className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/40 active:bg-accent/60"
+              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.06] active:bg-white/10"
             >
               {/* leading icon */}
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                <Film className="h-4 w-4 text-muted-foreground" />
+              <div className="relative flex h-12 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/[0.06] ring-1 ring-white/10">
+                {job.previewImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={job.previewImage} alt="" loading="lazy" className="h-full w-full object-cover" />
+                ) : (
+                  <Film className="h-4 w-4 text-muted-foreground" />
+                )}
               </div>
 
               {/* main */}
@@ -226,16 +274,18 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
 
               {/* inspo quick-open */}
               {job.inspo_link && (
-                <a
-                  href={job.inspo_link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
+                <button
+                  type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.open(job.inspo_link!, "_blank", "noopener,noreferrer");
+                }}
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
                   title="Open inspo reel"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                </a>
+                </button>
               )}
 
               {canDelete && (
@@ -316,5 +366,121 @@ export function EditingView({ jobs }: { jobs: EditJob[] }) {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * A job as a card: the inspo reel as its picture — it plays while the
+ * pointer rests on it — with the title and counts over a dark fade.
+ */
+function JobCard({ job, canDelete, onDelete }: { job: EditJob; canDelete: boolean; onDelete: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const brief =
+    job.description && !/^(Self-produced based on inspo|Own idea)$/.test(job.description) ? job.description : null;
+  return (
+    <Link
+      href={`/requests/${job.id}`}
+      className="group relative block overflow-hidden rounded-2xl border border-white/15 bg-card shadow-[0_12px_32px_-14px_rgba(0,0,0,0.6)] transition-transform duration-300 hover:-translate-y-1"
+      onMouseEnter={() => video.current?.play().catch(() => {})}
+      onMouseLeave={() => {
+        const v = video.current;
+        if (v) {
+          v.pause();
+          v.currentTime = 0.5;
+        }
+      }}
+    >
+      <div className="relative aspect-[9/16] w-full overflow-hidden bg-black/40">
+        {job.previewVideo ? (
+          <video
+            ref={video}
+            src={`${job.previewVideo}#t=0.5`}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+          />
+        ) : job.previewImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={job.previewImage} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <Film className="h-8 w-8 text-white/30" />
+          </div>
+        )}
+
+        {/* Top: what kind of job, and the quick buttons */}
+        <div className="absolute inset-x-2 top-2 flex items-start justify-between gap-1">
+          <div className="flex flex-wrap gap-1">
+            {job.is_trial && <TrialBadge size="sm" />}
+            {job.is_nsfw && (
+              <span className="rounded-full bg-blue-500/80 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur">NSFW</span>
+            )}
+            {job.fanslyCount > 0 && (
+              <span className="rounded-full bg-sky-500/80 px-1.5 py-0.5 text-[9px] font-bold text-white backdrop-blur">
+                {job.fanslyCount} Fansly
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {job.inspo_link && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.open(job.inspo_link!, "_blank", "noopener,noreferrer");
+                }}
+                className="glass-pill flex h-7 w-7 items-center justify-center rounded-full text-white"
+                title="Open inspo reel"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                className="glass-pill flex h-7 w-7 items-center justify-center rounded-full text-white hover:text-rose-300"
+                title="Delete job and its files"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {job.previewVideo && (
+          <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md transition-opacity group-hover:opacity-0">
+            <Play className="h-4 w-4 fill-white" />
+          </span>
+        )}
+
+        {/* Bottom: title and counts over a fade */}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-3 pb-3 pt-10">
+          <p className="truncate text-sm font-semibold text-white">{job.title}</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-white/70">
+            <span>
+              {job.rawCount} take{job.rawCount === 1 ? "" : "s"}
+            </span>
+            {job.editedCount > 0 && (
+              <>
+                <span>·</span>
+                <span className="font-medium text-emerald-300">
+                  {job.editedCount} cut{job.editedCount === 1 ? "" : "s"}
+                </span>
+              </>
+            )}
+            <span>·</span>
+            <span>{timeAgo(job.created_at)}</span>
+          </p>
+          {brief && <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-white/60">{brief}</p>}
+        </div>
+      </div>
+    </Link>
   );
 }

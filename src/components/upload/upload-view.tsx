@@ -431,8 +431,10 @@ export function UploadView({ personaId }: { personaId: string }) {
         </p>
       </div>
 
+      {/* The form on one glass pane */}
+      <div className="space-y-5 rounded-3xl border border-border/50 bg-card p-5">
       {/* Auto title */}
-      <div className="rounded-xl border border-border/40 bg-muted/30 px-4 py-3">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3">
         <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           Job (auto-named)
         </p>
@@ -558,8 +560,10 @@ export function UploadView({ personaId }: { personaId: string }) {
         />
       </div>
 
-      {/* Sticky submit on mobile */}
-      <div className="fixed inset-x-0 bottom-16 z-40 border-t border-border/50 bg-background/95 p-3 backdrop-blur-md md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+      </div>
+
+      {/* Sticky submit on mobile, floating above the bottom bar */}
+      <div className="fixed inset-x-3 bottom-[88px] z-40 rounded-2xl border border-white/15 bg-popover p-3 shadow-xl md:static md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none">
         <div className="mx-auto max-w-md space-y-2">
           {busy && (
             <div className="space-y-1">
