@@ -85,16 +85,16 @@
     @apply border-border;
   }
 
-  /* The scene behind the glass: an evening living room with a window
-     front onto the hills — dimmed a little so white text on glass holds. */
+  /* The scene behind the glass: a high living room with a window front
+     onto the bay in late sun — dimmed so white text on glass holds. */
   html {
     min-height: 100%;
     background-color: #2a2420;
     background-image:
-      linear-gradient(180deg, rgba(14, 12, 18, 0.42) 0%, rgba(14, 12, 18, 0.22) 38%, rgba(14, 10, 8, 0.5) 100%),
-      url("/bg-room.webp");
+      linear-gradient(180deg, rgba(12, 16, 26, 0.5) 0%, rgba(12, 14, 22, 0.32) 40%, rgba(16, 12, 8, 0.55) 100%),
+      url("/bg-bay.webp");
     background-size: cover, cover;
-    background-position: center, center 40%;
+    background-position: center, center 55%;
     background-repeat: no-repeat;
     background-attachment: fixed;
   }
