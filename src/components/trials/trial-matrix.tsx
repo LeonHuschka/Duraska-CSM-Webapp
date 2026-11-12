@@ -522,7 +522,14 @@ function VariantCard({
       </ReelPlayer>
       </div>
 
-      {staff ? <NameField c={c} onChanged={onChanged} /> : <p className="truncate text-sm font-medium">{name(c)}</p>}
+      {staff ? (
+        <div className="flex min-w-0 items-center gap-1">
+          <NameField c={c} onChanged={onChanged} />
+          <MoveMenu c={c} onChanged={onChanged} />
+        </div>
+      ) : (
+        <p className="truncate text-sm font-medium">{name(c)}</p>
+      )}
       <p className="-mt-1.5 text-[10px] text-muted-foreground">{stateLine}</p>
 
       {/* Plays on every account it went out on. */}
@@ -586,7 +593,7 @@ function VariantCard({
             size="sm"
             variant={c.winner ? "default" : "outline"}
             disabled={busy}
-            className={`h-8 flex-1 px-2 text-[11px] ${c.winner ? "bg-amber-400 text-black hover:bg-amber-300" : ""}`}
+            className={`h-8 min-w-0 flex-1 px-1.5 text-[11px] ${c.winner ? "bg-amber-400 text-black hover:bg-amber-300" : ""}`}
             onClick={() =>
               start(async () => {
                 const r = await toggleWinner(c.id);
@@ -595,15 +602,14 @@ function VariantCard({
               })
             }
           >
-            <Trophy className="mr-1 h-3.5 w-3.5" />
-            {c.winner ? "Winner" : "Make winner"}
+            <Trophy className="mr-1 h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{c.winner ? "Winner" : "Winner?"}</span>
           </Button>
         )}
-        <Button size="sm" variant="outline" className="h-8 px-2 text-[11px]" onClick={onOpen} title="Upload takes">
+        <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" onClick={onOpen} title="Upload takes">
           <Upload className="h-3.5 w-3.5" />
           {!staff && <span className="ml-1">Takes</span>}
         </Button>
-        {staff && <MoveMenu c={c} onChanged={onChanged} />}
       </div>
     </div>
   );
@@ -623,7 +629,7 @@ function MoveMenu({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="h-8 px-2" disabled={busy} title="Move or remove">
+        <Button size="sm" variant="ghost" className="h-6 w-6 shrink-0 p-0 text-muted-foreground" disabled={busy} title="Move or remove">
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRightLeft className="h-3.5 w-3.5" />}
         </Button>
       </DropdownMenuTrigger>
@@ -663,7 +669,7 @@ function NameField({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
       onBlur={save}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       placeholder={`${META[c.dimension].one} ${c.slot} — name it`}
-      className="w-full truncate rounded bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground/70 hover:bg-muted/40 focus:bg-muted/60 focus:px-1"
+      className="min-w-0 flex-1 truncate rounded bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground/70 hover:bg-muted/40 focus:bg-muted/60 focus:px-1"
     />
   );
 }
