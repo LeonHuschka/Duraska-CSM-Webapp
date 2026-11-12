@@ -9,6 +9,9 @@ import "server-only";
  * for as long as this server instance lives — a fresh one asks it again,
  * which costs nothing and finds it refilled when its month turns over.
  *
+ * A token Apify answers with 401 — revoked, or the account locked — is
+ * skipped the same way.
+ *
  * Accounts: APIFY_TOKEN, then APIFY_TOKEN_2.
  */
 const spent = new Set<string>();
@@ -45,7 +48,21 @@ export async function apifyRunSync(
       last = res;
       continue;
     }
+    // A token Apify no longer takes (revoked, account locked): the next account.
+    if (res.status === 401) {
+      spent.add(token);
+      console.warn(`[apify] account ${all.indexOf(token) + 1} refused the token (401), trying the next:`, (await res.clone().text()).slice(0, 200));
+      last = res;
+      continue;
+    }
     return res;
   }
   return last;
+}
+
+/** Apify's own word on a refused run, for the error stored with the link. */
+export async function apifyError(res: Response): Promise<string> {
+  const body = (await res.clone().json().catch(() => null)) as { error?: { type?: string; message?: string } } | null;
+  const why = body?.error?.message ?? body?.error?.type;
+  return why ? `${res.status} — ${why.slice(0, 120)}` : String(res.status);
 }

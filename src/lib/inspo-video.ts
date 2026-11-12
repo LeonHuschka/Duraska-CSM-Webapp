@@ -3,7 +3,7 @@ import { layoutNote } from "@/lib/note-layout";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { deleteMessage, instagramKey, REACTION, sendVideo, setMessageReaction } from "@/lib/telegram";
-import { apifyRunSync } from "@/lib/apify";
+import { apifyError, apifyRunSync } from "@/lib/apify";
 
 /**
  * Keep the inspo reel, not just its link.
@@ -326,8 +326,9 @@ export async function resolveFacebookVideoUrl(
     signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
   }).catch(() => null);
   if (!res) return { ok: false, note: "resolver unreachable" };
+  if (!res.ok) return { ok: false, note: `resolver answered ${await apifyError(res)}` };
   const items = (await res.json().catch(() => null)) as Record<string, unknown>[] | null;
-  if (!res.ok || !Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
+  if (!Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
   const item = items[0];
   if (!item) return { ok: false, note: "video not readable" };
   if (typeof item.errMsg === "string" && item.errMsg) return { ok: false, note: item.errMsg.slice(0, 80) };
@@ -345,8 +346,9 @@ export async function resolveVideoUrl(
     signal: AbortSignal.timeout((ACTOR_TIMEOUT_S + 15) * 1000),
   }).catch(() => null);
   if (!res) return { ok: false, note: "resolver unreachable" };
+  if (!res.ok) return { ok: false, note: `resolver answered ${await apifyError(res)}` };
   const items = (await res.json().catch(() => null)) as Record<string, unknown>[] | null;
-  if (!res.ok || !Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
+  if (!Array.isArray(items)) return { ok: false, note: `resolver answered ${res.status}` };
   const item = items[0];
   if (!item) return { ok: false, note: "post not readable — gone, private or age-gated" };
   if (item.error) return { ok: false, note: `post not readable — ${String(item.error).slice(0, 80)}` };
