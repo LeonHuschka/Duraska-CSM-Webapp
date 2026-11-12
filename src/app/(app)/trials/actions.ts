@@ -538,3 +538,45 @@ export async function requestCell(cellId: string, on: boolean) {
   await shootListOf(cell.trial_id);
   return { error: null };
 }
+
+/**
+ * A variation to another place in its round: where `targetId` stands, the
+ * others shifting up or down. Slots are unique per round, so it goes step
+ * by step through a free slot.
+ */
+export async function reorderCell(cellId: string, targetId: string) {
+  const supabase = await createClient();
+  const cell = await staffCell(supabase, cellId);
+  if (!cell) return { error: "Not allowed" };
+  const { data: row } = await supabase
+    .from("trial_cells")
+    .select("id, slot")
+    .eq("trial_id", cell.trial_id)
+    .eq("dimension", cell.dimension)
+    .order("slot");
+  const list = row ?? [];
+  const from = list.findIndex((c) => c.id === cellId);
+  const to = list.findIndex((c) => c.id === targetId);
+  if (from < 0 || to < 0) return { error: "Not in this round" };
+  if (from === to) return { error: null };
+  const used = new Set(list.map((c) => c.slot));
+  let free = 0;
+  for (let s = MAX_RESHOOTS; s >= 1; s--) if (!used.has(s)) { free = s; break; }
+  if (!free) return { error: "The round is full — remove one first" };
+  const swap = async (a: { id: string; slot: number }, b: { id: string; slot: number }) => {
+    await supabase.from("trial_cells").update({ slot: free }).eq("id", a.id);
+    await supabase.from("trial_cells").update({ slot: a.slot }).eq("id", b.id);
+    await supabase.from("trial_cells").update({ slot: b.slot }).eq("id", a.id);
+    const s = a.slot;
+    a.slot = b.slot;
+    b.slot = s;
+  };
+  const step = from < to ? 1 : -1;
+  for (let i = from; i !== to; i += step) {
+    await swap(list[i], list[i + step]);
+    [list[i], list[i + step]] = [list[i + step], list[i]];
+  }
+  touch(cell.trial_id);
+  await shootListOf(cell.trial_id);
+  return { error: null };
+}

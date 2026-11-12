@@ -23,6 +23,7 @@ import {
   archiveTrial,
   moveCell,
   removeCell,
+  reorderCell,
   requestCell,
   setDefaultReshoots,
   fetchOutlierVideo,
@@ -450,10 +451,12 @@ function Round({
       {state !== "decided" && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{brief}</p>}
 
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        {row.map((c) => (
+        {row.map((c, i) => (
           <VariantCard
             key={c.id}
             c={c}
+            prev={row[i - 1]?.id ?? null}
+            next={row[i + 1]?.id ?? null}
             rank={rank.get(c.id) ?? null}
             best={best}
             outlier={trial.views}
@@ -492,6 +495,8 @@ function Round({
 /** One variation: the reel, its plays per account, the brief for her, the team's notes. */
 function VariantCard({
   c,
+  prev,
+  next,
   rank,
   best,
   outlier,
@@ -500,6 +505,8 @@ function VariantCard({
   onChanged,
 }: {
   c: MatrixCell;
+  prev: string | null;
+  next: string | null;
   rank: number | null;
   best: number;
   outlier: number | null;
@@ -508,6 +515,7 @@ function VariantCard({
   onChanged: () => void;
 }) {
   const [busy, start] = useTransition();
+  const [over, setOver] = useState(false);
   const total = totalPlays(c);
   const chip = STATE_CHIP[c.state];
   const stateLine =
@@ -521,11 +529,38 @@ function VariantCard({
             ? "Cut — waiting to be posted"
             : "Posted";
   return (
-    <div className={`flex min-w-0 flex-col gap-2 rounded-xl p-1.5 ${c.winner ? "bg-amber-400/10 ring-2 ring-amber-400" : ""}`}>
+    <div
+      onDragOver={(e) => {
+        // A reel of the same round dropped here takes this place.
+        if (!staff || !e.dataTransfer.types.includes(`${DRAG_TYPE}-${c.dimension}`)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={async (e) => {
+        const [id, from] = (e.dataTransfer.getData(DRAG_TYPE) || "").split("|");
+        setOver(false);
+        if (!id || from !== c.dimension) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (id === c.id) return;
+        const r = await reorderCell(id, c.id);
+        if (r.error) toast.error(r.error);
+        onChanged();
+      }}
+      className={`flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-shadow ${c.winner ? "bg-amber-400/10 ring-2 ring-amber-400" : ""} ${
+        over ? "ring-2 ring-primary" : ""
+      }`}
+    >
       <div
         draggable={staff}
         onDragStart={(e) => {
           e.dataTransfer.setData(DRAG_TYPE, `${c.id}|${c.dimension}`);
+          // Its round in the type too: drag-over can read types, not data.
+          e.dataTransfer.setData(`${DRAG_TYPE}-${c.dimension}`, "1");
           e.dataTransfer.effectAllowed = "move";
         }}
         className={staff ? "cursor-grab active:cursor-grabbing" : ""}
@@ -559,7 +594,7 @@ function VariantCard({
       {staff ? (
         <div className="flex min-w-0 items-center gap-1">
           <NameField c={c} onChanged={onChanged} />
-          <MoveMenu c={c} onChanged={onChanged} />
+          <MoveMenu c={c} prev={prev} next={next} onChanged={onChanged} />
         </div>
       ) : (
         <p className="truncate text-sm font-medium">{name(c)}</p>
@@ -672,7 +707,7 @@ function RequestButton({ c, onChanged }: { c: MatrixCell; onChanged: () => void 
 }
 
 /** Into another round, or out of this one while it is still empty. */
-function MoveMenu({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | null; next: string | null; onChanged: () => void }) {
   const [busy, start] = useTransition();
   const run = (fn: () => Promise<{ error: string | null }>, ok: string) =>
     start(async () => {
@@ -690,6 +725,13 @@ function MoveMenu({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem disabled={!prev} onClick={() => prev && run(() => reorderCell(c.id, prev), "Moved left")}>
+          ← Move left
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!next} onClick={() => next && run(() => reorderCell(c.id, next), "Moved right")}>
+          → Move right
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         {DIMS.filter((d) => d !== c.dimension).map((d) => (
           <DropdownMenuItem key={d} onClick={() => run(() => moveCell(c.id, d), `Moved to ${META[d].title}`)}>
             {META[d].emoji} Move to {META[d].title}
