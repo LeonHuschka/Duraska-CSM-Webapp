@@ -580,3 +580,20 @@ export async function reorderCell(cellId: string, targetId: string) {
   await shootListOf(cell.trial_id);
   return { error: null };
 }
+
+/** The word or two the model knows the reel by — SHOOTING shows it in place of the handle. */
+export async function setTrialNickname(trialId: string, nickname: string) {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", trialId).maybeSingle();
+  if (!t) return { error: "No such trial" };
+  const me = await who(supabase, t.persona_id);
+  if (!me?.staff) return { error: "Only owners and managers name trials" };
+  const { error } = await supabase
+    .from("trials")
+    .update({ nickname: nickname.trim().slice(0, 40) || null, updated_at: new Date().toISOString() })
+    .eq("id", trialId);
+  if (error) return { error: error.message };
+  touch(trialId);
+  await shootListOf(trialId);
+  return { error: null };
+}

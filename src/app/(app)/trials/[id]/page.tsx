@@ -75,6 +75,7 @@ export default async function TrialPage({
         account: t.account,
         postUrl: t.postUrl,
         caption: t.caption,
+        nickname: t.nickname,
         cover: t.cover,
         video: t.video,
         views: t.views,

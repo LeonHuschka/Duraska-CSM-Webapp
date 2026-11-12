@@ -26,6 +26,7 @@ import {
   reorderCell,
   requestCell,
   setDefaultReshoots,
+  setTrialNickname,
   fetchOutlierVideo,
   finishCell,
   openCellJob,
@@ -66,6 +67,7 @@ export type MatrixTrial = {
   account: { label: string; platform: string; avatar: string | null; median: number | null } | null;
   postUrl: string | null;
   caption: string | null;
+  nickname: string | null;
   cover: string | null;
   video: string | null;
   views: number | null;
@@ -295,6 +297,41 @@ function ReelPlayer({
   );
 }
 
+/** The name she knows the reel by — in SHOOTING in place of the account. */
+function NicknameField({ trial, onChanged }: { trial: MatrixTrial; onChanged: () => void }) {
+  const [v, setV] = useState(trial.nickname ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  useEffect(() => setV(trial.nickname ?? ""), [trial.nickname]);
+  const save = async () => {
+    if (v.trim() === (trial.nickname ?? "")) return;
+    setState("saving");
+    const r = await setTrialNickname(trial.id, v);
+    if (r.error) {
+      setState("idle");
+      return void toast.error(r.error);
+    }
+    setState("saved");
+    setTimeout(() => setState("idle"), 1500);
+    onChanged();
+  };
+  return (
+    <label className="flex items-center gap-2 rounded-xl border border-border/50 bg-muted/30 px-3 py-2">
+      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Name for her</span>
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        maxLength={40}
+        placeholder='e.g. "towel door" — shown in SHOOTING instead of the account'
+        className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground/60"
+      />
+      {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+      {state === "saved" && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+    </label>
+  );
+}
+
 /** The outlier, the bar to beat, and where the trial stands. */
 function Header({
   trial,
@@ -341,6 +378,7 @@ function Header({
             </a>
           )}
         </div>
+        {staff && <NicknameField trial={trial} onChanged={onChanged} />}
         {trial.caption && <p className="line-clamp-2 text-xs text-muted-foreground">{trial.caption}</p>}
 
         {/* Where it stands: one step per round, the winners as they are picked. */}
@@ -1063,6 +1101,7 @@ function ModelTrial({
         )}
       </div>
 
+      {trial.nickname && <h1 className="px-1 text-xl font-semibold">🧪 {trial.nickname}</h1>}
       {/* Left the reel she reshoots, right where the reshoots stand. */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl border border-border/50 bg-card p-2">

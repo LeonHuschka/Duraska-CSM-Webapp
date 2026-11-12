@@ -1133,6 +1133,7 @@ export type Database = {
           status_note: string | null;
           inspo_link: string | null;
           inspo_video_path: string | null;
+          nickname: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1157,6 +1158,7 @@ export type Database = {
           status_note?: string | null;
           inspo_link?: string | null;
           inspo_video_path?: string | null;
+          nickname?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1181,6 +1183,7 @@ export type Database = {
           status_note?: string | null;
           inspo_link?: string | null;
           inspo_video_path?: string | null;
+          nickname?: string | null;
           created_at?: string;
           updated_at?: string;
         };

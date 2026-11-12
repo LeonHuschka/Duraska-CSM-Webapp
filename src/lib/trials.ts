@@ -78,6 +78,8 @@ export type TrialView = {
   shortcode: string;
   postUrl: string | null;
   caption: string | null;
+  /** What the team calls it for the model, e.g. "towel door". */
+  nickname: string | null;
   cover: string | null;
   /** The outlier itself, playable: our cut when it is one of ours, else the copy stored at the start. */
   video: string | null;
@@ -163,6 +165,7 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
     shortcode: t.shortcode,
     postUrl: t.post_url,
     caption: t.caption,
+    nickname: t.nickname ?? null,
     cover: t.cover_path ? signed.get(t.cover_path) ?? null : null,
     video: videoPath ? signed.get(videoPath) ?? null : null,
     views: t.views,

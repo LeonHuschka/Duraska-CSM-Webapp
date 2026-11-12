@@ -13,7 +13,6 @@ import {
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
 import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
-import { accountLabel } from "@/lib/account-analytics";
 
 /**
  * The SHOOTING topic: one message a day with the reels to shoot. The
@@ -187,24 +186,17 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
     .from("trials")
-    .select("id, account_id, phase, created_at")
+    .select("id, account_id, phase, created_at, nickname, caption")
     .eq("persona_id", personaId)
     .eq("status", "active")
     .neq("phase", "done")
     .order("created_at", { ascending: true });
   if (!trials?.length) return { lines: [], keyboard: [] };
-  const accIds = trials.map((t) => t.account_id).filter((x): x is string => !!x);
-  const [{ data: cells }, { data: accounts }] = await Promise.all([
-    db
-      .from("trial_cells")
-      .select("id, trial_id, dimension, slot, label, brief, finished_at, requested_at")
-      .in("trial_id", trials.map((t) => t.id))
-      .order("slot"),
-    accIds.length
-      ? db.from("accounts").select("id, handle, display_name").in("id", accIds)
-      : Promise.resolve({ data: [] as { id: string; handle: string; display_name: string | null }[] }),
-  ]);
-  const accName = new Map((accounts ?? []).map((a) => [a.id, a.display_name || accountLabel(a.handle)]));
+  const { data: cells } = await db
+    .from("trial_cells")
+    .select("id, trial_id, dimension, slot, label, brief, finished_at, requested_at")
+    .in("trial_id", trials.map((t) => t.id))
+    .order("slot");
 
   const lines = ["🧪 <b>Trial-Maxxing</b>"];
   const keyboard: LinkButton[][] = [];
@@ -218,7 +210,8 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
       if (round.length && (d === t.phase || done > 0)) at = { d, done, of: round.length };
     }
     if (!at) continue;
-    const who = t.account_id ? accName.get(t.account_id) ?? "" : "";
+    // The reel by the name the team gave it — the handle tells her nothing.
+    const who = trialName(t);
     lines.push(`${DIM_META[at.d].emoji} ${esc(who)} · ${DIM_META[at.d].title} <b>${at.done}/${at.of}</b>`);
     // What the team asked her to shoot, with its brief, and a button
     // straight to its upload — until it is done.
@@ -243,11 +236,24 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
       if (url) buttons.push({ text: `${DIM_META[d].emoji} ${nm}`, url });
     }
     keyboard.push([
-      { text: buttons.length ? `🧪 ${who || "Trial"}` : `🧪 ${who ? `${who} · ` : ""}open the trial`, url: `${APP_URL}/trials/${t.id}` },
+      { text: buttons.length ? `🧪 ${who}` : `🧪 ${who} · open the trial`, url: `${APP_URL}/trials/${t.id}` },
       ...buttons,
     ]);
   }
   return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
+}
+
+/** What a trial is called for her: its nickname, else the first words of its caption. */
+function trialName(t: { nickname: string | null; caption: string | null }): string {
+  if (t.nickname?.trim()) return t.nickname.trim();
+  const words = (t.caption ?? "")
+    .replace(/https?:\/\/\S+|[#@]\S+/g, "")
+    .replace(/[^A-Za-z0-9À-ÿ' ]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3);
+  return words.length ? words.join(" ") : "Trial";
 }
 
 /**
