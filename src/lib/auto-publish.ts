@@ -1,4 +1,5 @@
 import "server-only";
+import { isVideoPath } from "@/lib/feed-media";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import { accountLabel } from "@/lib/account-analytics";
@@ -101,9 +102,14 @@ async function publishOne(supabase: Db, slot: Slot, deadline: number): Promise<P
       s = claimed;
       let container: string;
       if (s.media_kind === "image" || s.media_kind === "carousel") {
-        const imageUrls = await signedPaths(supabase, s.media_paths ?? []);
-        if (!imageUrls) return fail(supabase, s, "A picture of the post is gone", true);
-        container = await createFeedContainer(conn.ig_user_id, conn.access_token, { imageUrls, caption: s.caption });
+        const paths = s.media_paths ?? [];
+        const urls = await signedPaths(supabase, paths);
+        if (!urls) return fail(supabase, s, "A picture or video of the post is gone", true);
+        container = await createFeedContainer(conn.ig_user_id, conn.access_token, {
+          items: urls.map((url, i) => ({ url, video: isVideoPath(paths[i]) })),
+          caption: s.caption,
+          waitUntil: deadline - 40_000,
+        });
       } else {
         const videoUrl = await signedVideo(supabase, s.asset_id);
         if (!videoUrl) return fail(supabase, s, "The video is gone from the vault", true);
@@ -173,10 +179,10 @@ async function signedVideo(supabase: Db, assetId: string | null): Promise<string
 }
 
 function what(s: Slot): string {
-  return s.media_kind === "carousel" ? "pictures" : s.media_kind === "image" ? "picture" : "video";
+  return s.media_kind === "carousel" ? "carousel" : s.media_kind === "image" ? "picture" : "video";
 }
 
-/** Signed links to every picture of a feed post, or null if one is missing. */
+/** Signed links to every picture and video of a feed post, or null if one is missing. */
 async function signedPaths(supabase: Db, paths: string[]): Promise<string[] | null> {
   if (!paths.length) return null;
   const { data } = await supabase.storage.from("content-assets").createSignedUrls(paths, 6 * 3600);

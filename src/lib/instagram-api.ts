@@ -135,24 +135,44 @@ export async function createReelContainer(
 }
 
 /**
- * A feed post: one picture, or a carousel of up to ten. Instagram takes
- * JPEG only, between 4:5 and 1.91:1 — the planner converts on upload.
+ * A feed post: one picture, or a carousel of up to ten pictures and
+ * videos. Instagram takes JPEG pictures only, between 4:5 and 1.91:1 —
+ * the planner converts on upload. A video in a carousel is processed on
+ * its own first; the carousel can only be made once every video is done.
  */
 export async function createFeedContainer(
   igUserId: string,
   token: string,
-  p: { imageUrls: string[]; caption: string | null }
+  p: { items: { url: string; video: boolean }[]; caption: string | null; waitUntil: number }
 ): Promise<string> {
   const host = graphFor(token);
-  if (p.imageUrls.length === 1) {
-    const form = new URLSearchParams({ image_url: p.imageUrls[0], access_token: token });
+  if (p.items.length === 1 && !p.items[0].video) {
+    const form = new URLSearchParams({ image_url: p.items[0].url, access_token: token });
     if (p.caption) form.set("caption", p.caption);
     return (await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id;
   }
   const children: string[] = [];
-  for (const url of p.imageUrls) {
-    const form = new URLSearchParams({ image_url: url, is_carousel_item: "true", access_token: token });
-    children.push((await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id);
+  const videos: string[] = [];
+  for (const it of p.items) {
+    const form = new URLSearchParams(
+      it.video
+        ? { media_type: "VIDEO", video_url: it.url, is_carousel_item: "true", access_token: token }
+        : { image_url: it.url, is_carousel_item: "true", access_token: token }
+    );
+    const id = (await igFetch<{ id: string }>(`${host}/${igUserId}/media`, { method: "POST", body: form })).id;
+    children.push(id);
+    if (it.video) videos.push(id);
+  }
+  for (const id of videos) {
+    for (;;) {
+      const st = await containerStatus(id, token);
+      if (st.code === "FINISHED") break;
+      if (st.code === "ERROR" || st.code === "EXPIRED") {
+        throw new Error(`Instagram could not process a video of the carousel${st.detail ? `: ${st.detail}` : ""}`);
+      }
+      if (Date.now() > p.waitUntil) throw new Error("Instagram took too long on a video of the carousel — it is tried again");
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
   }
   const form = new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), access_token: token });
   if (p.caption) form.set("caption", p.caption);

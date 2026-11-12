@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { coverPath, isVideoPath } from "@/lib/feed-media";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
@@ -170,7 +171,12 @@ export default async function PlannerPage({
     paths.add(a.file_path);
     if (a.thumbnail_path) paths.add(a.thumbnail_path);
   }
-  feedOf.forEach((f) => f.paths.forEach((p) => paths.add(p)));
+  feedOf.forEach((f) =>
+    f.paths.forEach((p) => {
+      paths.add(p);
+      if (isVideoPath(p)) paths.add(coverPath(p));
+    })
+  );
   const signed = new Map<string, string>();
   const list = Array.from(paths);
   for (let i = 0; i < list.length; i += 500) {
@@ -260,7 +266,11 @@ export default async function PlannerPage({
             : "Feed post"
           : (s.request_id && titleOf.get(s.request_id)) || "Reel",
         variant: a ? variant(a) : null,
-        thumb: feed ? images[0] ?? null : a?.thumbnail_path ? signed.get(a.thumbnail_path) ?? null : null,
+        thumb: feed
+          ? feed.paths[0] && isVideoPath(feed.paths[0])
+            ? signed.get(coverPath(feed.paths[0])) ?? null
+            : images[0] ?? null
+          : a?.thumbnail_path ? signed.get(a.thumbnail_path) ?? null : null,
         video: a ? signed.get(a.file_path) ?? null : null,
         at: s.status === "posted" ? s.posted_at ?? s.scheduled_for : s.scheduled_for,
         caption: s.caption ?? "",

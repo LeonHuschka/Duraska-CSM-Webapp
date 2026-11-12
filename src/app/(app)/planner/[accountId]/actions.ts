@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { plannerAccount } from "@/lib/planner-access";
 import { publishDue } from "@/lib/auto-publish";
 import { connectWithToken } from "@/lib/instagram-api";
+import { isVideoPath } from "@/lib/feed-media";
 import { TIMEZONES } from "@/components/planner/planner-utils";
 
 type Res = { error: string | null; id?: string };
@@ -64,8 +65,9 @@ export async function schedulePost(data: {
   let row;
   if (data.feedPaths) {
     const paths = data.feedPaths;
-    if (paths.length < 1 || paths.length > 10) return { error: "A feed post has 1 to 10 pictures" };
+    if (paths.length < 1 || paths.length > 10) return { error: "A feed post has 1 to 10 pictures or videos" };
     if (!paths.every((p) => p.startsWith(`personas/${personaId}/feed/`))) return { error: "Not this persona's pictures" };
+    if (paths.length === 1 && isVideoPath(paths[0])) return { error: "One video alone goes out as a reel — add a picture for a carousel" };
     row = {
       ...base,
       media_kind: paths.length === 1 ? "image" : "carousel",

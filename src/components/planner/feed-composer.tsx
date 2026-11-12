@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, ImagePlus, Images, Loader2, Send, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Film, ImagePlus, Images, Loader2, Send, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
 import { postNow, schedulePost } from "@/app/(app)/planner/[accountId]/actions";
 import { atTime, dayKey, hhmm, tzLabel, whenLabel } from "@/components/planner/planner-utils";
+import { coverPath } from "@/lib/feed-media";
 
 const MAX_PICTURES = 10;
 const MAX_CAPTION = 2200;
@@ -18,14 +19,18 @@ const MAX_CAPTION = 2200;
 const MIN_RATIO = 4 / 5;
 const MAX_RATIO = 1.91;
 const MAX_WIDTH = 1440;
+/** What Instagram takes for a video inside a carousel. */
+const MIN_SECONDS = 3;
+const MAX_SECONDS = 60;
 
-type Picture = { id: string; file: File; url: string; ratio: number };
+/** A picture, or a video with a still of its first frame for the tile. */
+type Picture = { id: string; file: File; url: string; ratio: number; video: boolean; cover: Blob | null; coverUrl: string | null };
 
 /**
- * A feed post: drop one picture or up to ten for a carousel, put them in
- * order, write the caption and pick the time. The pictures become JPEGs
- * cut to the first one's shape (Instagram crops a carousel to it anyway)
- * when it is scheduled.
+ * A feed post: drop one picture, or up to ten pictures and videos for a
+ * carousel, put them in order, write the caption and pick the time. The
+ * pictures become JPEGs cut to the first one's shape (Instagram crops a
+ * carousel to it anyway) when it is scheduled; videos go up as they are.
  */
 export function FeedComposer({
   accountId,
@@ -57,7 +62,7 @@ export function FeedComposer({
   useEffect(() => {
     if (!at) return;
     setPics((old) => {
-      old.forEach((p) => URL.revokeObjectURL(p.url));
+      old.forEach(release);
       return [];
     });
     setDate(dayKey(at, tz));
@@ -72,15 +77,29 @@ export function FeedComposer({
   const tooLong = caption.length > MAX_CAPTION || tags > 30;
 
   const add = async (files: FileList | File[]) => {
-    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (!list.length) return void toast.error("Pictures only — JPG, PNG or WebP");
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (!list.length) return void toast.error("Pictures or videos only — JPG, PNG, WebP, MP4 or MOV");
     const room = MAX_PICTURES - pics.length;
-    if (list.length > room) toast.error(`A carousel takes ${MAX_PICTURES} pictures — the rest were left out`);
+    if (list.length > room) toast.error(`A carousel takes ${MAX_PICTURES} — the rest were left out`);
     const added: Picture[] = [];
     for (const file of list.slice(0, room)) {
+      if (file.type.startsWith("video/")) {
+        try {
+          const v = await readVideo(file);
+          if (v.seconds < MIN_SECONDS || v.seconds > MAX_SECONDS) {
+            URL.revokeObjectURL(v.url);
+            toast.error(`${file.name}: ${Math.round(v.seconds)} s — a video in a carousel is ${MIN_SECONDS} to ${MAX_SECONDS} s`);
+            continue;
+          }
+          added.push({ id: crypto.randomUUID(), file, url: v.url, ratio: v.ratio, video: true, cover: v.cover, coverUrl: URL.createObjectURL(v.cover) });
+        } catch {
+          toast.error(`${file.name}: this video cannot be read here — export it as MP4 first`);
+        }
+        continue;
+      }
       try {
         const bmp = await createImageBitmap(file);
-        added.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), ratio: bmp.width / bmp.height });
+        added.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), ratio: bmp.width / bmp.height, video: false, cover: null, coverUrl: null });
         bmp.close();
       } catch {
         toast.error(`${file.name}: this picture cannot be read here — save it as JPG or PNG first`);
@@ -99,6 +118,9 @@ export function FeedComposer({
 
   const save = async (now: boolean) => {
     if (!pics.length) return void toast.error("Add a picture first");
+    if (pics.length === 1 && pics[0].video) {
+      return void toast.error("One video alone goes out as a reel — plan it from the vault, or add a picture for a carousel");
+    }
     if (!now && (Number.isNaN(when.getTime()) || when.getTime() < Date.now() - 60_000)) {
       return void toast.error("That time has passed — pick a later one or post now");
     }
@@ -106,10 +128,21 @@ export function FeedComposer({
     try {
       const supabase = createClient();
       const paths: string[] = [];
+      const bucket = supabase.storage.from("content-assets");
       for (const p of pics) {
+        const id = crypto.randomUUID();
+        if (p.video) {
+          const ext = /\.mov$/i.test(p.file.name) || p.file.type === "video/quicktime" ? "mov" : "mp4";
+          const path = `personas/${personaId}/feed/${id}.${ext}`;
+          const { error } = await bucket.upload(path, p.file, { contentType: p.file.type || `video/${ext === "mov" ? "quicktime" : "mp4"}` });
+          if (error) throw new Error(error.message);
+          if (p.cover) await bucket.upload(coverPath(path), p.cover, { contentType: "image/jpeg" });
+          paths.push(path);
+          continue;
+        }
         const jpeg = await toJpeg(p.file, ratio);
-        const path = `personas/${personaId}/feed/${crypto.randomUUID()}.jpg`;
-        const { error } = await supabase.storage.from("content-assets").upload(path, jpeg, { contentType: "image/jpeg" });
+        const path = `personas/${personaId}/feed/${id}.jpg`;
+        const { error } = await bucket.upload(path, jpeg, { contentType: "image/jpeg" });
         if (error) throw new Error(error.message);
         paths.push(path);
       }
@@ -144,7 +177,7 @@ export function FeedComposer({
         <DialogHeader className="border-b border-border/50 px-5 py-3">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Images className="h-4 w-4" />
-            {pics.length > 1 ? `Carousel · ${pics.length} pictures` : "Feed post"}
+            {pics.length > 1 ? `Carousel · ${pics.length}` : "Feed post"}
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-5 p-5 sm:grid-cols-[260px_1fr]">
@@ -165,12 +198,12 @@ export function FeedComposer({
               } ${pics.length >= MAX_PICTURES ? "pointer-events-none opacity-40" : ""}`}
             >
               <ImagePlus className="h-5 w-5" />
-              Drop pictures or click
-              <span className="text-[10px]">1 = single post · 2–10 = carousel</span>
+              Drop pictures or videos, or click
+              <span className="text-[10px]">1 picture = single post · 2–10 = carousel</span>
               <input
                 ref={input}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/mp4,video/quicktime"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -182,12 +215,15 @@ export function FeedComposer({
             <div className="grid grid-cols-3 gap-1.5">
               {pics.map((p, i) => (
                 <div key={p.id} className="group relative overflow-hidden rounded-md bg-black" style={{ aspectRatio: String(ratio) }}>
-                  <img src={p.url} alt="" className="h-full w-full object-cover" />
-                  <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[9px] font-semibold text-white">{i + 1}</span>
+                  <img src={p.coverUrl ?? p.url} alt="" className="h-full w-full object-cover" />
+                  <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/70 px-1 text-[9px] font-semibold text-white">
+                    {i + 1}
+                    {p.video && <Film className="h-2.5 w-2.5" />}
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
-                      URL.revokeObjectURL(p.url);
+                      release(p);
                       setPics((l) => l.filter((x) => x.id !== p.id));
                     }}
                     className="absolute right-1 top-1 rounded bg-black/70 p-0.5 text-white opacity-0 group-hover:opacity-100"
@@ -210,8 +246,8 @@ export function FeedComposer({
             </div>
             {pics.length > 0 && (
               <p className="text-[10px] text-muted-foreground">
-                Shape {ratio >= 0.99 && ratio <= 1.01 ? "1:1" : ratio < 1 ? "4:5 tall" : "wide"} from picture 1 — the others are
-                cropped to it.
+                Shape {ratio >= 0.99 && ratio <= 1.01 ? "1:1" : ratio < 1 ? "4:5 tall" : "wide"} from item 1 — the pictures are
+                cut to it, Instagram fits the videos to it.
               </p>
             )}
           </div>
@@ -268,6 +304,47 @@ export function FeedComposer({
       </DialogContent>
     </Dialog>
   );
+}
+
+function release(p: Picture) {
+  URL.revokeObjectURL(p.url);
+  if (p.coverUrl) URL.revokeObjectURL(p.coverUrl);
+}
+
+/** A video's shape, length and a still of its first moment, read in the browser. */
+function readVideo(file: File): Promise<{ url: string; ratio: number; seconds: number; cover: Blob }> {
+  const url = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    const bail = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("unreadable"));
+    };
+    v.onerror = bail;
+    v.onloadedmetadata = () => {
+      if (!v.videoWidth || !v.videoHeight) return bail();
+      v.currentTime = Math.min(0.1, v.duration / 2);
+    };
+    v.onseeked = () => {
+      const w = Math.min(720, v.videoWidth);
+      const h = Math.round((w * v.videoHeight) / v.videoWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return bail();
+      ctx.drawImage(v, 0, 0, w, h);
+      canvas.toBlob(
+        (b) => (b ? resolve({ url, ratio: v.videoWidth / v.videoHeight, seconds: v.duration, cover: b }) : bail()),
+        "image/jpeg",
+        0.85
+      );
+    };
+    v.src = url;
+  });
 }
 
 function clamp(r: number): number {

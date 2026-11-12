@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { isVideoUrl } from "@/lib/feed-media";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowUpRight, ChevronLeft, ChevronRight, FlaskConical, Loader2, RotateCcw, Send, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -161,7 +162,16 @@ export function PostEditor({
           <div className="mx-auto w-[220px]">
             {isFeed ? (
               <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl border border-border/50 bg-black">
-                {images[slide] ? (
+                {images[slide] && isVideoUrl(images[slide]) ? (
+                  <video
+                    key={images[slide]}
+                    src={images[slide]}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-contain"
+                  />
+                ) : images[slide] ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={images[slide]} alt="" className="h-full w-full object-contain" />
                 ) : (
