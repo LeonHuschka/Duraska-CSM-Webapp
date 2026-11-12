@@ -476,6 +476,7 @@ export async function AccountsTab({
         hasPeriod={hasPeriod}
         spark={{
           views: analytics.series.total.filter((_, i) => analytics.series.days[i] >= analytics.start),
+          ...analytics.spark,
         }}
       />
       {hasPeriod && analytics.scrapeSince != null && analytics.start < analytics.scrapeSince && (

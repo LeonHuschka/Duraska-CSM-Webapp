@@ -123,6 +123,8 @@ export type Analytics = {
   scrapeSince: number | null;
   accounts: AccountStats[];
   kpis: Kpi[];
+  /** Day-by-day history for followers, avg / reel and reels in the period. */
+  spark: Record<string, number[]>;
   /** The cumulative views line, one point per reading day. */
   series: {
     days: number[];
@@ -498,6 +500,29 @@ export function computeAnalytics(
     },
   ];
 
+  // ── A day-by-day history per figure, for the small curves on the tiles ──
+  // Followers: what the accounts had at each day's end (an account read
+  // only later counts with its first reading, so its arrival is no jump).
+  // Avg / reel and reels: over the reels posted from the period's start up
+  // to that day, so the curve ends on the tile's own figure.
+  const sparkDays = dayEnds.filter((d) => d >= start);
+  const firstFollowers = (id: string) => followerPts.get(id)?.[0]?.v ?? null;
+  const inNet = new Set(stats.map((x) => x.id));
+  const periodReels = Array.from(latestReel.values()).filter(
+    (r) => inNet.has(r.account) && r.scrape && r.postedAt != null && (!days || r.postedAt >= start)
+  );
+  const spark: Record<string, number[]> = {
+    followers: sparkDays.map((d) =>
+      stats.reduce((acc, x) => acc + (followersAt(x.id, d) ?? firstFollowers(x.id) ?? 0), 0)
+    ),
+    avg: sparkDays.map((d) => {
+      const upTo = periodReels.filter((r) => r.postedAt! <= d);
+      // No reel yet: no point, so the curve starts with the first reel.
+      return upTo.length ? upTo.reduce((a, r) => a + r.views, 0) / upTo.length : NaN;
+    }),
+    reels: sparkDays.map((d) => periodReels.filter((r) => r.postedAt! <= d).length),
+  };
+
   let scrapeSince: number | null = null;
   firstScrape.forEach((t) => {
     if (scrapeSince === null || t < scrapeSince) scrapeSince = t;
@@ -510,6 +535,7 @@ export function computeAnalytics(
     scrapeSince,
     accounts: stats.sort((a, b) => b.views - a.views),
     kpis,
+    spark,
     series: {
       days: dayEnds,
       total,
