@@ -1070,13 +1070,6 @@ function ModelTrial({
   onOpen: (id: string) => void;
 }) {
   const pIdx = phaseIdx(trial.phase);
-  const open = (c: MatrixCell) => c.state === "empty" || c.state === "takes";
-  const asked = trial.cells
-    .filter((c) => c.requestedAt && open(c))
-    .sort((a, b) => (a.requestedAt ?? "").localeCompare(b.requestedAt ?? ""));
-  // Nothing asked for by name: the open boxes of the round she is in.
-  const current = trial.phase === "done" ? [] : trial.cells.filter((c) => c.dimension === trial.phase && open(c)).sort((a, b) => a.slot - b.slot);
-  const jobs = asked.length ? asked : current;
   return (
     <div className="mx-auto max-w-md space-y-4 pb-16">
       {preview && (
@@ -1118,36 +1111,6 @@ function ModelTrial({
         </div>
       </div>
 
-      {/* What to shoot now: clear enough to read at a glance. */}
-      <section className="space-y-2">
-        <h2 className="px-1 text-sm font-semibold">{asked.length ? "👉 Shoot these" : trial.phase === "done" ? "All done 🏁" : "👉 Shoot next"}</h2>
-        {jobs.length === 0 && trial.phase !== "done" && (
-          <p className="rounded-2xl border border-dashed border-border/50 px-4 py-5 text-center text-xs text-muted-foreground">
-            Nothing open in this round — well done.
-          </p>
-        )}
-        {jobs.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => onOpen(c.id)}
-            className="flex w-full items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-400/5 p-3 text-left active:bg-amber-400/10"
-          >
-            <span className="text-2xl leading-none">{META[c.dimension].emoji}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold">{name(c)}</span>
-              <span className="mt-0.5 block whitespace-pre-line text-sm leading-snug">
-                {c.brief?.trim() || trial.briefs[c.dimension]}
-              </span>
-              {c.takes > 0 && <span className="mt-1 block text-[11px] text-emerald-300">{c.takes} take{c.takes === 1 ? "" : "s"} in — tap to add or finish</span>}
-            </span>
-            <span className="flex shrink-0 items-center gap-1 self-center rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground">
-              <Upload className="h-3.5 w-3.5" /> Shoot
-            </span>
-          </button>
-        ))}
-      </section>
-
       {/* The rounds, small: the reels, their plays, the winner. */}
       {DIMS.map((d, i) => {
         const row = trial.cells.filter((c) => c.dimension === d).sort((a, b) => a.slot - b.slot);
@@ -1163,20 +1126,37 @@ function ModelTrial({
                 {doneCount(row)}/{row.length} shot{state === "decided" ? " · decided" : state === "now" ? " · now" : ""}
               </span>
             </div>
+            {/* What the round is about, once — the boxes say what each one needs. */}
+            {state === "now" && <p className="mt-1 text-xs leading-snug text-muted-foreground">{trial.briefs[d]}</p>}
             <div className="mt-2 grid grid-cols-3 gap-2">
               {row.map((c) => (
                 <button key={c.id} type="button" onClick={() => onOpen(c.id)} className="min-w-0 text-left">
                   <div
                     className={`relative aspect-[9/16] overflow-hidden rounded-lg ${
-                      c.state === "empty" ? "border border-dashed border-border bg-muted/20" : "bg-muted"
+                      c.state === "empty" && c.brief?.trim()
+                        ? "border-2 border-rose-500 bg-rose-500/10"
+                        : c.state === "empty"
+                          ? "border border-dashed border-border bg-muted/20"
+                          : "bg-muted"
                     } ${c.winner ? "ring-2 ring-amber-400" : ""}`}
                   >
                     {c.thumb && <img src={c.thumb} alt="" className="h-full w-full object-cover" />}
-                    {c.state === "empty" && (
+                    {/* Asked for and not shot yet: what to do, right in the box. */}
+                    {c.state === "empty" && c.brief?.trim() ? (
+                      <span className="absolute inset-0 flex flex-col p-1.5">
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-rose-300">To shoot</span>
+                        <span className="mt-1 line-clamp-[9] whitespace-pre-line text-[11px] font-medium leading-snug text-foreground">
+                          {c.brief}
+                        </span>
+                        <span className="mt-auto flex items-center justify-center gap-1 rounded-md bg-rose-500 py-1 text-[10px] font-semibold text-white">
+                          <Upload className="h-3 w-3" /> Shoot
+                        </span>
+                      </span>
+                    ) : c.state === "empty" ? (
                       <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
                         <Plus className="h-4 w-4" />
                       </span>
-                    )}
+                    ) : null}
                     {c.winner && (
                       <span className="absolute left-1 top-1 rounded-full bg-amber-400 px-1 text-[9px] font-bold text-black">🏆</span>
                     )}
