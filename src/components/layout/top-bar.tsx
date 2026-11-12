@@ -54,8 +54,10 @@ export function TopBar({ userEmail, userName, isModel = false, withNav = false }
         </span>
       </div>
       {/* Desktop: the logo as a round glass button, the sections as pills in the middle. */}
-      <Link href="/" className="glass-pill hidden h-14 w-14 items-center justify-center overflow-hidden rounded-full md:flex">
-        <Image src="/Duraska_logo_white.svg" alt="Duraska" width={84} height={84} className="h-[84px] w-[84px] max-w-none" />
+      {/* The wordmark fills only the middle band of its square file, so the
+          file is drawn large and the pill shows that band. */}
+      <Link href="/" className="glass-pill hidden h-14 w-[200px] items-center justify-center overflow-hidden rounded-full md:flex">
+        <Image src="/Duraska_logo_white.svg" alt="Duraska" width={230} height={230} className="h-[230px] w-[230px] max-w-none" priority />
       </Link>
       {withNav && (
         <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:block">
