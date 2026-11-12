@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { createClient } from "@/lib/supabase/client";
 import { generateThumbnail, generateThumbnailFromUrl, safeStorageName } from "@/lib/thumbnails";
 import { isMediaFile, MAX_UPLOAD_MB, resolveMime, uploadToStorage } from "@/lib/upload-takes";
@@ -600,14 +601,7 @@ function VariantCard({
       </div>
 
       {staff ? (
-        <TextNote
-          value={c.brief}
-          placeholder="What she does in this one…"
-          label="For the model"
-          onSave={(t) => setCellText(c.id, "brief", t)}
-          onSaved={onChanged}
-          tone="brief"
-        />
+        <BriefField c={c} onChanged={onChanged} />
       ) : (
         c.brief && (
           <div className="rounded-lg border border-primary/40 bg-primary/10 p-2">
@@ -711,6 +705,137 @@ function MoveMenu({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** The brief on the card as she will read it; a click opens the editor. */
+function BriefField({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block w-full rounded-lg border border-primary/30 bg-primary/5 px-2 py-1.5 text-left transition-colors hover:border-primary/60"
+      >
+        <span className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wide text-primary">
+          For the model
+          {c.requestedAt && <span className="normal-case text-sky-300">📲 in SHOOTING</span>}
+        </span>
+        {c.brief?.trim() ? (
+          <span className="mt-0.5 line-clamp-5 block whitespace-pre-line text-xs leading-snug">{c.brief}</span>
+        ) : (
+          <span className="mt-0.5 block text-xs text-muted-foreground/70">+ Write what she does…</span>
+        )}
+      </button>
+      {open && <BriefEditor c={c} onClose={() => setOpen(false)} onChanged={onChanged} />}
+    </>
+  );
+}
+
+const BULLET = "• ";
+
+/**
+ * The brief, written big: a list by default — Enter starts the next point,
+ * Enter on an empty point ends the list. Saved, or saved and sent to her
+ * SHOOTING message in one go.
+ */
+function BriefEditor({ c, onClose, onChanged }: { c: MatrixCell; onClose: () => void; onChanged: () => void }) {
+  const [v, setV] = useState(c.brief?.trim() ? c.brief : BULLET);
+  const [busy, start] = useTransition();
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const canSend = !c.requestedAt && (c.state === "empty" || c.state === "takes");
+  const clean = (t: string) =>
+    t
+      .split("\n")
+      .filter((l) => l.trim() !== "•" && l.trim() !== "")
+      .join("\n")
+      .trim();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  const save = (send: boolean) =>
+    start(async () => {
+      const text = clean(v);
+      const r = await setCellText(c.id, "brief", text);
+      if (r.error) return void toast.error(r.error);
+      if (send) {
+        if (!text) return void toast.error("Write what she does first");
+        const q = await requestCell(c.id, true);
+        if (q.error) toast.error(q.error);
+        else toast.success("Saved and sent to SHOOTING 📲");
+      } else toast.success("Saved");
+      onChanged();
+      onClose();
+    });
+
+  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      return save(false);
+    }
+    if (e.key !== "Enter" || e.shiftKey) return;
+    const el = e.currentTarget;
+    const at = el.selectionStart;
+    const lineStart = v.lastIndexOf("\n", at - 1) + 1;
+    const line = v.slice(lineStart, at);
+    if (!line.startsWith(BULLET) && line.trim() !== "•") return;
+    e.preventDefault();
+    if (line.trim() === "•") {
+      // An empty point: the list ends here.
+      const next = v.slice(0, lineStart) + v.slice(at);
+      setV(next);
+      requestAnimationFrame(() => el.setSelectionRange(lineStart, lineStart));
+      return;
+    }
+    const next = `${v.slice(0, at)}\n${BULLET}${v.slice(el.selectionEnd)}`;
+    setV(next);
+    const pos = at + 1 + BULLET.length;
+    requestAnimationFrame(() => el.setSelectionRange(pos, pos));
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-base">
+            {META[c.dimension].emoji} {name(c)} — for the model
+          </DialogTitle>
+        </DialogHeader>
+        <p className="-mt-2 text-xs text-muted-foreground">
+          One point per line — Enter starts the next, Enter on an empty point ends the list. She sees it on her page, on the upload and in SHOOTING.
+        </p>
+        <textarea
+          ref={ref}
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+          onKeyDown={onKey}
+          rows={10}
+          placeholder="• Black dress, hair up&#10;• Start at the door, look back&#10;• Text on screen: …"
+          className="w-full resize-y rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm leading-relaxed outline-none focus:ring-1 focus:ring-ring"
+        />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-[10px] text-muted-foreground">⌘ Enter saves</span>
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => save(false)} disabled={busy}>
+            {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            Save
+          </Button>
+          {canSend && (
+            <Button size="sm" onClick={() => save(true)} disabled={busy} className="bg-sky-500 text-white hover:bg-sky-400">
+              <Send className="mr-1.5 h-3.5 w-3.5" /> Save &amp; send to SHOOTING
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

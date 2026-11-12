@@ -230,8 +230,15 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
     for (const c of asked) {
       const d = c.dimension as Dimension;
       const nm = cellName({ dimension: d, slot: c.slot, label: c.label });
-      const brief = (c.brief ?? "").replace(/\s+/g, " ").trim();
-      lines.push(`   👉 <b>${esc(nm)}</b>${brief ? ` — ${esc(brief.length > 160 ? `${brief.slice(0, 157)}…` : brief)}` : ""}`);
+      // The brief as she wrote it: one point a line, a few lines at most.
+      const points = (c.brief ?? "")
+        .split("\n")
+        .map((l) => l.replace(/^\s*(?:[•\-*–]|\d+[.)])\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 6)
+        .map((l) => (l.length > 140 ? `${l.slice(0, 137)}…` : l));
+      lines.push(`👉 <b>${esc(nm)}</b>`);
+      for (const pt of points) lines.push(`      • ${esc(pt)}`);
       const url = shootUrl(c.id, "cell");
       if (url) buttons.push({ text: `${DIM_META[d].emoji} ${nm}`, url });
     }
