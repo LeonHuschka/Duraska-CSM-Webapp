@@ -603,7 +603,7 @@ function VariantCard({
             }
           >
             <Trophy className="mr-1 h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{c.winner ? "Winner" : "Winner?"}</span>
+            <span className="truncate">{c.winner ? "Winner" : "Pick"}</span>
           </Button>
         )}
         <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" onClick={onOpen} title="Upload takes">
