@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Glass: the app sits on a warm evening scene and every surface is frosted
+ * glass over it — translucent white, a fine light edge, blur behind. Each
+ * colour carries its own base transparency (--x-a), which the opacity
+ * modifiers multiply: bg-card is white at 7.5 %, bg-card/80 at 6 %.
+ */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -10,7 +16,7 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 262 83% 58%;
+    --primary: 214 95% 62%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
@@ -22,36 +28,51 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 262 83% 58%;
-    --radius: 0.75rem;
-    --chart-1: 262 83% 58%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --ring: 214 95% 62%;
+    --radius: 1rem;
+    --chart-1: 214 95% 62%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
   }
 
   .dark {
-    --background: 240 10% 4%;
-    --foreground: 0 0% 95%;
-    --card: 240 6% 7%;
-    --card-foreground: 0 0% 95%;
-    --popover: 240 6% 7%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 262 83% 58%;
+    /* Surfaces: white glass of different strength; menus a darker glass. */
+    --background: 228 18% 8%;
+    --background-a: 0.32;
+    --card: 0 0% 100%;
+    --card-a: 0.075;
+    --popover: 228 16% 13%;
+    --popover-a: 0.8;
+    --secondary: 0 0% 100%;
+    --secondary-a: 0.1;
+    --muted: 0 0% 100%;
+    --muted-a: 0.08;
+    --accent: 0 0% 100%;
+    --accent-a: 0.12;
+    --border: 0 0% 100%;
+    --border-a: 0.14;
+    --input: 0 0% 100%;
+    --input-a: 0.18;
+
+    /* Text: white, secondary at 60 % as in the glass look. */
+    --foreground: 0 0% 100%;
+    --card-foreground: 0 0% 100%;
+    --popover-foreground: 0 0% 100%;
+    --secondary-foreground: 0 0% 100%;
+    --accent-foreground: 0 0% 100%;
+    --muted-foreground: 0 0% 100%;
+    --muted-foreground-a: 0.6;
+
+    /* Accent: the clear blue of the glass dashboards. */
+    --primary: 214 95% 62%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 13%;
-    --secondary-foreground: 0 0% 95%;
-    --muted: 240 5% 13%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 16%;
-    --accent-foreground: 0 0% 95%;
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 0 0% 95%;
-    --border: 240 4% 16%;
-    --input: 240 4% 16%;
-    --ring: 262 83% 58%;
-    --chart-1: 262 83% 58%;
+    --ring: 214 95% 70%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --chart-1: 214 95% 62%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
@@ -63,7 +84,70 @@
   * {
     @apply border-border;
   }
+
+  /* The scene behind the glass: an evening room with tall windows — sky,
+     a warm glow on the horizon, hills, window frames, the floor — painted
+     in gradients, darkened at the edges so text on glass stays legible. */
+  html {
+    min-height: 100%;
+    background-color: #1c1714;
+    background-image:
+      radial-gradient(ellipse 120% 90% at 50% 45%, transparent 45%, rgba(8, 6, 5, 0.62) 100%),
+      linear-gradient(180deg, rgba(12, 12, 16, 0.18), rgba(12, 10, 8, 0.38)),
+      linear-gradient(90deg, rgba(22, 17, 14, 0.82) 0 0.7%, transparent 0.7% 23.6%, rgba(22, 17, 14, 0.82) 23.6% 24.3%, transparent 24.3% 49.6%, rgba(22, 17, 14, 0.82) 49.6% 50.3%, transparent 50.3% 75.6%, rgba(22, 17, 14, 0.82) 75.6% 76.3%, transparent 76.3% 99.3%, rgba(22, 17, 14, 0.82) 99.3%),
+      linear-gradient(180deg, rgba(22, 17, 14, 0.82) 0 1.2%, transparent 1.2% 11%, rgba(22, 17, 14, 0.7) 11% 11.8%, transparent 11.8%),
+      linear-gradient(180deg, transparent 63%, #5c4536 63.4%, #3a2c22 78%, #1f1814 100%),
+      radial-gradient(70% 9% at 22% 63%, rgba(66, 62, 72, 0.95), transparent 70%),
+      radial-gradient(80% 11% at 78% 64%, rgba(58, 54, 64, 0.95), transparent 70%),
+      radial-gradient(55% 20% at 52% 57%, rgba(255, 196, 148, 0.62), transparent 72%),
+      linear-gradient(180deg, #4b5568 0%, #77798a 26%, #b89a8e 44%, #e2b08c 54%, #e9b88f 58%, #8d6e5d 63%, #3a2c22 64%);
+    background-size: 100% 100%, 100% 100%, 100% 63%, 100% 63%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
   body {
     @apply bg-background text-foreground;
+    background-attachment: fixed;
   }
+}
+
+/* Frosted: whatever is glass blurs what lies behind it. */
+[class*="bg-card"],
+[class*="bg-popover"],
+[class*="bg-background"] {
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+}
+
+/* A glass card: a light top edge and a soft shadow under it. */
+[class*="bg-card"] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 10px 30px -12px rgba(0, 0, 0, 0.45);
+}
+
+/* Cards that are links lift a little under the pointer. */
+a[class*="bg-card"] {
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+a[class*="bg-card"]:hover {
+  transform: translateY(-3px);
+}
+
+/* Thin, light scrollbars on glass. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

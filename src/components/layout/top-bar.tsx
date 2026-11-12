@@ -39,7 +39,7 @@ export function TopBar({ userEmail, userName, isModel = false }: TopBarProps) {
       .toUpperCase() ?? userEmail.charAt(0).toUpperCase();
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border/50 px-4 md:justify-end md:px-6">
+    <header className="flex h-16 items-center justify-between px-4 md:justify-end md:px-6">
       {/* Mobile: hamburger + logo. The hamburger opens the slide-in sidebar,
           which is the ONLY place the persona switcher lives — without it a
           phone-only user can never set their active persona. */}
@@ -51,9 +51,9 @@ export function TopBar({ userEmail, userName, isModel = false }: TopBarProps) {
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="gap-2.5 rounded-full px-2 pr-3">
+          <Button variant="ghost" className="gap-2.5 rounded-full border border-border bg-card px-1.5 pr-3.5 hover:bg-white/15">
             <Avatar className="h-7 w-7">
-              <AvatarFallback className="bg-primary/10 text-xs font-medium text-primary">
+              <AvatarFallback className="bg-gradient-to-br from-amber-300 to-orange-500 text-xs font-semibold text-neutral-900">
                 {initials}
               </AvatarFallback>
             </Avatar>

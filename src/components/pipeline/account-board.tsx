@@ -581,7 +581,7 @@ function AccountTile({
         a.disabled || a.paused ? "opacity-50 grayscale" : ""
       }`}
       style={{
-        background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card))`,
+        background: `${PLATFORM_BG[a.platform] ?? ""}, hsl(var(--card) / var(--card-a, 1))`,
       }}
     >
       <div className="flex items-start gap-3">

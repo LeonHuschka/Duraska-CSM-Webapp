@@ -51,7 +51,7 @@ export default async function AppLayout({
         <PersonaProvider
           value={{ activePersona, personas }}
         >
-          <div className="hidden md:flex md:w-[260px] md:shrink-0 border-r border-border/50 bg-card/80">
+          <div className="hidden md:m-3 md:mr-0 md:flex md:w-[248px] md:shrink-0 md:overflow-hidden md:rounded-3xl md:border md:border-border md:bg-card">
             <AppSidebar />
           </div>
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -60,7 +60,7 @@ export default async function AppLayout({
               userName={profile?.full_name ?? null}
               isModel={activePersona.role === "model"}
             />
-            <main className="flex-1 overflow-auto p-4 pb-20 md:p-6 md:pb-6">{children}</main>
+            <main className="flex-1 overflow-auto p-4 pb-28 md:p-6 md:pb-6">{children}</main>
             <MobileBottomNav />
           </div>
         </PersonaProvider>

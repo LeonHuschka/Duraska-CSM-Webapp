@@ -55,7 +55,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
         </div>
       )}
 
-      <nav className="flex-1 space-y-0.5 px-3">
+      <nav className="flex-1 space-y-1 px-3">
         {navItems.map((item) => {
           const isActive =
             item.href === "/"
@@ -68,13 +68,13 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
               href={item.href}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                "flex items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium transition-all duration-150",
                 isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  ? "bg-white text-neutral-900 shadow-[0_6px_20px_-6px_rgba(255,255,255,0.45)]"
+                  : "text-muted-foreground hover:bg-white/10 hover:text-foreground"
               )}
             >
-              <item.icon className={cn("h-4 w-4", isActive && "text-primary")} />
+              <item.icon className="h-4 w-4" />
               {item.label}
             </Link>
           );
