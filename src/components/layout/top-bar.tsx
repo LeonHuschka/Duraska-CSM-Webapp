@@ -54,8 +54,8 @@ export function TopBar({ userEmail, userName, isModel = false, withNav = false }
         </span>
       </div>
       {/* Desktop: the logo as a round glass button, the sections as pills in the middle. */}
-      <Link href="/" className="glass-pill hidden h-10 w-10 items-center justify-center overflow-hidden rounded-full md:flex">
-        <Image src="/Duraska_logo_white.svg" alt="Duraska" width={56} height={56} className="h-14 w-14 max-w-none" />
+      <Link href="/" className="glass-pill hidden h-14 w-14 items-center justify-center overflow-hidden rounded-full md:flex">
+        <Image src="/Duraska_logo_white.svg" alt="Duraska" width={84} height={84} className="h-[84px] w-[84px] max-w-none" />
       </Link>
       {withNav && (
         <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:block">
