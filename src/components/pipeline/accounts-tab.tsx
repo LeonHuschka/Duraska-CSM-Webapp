@@ -427,17 +427,34 @@ export async function AccountsTab({
     };
   });
 
-  const lines = analytics.accounts.map((s) => ({
-    id: s.id,
-    label: s.label,
-    platform: s.platform,
-    color: s.color,
-    avatar: s.avatar,
-    points: analytics.series.byAccount[s.id],
-    seam: analytics.series.seamByAccount[s.id] ?? -1,
-    first: analytics.series.firstByAccount[s.id],
-    last: analytics.series.lastByAccount[s.id],
-  }));
+  // The chart follows the period: with 7, 30 or 90 days it shows only
+  // those days, each line as the views it gained since the period began
+  // (from the day before, so the first day's gain shows); all time keeps
+  // the whole cumulative history.
+  const allDays = analytics.series.days;
+  const from = hasPeriod ? Math.max(0, allDays.findIndex((d) => d >= analytics.start) - 1) : 0;
+  const chartDays = from > 0 ? allDays.slice(from) : allDays;
+  const lines = analytics.accounts.map((s) => {
+    const pts = analytics.series.byAccount[s.id];
+    const first = analytics.series.firstByAccount[s.id];
+    const last = analytics.series.lastByAccount[s.id];
+    const seam = analytics.series.seamByAccount[s.id] ?? -1;
+    if (!hasPeriod) return { id: s.id, label: s.label, platform: s.platform, color: s.color, avatar: s.avatar, points: pts, seam, first, last };
+    const start = first === undefined ? undefined : Math.max(first, from);
+    const base = start === undefined ? 0 : pts[start] ?? 0;
+    return {
+      id: s.id,
+      label: s.label,
+      platform: s.platform,
+      color: s.color,
+      avatar: s.avatar,
+      points: pts.slice(from).map((v) => Math.max(0, v - base)),
+      seam: seam - from,
+      // An account read only before the period has no line in it.
+      first: start === undefined || last === undefined || last < from ? (undefined as unknown as number) : start - from,
+      last: last === undefined ? last : last - from,
+    };
+  });
 
   return (
     <div className="space-y-5">
@@ -490,12 +507,14 @@ export async function AccountsTab({
       {/* 2 · Growth, account against account */}
       <div className="min-w-0 rounded-2xl border border-border/50 bg-card p-5">
         <div className="mb-3 flex items-baseline justify-between">
-          <h3 className="text-sm font-medium">Views over time</h3>
+          <h3 className="text-sm font-medium">{hasPeriod ? "Views gained" : "Views over time"}</h3>
           <span className="hidden text-[11px] text-muted-foreground sm:inline">
-            one line per account · dashed vertical line marks the period start
+            {hasPeriod
+              ? `one line per account · since ${new Date(analytics.start).toLocaleDateString("de-DE", { day: "numeric", month: "short" })}`
+              : "one line per account, all time"}
           </span>
         </div>
-        <ViewsOverTime days={analytics.series.days} lines={lines} periodStart={analytics.start} />
+        <ViewsOverTime days={chartDays} lines={lines} periodStart={analytics.start} />
       </div>
 
       {/* 3 · Who and how fast */}
