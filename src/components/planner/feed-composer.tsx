@@ -77,8 +77,8 @@ export function FeedComposer({
   const tooLong = caption.length > MAX_CAPTION || tags > 30;
 
   const add = async (files: FileList | File[]) => {
-    const list = Array.from(files).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
-    if (!list.length) return void toast.error("Pictures or videos only — JPG, PNG, WebP, MP4 or MOV");
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/") || isHeic(f));
+    if (!list.length) return void toast.error("Pictures or videos only — JPG, PNG, HEIC, WebP, MP4 or MOV");
     const room = MAX_PICTURES - pics.length;
     if (list.length > room) toast.error(`A carousel takes ${MAX_PICTURES} — the rest were left out`);
     const added: Picture[] = [];
@@ -98,8 +98,9 @@ export function FeedComposer({
         continue;
       }
       try {
-        const bmp = await createImageBitmap(file);
-        added.push({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file), ratio: bmp.width / bmp.height, video: false, cover: null, coverUrl: null });
+        const pic = isHeic(file) ? await fromHeic(file) : file;
+        const bmp = await createImageBitmap(pic);
+        added.push({ id: crypto.randomUUID(), file: pic, url: URL.createObjectURL(pic), ratio: bmp.width / bmp.height, video: false, cover: null, coverUrl: null });
         bmp.close();
       } catch {
         toast.error(`${file.name}: this picture cannot be read here — save it as JPG or PNG first`);
@@ -203,7 +204,7 @@ export function FeedComposer({
               <input
                 ref={input}
                 type="file"
-                accept="image/*,video/mp4,video/quicktime"
+                accept="image/*,.heic,.heif,video/mp4,video/quicktime"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -345,6 +346,20 @@ function readVideo(file: File): Promise<{ url: string; ratio: number; seconds: n
     };
     v.src = url;
   });
+}
+
+const HEIC_NAME = /\.(heic|heif)$/i;
+
+/** iPhone pictures: Chrome hands them over often without a type. */
+function isHeic(f: File): boolean {
+  return /^image\/hei[cf]/i.test(f.type) || HEIC_NAME.test(f.name);
+}
+
+/** Chrome cannot read HEIC, so it becomes a JPEG here first; the decoder loads only when needed. */
+async function fromHeic(file: File): Promise<File> {
+  const { heicTo } = await import("heic-to/next");
+  const jpeg = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
+  return new File([jpeg], `${file.name.replace(HEIC_NAME, "")}.jpg`, { type: "image/jpeg" });
 }
 
 function clamp(r: number): number {
