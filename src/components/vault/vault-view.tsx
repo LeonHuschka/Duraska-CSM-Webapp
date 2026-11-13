@@ -15,6 +15,13 @@ import {
   Scissors,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  FanslyPlanButton,
+  FanslyPlanList,
+  FanslyPlannedBadge,
+  FanslyPlannerProvider,
+  type FanslyPlan,
+} from "@/components/vault/fansly-planner";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
@@ -500,6 +507,7 @@ function VaultCard({
           <span className="rounded-md bg-black/50 px-1.5 py-0.5 text-[9px] font-medium text-white/80 capitalize w-fit">
             {asset.stage}
           </span>
+          <FanslyPlannedBadge assetId={asset.id} />
         </div>
 
         {/* Top-right: the variant number when the cut has siblings, then the
@@ -516,6 +524,7 @@ function VaultCard({
         <div className="flex items-center gap-1.5 transition-opacity md:opacity-0 md:group-hover:opacity-100">
           {/* Mark as posted — Instagram and Facebook accounts; a Fansly
               cut goes out on Fansly, which has none here. */}
+          <FanslyPlanButton asset={asset} />
           {asset.stage !== "fansly" && (
           <Popover open={postOpen} onOpenChange={setPostOpen}>
             <PopoverTrigger asChild>
@@ -1026,11 +1035,14 @@ export function VaultView({
   viewer,
   members,
   onlyReels = [],
+  fanslyPlans = [],
 }: {
   assets: VaultAsset[];
   accounts: PostingAccount[];
   viewer: VaultViewer;
   members: VaultMember[];
+  /** What owners and managers planned on Fansly; empty for everyone else. */
+  fanslyPlans?: FanslyPlan[];
   /** Opened from a link to certain reels: their cuts only, until cleared. */
   onlyReels?: string[];
 }) {
@@ -1369,6 +1381,7 @@ export function VaultView({
   const remaining = reels.length - page * PAGE_SIZE;
 
   return (
+    <FanslyPlannerProvider enabled={canSwitch} plans={fanslyPlans}>
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
@@ -1570,6 +1583,8 @@ export function VaultView({
         </Select>
       </div>
 
+      {canSwitch && stageFilter === "fansly" && <FanslyPlanList plans={fanslyPlans} assets={localAssets} />}
+
       {/* Grid */}
       {filtered.length === 0 ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border/50 bg-card/50 p-8 text-center">
@@ -1634,5 +1649,6 @@ export function VaultView({
         </>
       )}
     </div>
+    </FanslyPlannerProvider>
   );
 }

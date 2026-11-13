@@ -677,6 +677,51 @@ export type Database = {
         Update: { id?: string; persona_id?: string; text?: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
         Relationships: [];
       };
+      fansly_posts: {
+        Row: {
+          id: string;
+          persona_id: string;
+          asset_id: string;
+          scheduled_for: string;
+          caption: string;
+          price: number | null;
+          note: string | null;
+          status: string;
+          message_id: number | null;
+          error: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          persona_id: string;
+          asset_id: string;
+          scheduled_for: string;
+          caption?: string;
+          price?: number | null;
+          note?: string | null;
+          status?: string;
+          message_id?: number | null;
+          error?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          persona_id?: string;
+          asset_id?: string;
+          scheduled_for?: string;
+          caption?: string;
+          price?: number | null;
+          note?: string | null;
+          status?: string;
+          message_id?: number | null;
+          error?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       team_todos: {
         Row: { id: string; persona_id: string; text: string; repeat: "all" | "1d" | "7d" | "30d"; done: boolean; done_at: string | null; done_by: string | null; position: number; created_by: string | null; created_at: string };
         Insert: { id?: string; persona_id: string; text: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
@@ -1309,6 +1354,7 @@ export type Database = {
           slow_edit_days: number;
           slow_post_days: number;
           reports_thread_id: number | null;
+          fansly_thread_id: number | null;
           last_daily_report_at: string | null;
           last_weekly_report_at: string | null;
           shoot_notice_message_id: number | null;
@@ -1345,6 +1391,7 @@ export type Database = {
           slow_edit_days?: number;
           slow_post_days?: number;
           reports_thread_id?: number | null;
+          fansly_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;
@@ -1381,6 +1428,7 @@ export type Database = {
           slow_edit_days?: number;
           slow_post_days?: number;
           reports_thread_id?: number | null;
+          fansly_thread_id?: number | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;

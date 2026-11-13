@@ -2,6 +2,10 @@ import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
 import { allRows } from "@/lib/supabase/all-rows";
 import { VaultView } from "@/components/vault/vault-view";
+import type { FanslyPlan } from "@/components/vault/fansly-planner";
+
+// Planning on Fansly uploads the cut to Telegram from a server action here.
+export const maxDuration = 120;
 
 export interface VaultAsset {
   id: string;
@@ -129,6 +133,18 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
         : ((membership?.role as VaultViewer["role"] | undefined) ?? "va"),
     username: profile?.telegram_username ?? null,
   };
+  // What owners and managers planned on Fansly, for the list on that view.
+  const fanslyPlans: FanslyPlan[] =
+    viewer.role === "owner" || viewer.role === "manager"
+      ? ((
+          await supabase
+            .from("fansly_posts")
+            .select("id, asset_id, scheduled_for, caption, price, note, status, error")
+            .eq("persona_id", personaId)
+            .gte("scheduled_for", new Date(Date.now() - 30 * 86_400_000).toISOString())
+            .order("scheduled_for")
+        ).data ?? [])
+      : [];
   const members: VaultMember[] = (teammates ?? [])
     .filter((m) => m.user_profiles?.telegram_username)
     .map((m) => ({
@@ -372,6 +388,7 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
       viewer={viewer}
       members={members}
       onlyReels={onlyReels}
+      fanslyPlans={fanslyPlans}
     />
   );
 }
