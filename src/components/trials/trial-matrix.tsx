@@ -17,6 +17,7 @@ import { isMediaFile, MAX_UPLOAD_MB, resolveMime, uploadToStorage } from "@/lib/
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
 import { TakeGrid, type GridTake } from "@/components/upload/take-grid";
 import { BriefPoints } from "@/components/trials/brief-points";
+import { briefPoints } from "@/lib/brief-points";
 import { setAssetFansly } from "@/app/(app)/requests/[id]/actions";
 import {
   addCell,
@@ -804,7 +805,14 @@ function BriefField({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) 
           {c.requestedAt && <span className="normal-case text-sky-300">📲 in SHOOTING</span>}
         </span>
         {c.brief?.trim() ? (
-          <span className="mt-0.5 line-clamp-5 block whitespace-pre-line text-xs leading-snug">{c.brief}</span>
+          <span className="mt-1 block space-y-0.5">
+            {briefPoints(c.brief).slice(0, 5).map((pt, i) => (
+              <span key={i} className="flex gap-1.5 text-xs leading-snug">
+                <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-primary" />
+                <span className="line-clamp-2">{pt}</span>
+              </span>
+            ))}
+          </span>
         ) : (
           <span className="mt-0.5 block text-xs text-muted-foreground/70">+ Write what she does…</span>
         )}
