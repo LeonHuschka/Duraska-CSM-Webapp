@@ -12,6 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
+import { briefPoints } from "@/lib/brief-points";
 import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
 
 /**
@@ -224,10 +225,7 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
       const d = c.dimension as Dimension;
       const nm = cellName({ dimension: d, slot: c.slot, label: c.label });
       // The brief as she wrote it: one point a line, a few lines at most.
-      const points = (c.brief ?? "")
-        .split("\n")
-        .map((l) => l.replace(/^\s*(?:[•\-*–]|\d+[.)])\s*/, "").trim())
-        .filter(Boolean)
+      const points = briefPoints(c.brief)
         .slice(0, 6)
         .map((l) => (l.length > 140 ? `${l.slice(0, 137)}…` : l));
       lines.push(`👉 <b>${esc(nm)}</b>`);

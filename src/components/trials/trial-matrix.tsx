@@ -16,6 +16,7 @@ import { generateThumbnail, generateThumbnailFromUrl, safeStorageName } from "@/
 import { isMediaFile, MAX_UPLOAD_MB, resolveMime, uploadToStorage } from "@/lib/upload-takes";
 import { AccountAvatar } from "@/components/pipeline/account-avatar";
 import { TakeGrid, type GridTake } from "@/components/upload/take-grid";
+import { BriefPoints } from "@/components/trials/brief-points";
 import { setAssetFansly } from "@/app/(app)/requests/[id]/actions";
 import {
   addCell,
@@ -1314,9 +1315,8 @@ function CellSheet({
               <SheetDescription className="text-xs leading-relaxed">{trial.briefs[cell.dimension]}</SheetDescription>
             </SheetHeader>
             {cell.brief && (
-              <div className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-2.5">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-primary">What to do in this one</p>
-                <p className="mt-0.5 whitespace-pre-line text-sm">{cell.brief}</p>
+              <div className="mt-3">
+                <BriefPoints name={name(cell)} brief={cell.brief} compact />
               </div>
             )}
 

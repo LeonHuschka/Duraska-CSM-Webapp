@@ -5,6 +5,7 @@ import { readShootToken } from "@/lib/shoot-token";
 import { notePlain } from "@/lib/shoot-list";
 import { DIM_META, cellName, loadTrial, roundBrief, winnersOf } from "@/lib/trials";
 import { ShootUpload } from "@/components/shoot/shoot-upload";
+import { BriefPoints } from "@/components/trials/brief-points";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Upload takes", robots: { index: false, follow: false } };
@@ -120,12 +121,7 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
         </a>
       )}
 
-      {cell.brief && (
-        <div className="rounded-xl border border-primary/40 bg-primary/10 p-3">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-primary">What to do in this one</p>
-          <p className="mt-1 whitespace-pre-line text-sm">{cell.brief}</p>
-        </div>
-      )}
+      {cell.brief && <BriefPoints name={cellName(cell)} brief={cell.brief} />}
       <div className="rounded-xl border border-border/50 bg-card p-3">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">This round</p>
         <p className="mt-1 text-sm">{brief}</p>
