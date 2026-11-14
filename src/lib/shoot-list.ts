@@ -170,7 +170,8 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
       ? `🎬 <b>To shoot · ${date}</b>\n\nNothing open — every inspo link is shot. New ones go into the requests topic.`
       : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
   const foot =
-    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.`;
+    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.` +
+    (trial.lines.length ? `\n🧪 opens the upload of a trial box, with what to do in it.` : "");
   return {
     text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
     keyboard: [...keyboard, ...trial.keyboard],
@@ -180,8 +181,8 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
 /**
  * The running Trial-Maxxing trials, kept short: how many boxes she is asked
  * to shoot, with one link to the trials in the app. The briefs live on the
- * upload page; below, a row per box like the inspo rows — its upload, and
- * the outlier it reshoots.
+ * upload page; below, one row a trial — a 🧪 upload per box, then the
+ * outlier it reshoots.
  */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
@@ -208,14 +209,15 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
     open += asked.length;
     // The reel by the name the team gave it — the handle tells her nothing.
     const who = trialName(t);
+    if (!asked.length) continue;
+    // One row a trial: a 🧪 upload per box, then the outlier under its name.
+    const row: LinkButton[] = [];
     for (const c of asked.slice(0, 3)) {
-      const nm = cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label });
       const url = shootUrl(c.id, "cell");
-      const row: LinkButton[] = [];
-      if (url) row.push({ text: `🎥 ${who} · ${nm}`, url });
-      row.push(t.post_url ? { text: `📍 ${who} · Inspo`, url: t.post_url } : { text: `🧪 ${who}`, url: `${APP_URL}/trials/${t.id}` });
-      keyboard.push(row);
+      if (url) row.push({ text: `🧪 ${cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label })}`, url });
     }
+    row.push({ text: `📍 ${who}`, url: t.post_url ?? `${APP_URL}/trials/${t.id}` });
+    keyboard.push(row);
   }
   if (!open) return { lines: [], keyboard: [] };
   return {
