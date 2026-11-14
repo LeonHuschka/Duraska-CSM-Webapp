@@ -3,7 +3,7 @@ import { briefPoints } from "@/lib/brief-points";
 /**
  * The brief laid out like the SHOOTING list in Telegram: "👉 Outfit 1",
  * then a bullet per point. A point that starts with a label in capitals
- * ("HOOK: …") shows the label bold.
+ * ("HOOK: …") shows the label bold; the hook gets its 🪝.
  */
 export function BriefPoints({ name, brief, compact = false }: { name: string; brief: string; compact?: boolean }) {
   const points = briefPoints(brief);
@@ -19,7 +19,11 @@ export function BriefPoints({ name, brief, compact = false }: { name: string; br
               <span>
                 {m ? (
                   <>
-                    <b className="font-semibold">{m[1]}:</b> {m[2]}
+                    <b className="font-semibold">
+                      {/^HOOK$/i.test(m[1]) ? "🪝 " : ""}
+                      {m[1]}:
+                    </b>{" "}
+                    {m[2]}
                   </>
                 ) : (
                   pt

@@ -12,8 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { briefPoints } from "@/lib/brief-points";
-import { APP_URL, DIMENSIONS, DIM_META, cellName, type Dimension } from "@/lib/trials";
+import { APP_URL, cellName, type Dimension } from "@/lib/trials";
 
 /**
  * The SHOOTING topic: one message a day with the reels to shoot. The
@@ -171,8 +170,7 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
       ? `🎬 <b>To shoot · ${date}</b>\n\nNothing open — every inspo link is shot. New ones go into the requests topic.`
       : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
   const foot =
-    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo in the requests topic.` +
-    (trial.lines.length ? `\n🧪 opens the trial's matrix in the app.` : "");
+    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.`;
   return {
     text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
     keyboard: [...keyboard, ...trial.keyboard],
@@ -180,14 +178,15 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
 }
 
 /**
- * The running Trial-Maxxing trials: per trial the round it is at and how
- * much of it is shot, and a button to its matrix. A round is shot ahead of
- * its phase as often as not, so it is read from the boxes, not the phase.
+ * The running Trial-Maxxing trials, kept short: how many boxes she is asked
+ * to shoot, with one link to the trials in the app. The briefs live on the
+ * upload page; below, a row per box like the inspo rows — its upload, and
+ * the outlier it reshoots.
  */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
     .from("trials")
-    .select("id, account_id, phase, created_at, nickname, caption")
+    .select("id, created_at, nickname, caption, post_url")
     .eq("persona_id", personaId)
     .eq("status", "active")
     .neq("phase", "done")
@@ -195,50 +194,34 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
   if (!trials?.length) return { lines: [], keyboard: [] };
   const { data: cells } = await db
     .from("trial_cells")
-    .select("id, trial_id, dimension, slot, label, brief, finished_at, requested_at")
+    .select("id, trial_id, dimension, slot, label, finished_at, requested_at")
     .in("trial_id", trials.map((t) => t.id))
     .order("slot");
 
-  const lines = ["🧪 <b>Trial-Maxxing</b>"];
   const keyboard: LinkButton[][] = [];
+  let open = 0;
   for (const t of trials) {
-    const mine = (cells ?? []).filter((c) => c.trial_id === t.id);
-    // The round it is at: the furthest one begun, which is often ahead of the phase.
-    let at: { d: Dimension; done: number; of: number } | null = null;
-    for (const d of DIMENSIONS) {
-      const round = mine.filter((c) => c.dimension === d);
-      const done = round.filter((c) => c.finished_at).length;
-      if (round.length && (d === t.phase || done > 0)) at = { d, done, of: round.length };
-    }
-    if (!at) continue;
+    // What the team asked her to shoot and she has not finished yet.
+    const asked = (cells ?? [])
+      .filter((c) => c.trial_id === t.id && c.requested_at && !c.finished_at)
+      .sort((a, b) => (a.requested_at ?? "").localeCompare(b.requested_at ?? ""));
+    open += asked.length;
     // The reel by the name the team gave it — the handle tells her nothing.
     const who = trialName(t);
-    lines.push(`${DIM_META[at.d].emoji} ${esc(who)} · ${DIM_META[at.d].title} <b>${at.done}/${at.of}</b>`);
-    // What the team asked her to shoot, with its brief, and a button
-    // straight to its upload — until it is done.
-    const asked = mine
-      .filter((c) => c.requested_at && !c.finished_at)
-      .sort((a, b) => (a.requested_at ?? "").localeCompare(b.requested_at ?? ""))
-      .slice(0, 3);
-    const buttons: LinkButton[] = [];
-    for (const c of asked) {
-      const d = c.dimension as Dimension;
-      const nm = cellName({ dimension: d, slot: c.slot, label: c.label });
-      // The brief as she wrote it: one point a line, a few lines at most.
-      const points = briefPoints(c.brief)
-        .slice(0, 6)
-        .map((l) => (l.length > 140 ? `${l.slice(0, 137)}…` : l));
-      lines.push(`👉 <b>${esc(nm)}</b>`);
-      for (const pt of points) lines.push(`      • ${esc(pt)}`);
+    for (const c of asked.slice(0, 3)) {
+      const nm = cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label });
       const url = shootUrl(c.id, "cell");
-      if (url) buttons.push({ text: `${DIM_META[d].emoji} ${nm}`, url });
+      const row: LinkButton[] = [];
+      if (url) row.push({ text: `🎥 ${who} · ${nm}`, url });
+      row.push(t.post_url ? { text: `📍 ${who} · Inspo`, url: t.post_url } : { text: `🧪 ${who}`, url: `${APP_URL}/trials/${t.id}` });
+      keyboard.push(row);
     }
-    keyboard.push([
-      { text: buttons.length ? `🧪 ${who}` : `🧪 ${who} · open the trial`, url: `${APP_URL}/trials/${t.id}` },
-      ...buttons,
-    ]);
   }
-  return lines.length > 1 ? { lines, keyboard } : { lines: [], keyboard: [] };
+  if (!open) return { lines: [], keyboard: [] };
+  return {
+    lines: [`🧪 <b>Trial-Maxxing</b> · <b>${open}</b> to shoot — <a href="${APP_URL}/trials">open the trials</a>`],
+    keyboard,
+  };
 }
 
 /** What a trial is called for her: its nickname, else the first words of its caption. */

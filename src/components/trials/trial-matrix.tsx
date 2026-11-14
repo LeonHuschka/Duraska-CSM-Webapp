@@ -809,7 +809,7 @@ function BriefField({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) 
             {briefPoints(c.brief).slice(0, 5).map((pt, i) => (
               <span key={i} className="flex gap-1.5 text-xs leading-snug">
                 <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-primary" />
-                <span className="line-clamp-2">{pt}</span>
+                <span className="line-clamp-2">{pt.replace(/^HOOK:/i, "🪝 HOOK:")}</span>
               </span>
             ))}
           </span>
