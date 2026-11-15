@@ -677,6 +677,30 @@ export type Database = {
         Update: { id?: string; persona_id?: string; text?: string; repeat?: "all" | "1d" | "7d" | "30d"; done?: boolean; done_at?: string | null; done_by?: string | null; position?: number; created_by?: string | null; created_at?: string };
         Relationships: [];
       };
+      fansly_schedule: {
+        Row: {
+          persona_id: string;
+          slots: string[];
+          overrides: Json;
+          hashtags: string;
+          updated_at: string;
+        };
+        Insert: {
+          persona_id: string;
+          slots?: string[];
+          overrides?: Json;
+          hashtags?: string;
+          updated_at?: string;
+        };
+        Update: {
+          persona_id?: string;
+          slots?: string[];
+          overrides?: Json;
+          hashtags?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       fansly_posts: {
         Row: {
           id: string;
@@ -686,6 +710,7 @@ export type Database = {
           caption: string;
           price: number | null;
           fyp: boolean;
+          caption_source: string | null;
           note: string | null;
           status: string;
           message_id: number | null;
@@ -701,6 +726,7 @@ export type Database = {
           caption?: string;
           price?: number | null;
           fyp?: boolean;
+          caption_source?: string | null;
           note?: string | null;
           status?: string;
           message_id?: number | null;
@@ -716,6 +742,7 @@ export type Database = {
           caption?: string;
           price?: number | null;
           fyp?: boolean;
+          caption_source?: string | null;
           note?: string | null;
           status?: string;
           message_id?: number | null;

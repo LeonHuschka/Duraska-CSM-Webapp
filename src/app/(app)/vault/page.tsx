@@ -2,7 +2,9 @@ import { getActivePersonaId } from "@/lib/persona";
 import { createClient } from "@/lib/supabase/server";
 import { allRows } from "@/lib/supabase/all-rows";
 import { VaultView } from "@/components/vault/vault-view";
-import type { FanslyPlan } from "@/components/vault/fansly-planner";
+import type { FanslyPlan, FanslyScheduleView } from "@/components/vault/fansly-planner";
+import { DEFAULT_HASHTAGS, DEFAULT_SLOTS, FANSLY_TZ, cleanSlots } from "@/lib/fansly-plan";
+import { dayKey } from "@/components/planner/planner-utils";
 
 // Planning on Fansly uploads the cut to Telegram from a server action here.
 export const maxDuration = 120;
@@ -139,12 +141,21 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
       ? ((
           await supabase
             .from("fansly_posts")
-            .select("id, asset_id, scheduled_for, caption, price, fyp, note, status, error")
+            .select("id, asset_id, scheduled_for, caption, price, fyp, note, status, error, caption_source")
             .eq("persona_id", personaId)
             .gte("scheduled_for", new Date(Date.now() - 30 * 86_400_000).toISOString())
             .order("scheduled_for")
         ).data ?? [])
       : [];
+  // The Fansly calendar's times and hashtags.
+  let fanslySchedule: FanslyScheduleView | null = null;
+  if (viewer.role === "owner" || viewer.role === "manager") {
+    const { data: s } = await supabase.from("fansly_schedule").select("slots, overrides, hashtags").eq("persona_id", personaId).maybeSingle();
+    const overrides: Record<string, string[]> = {};
+    for (const [day, list] of Object.entries((s?.overrides ?? {}) as Record<string, unknown>)) overrides[day] = cleanSlots(list);
+    fanslySchedule = { slots: s ? cleanSlots(s.slots) : DEFAULT_SLOTS, overrides, hashtags: s?.hashtags ?? DEFAULT_HASHTAGS };
+  }
+  const fanslyToday = dayKey(new Date(), FANSLY_TZ);
   const members: VaultMember[] = (teammates ?? [])
     .filter((m) => m.user_profiles?.telegram_username)
     .map((m) => ({
@@ -389,6 +400,8 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
       members={members}
       onlyReels={onlyReels}
       fanslyPlans={fanslyPlans}
+      fanslySchedule={fanslySchedule}
+      fanslyToday={fanslyToday}
     />
   );
 }

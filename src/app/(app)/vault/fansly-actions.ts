@@ -4,21 +4,26 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
-import { deleteMessage, sendDocument, sendMessage, sendVideo } from "@/lib/telegram";
-import { videoInfo } from "@/lib/video-info";
+import { deleteMessage } from "@/lib/telegram";
+import { atTime, hhmm } from "@/components/planner/planner-utils";
+import {
+  FANSLY_TZ,
+  captionFor,
+  cleanSlots,
+  deliver,
+  fillDrafts,
+  readSchedule,
+  withHashtags,
+} from "@/lib/fansly-plan";
 
 /**
- * The Fansly planner. A Fansly cut, planned for a time with its caption,
- * goes to the VA's Fansly topic at once as a task: the video, when to put
- * it up, the price and the caption to copy. The VA sets it in Fansly's own
- * scheduler. Owners and managers only.
+ * The Fansly calendar's actions. Owners and managers only: they set the
+ * times, approve and move posts; the app fills the free times as drafts,
+ * and the cron sends approved posts to the VA the day before.
  */
 
 type Sb = Awaited<ReturnType<typeof createClient>>;
-
-/** Telegram takes up to 50 MB from a bot; a bigger cut goes as a link. */
-const MAX_VIDEO_BYTES = 49 * 1024 * 1024;
-const MAX_CAPTION = 1024;
+type Result = { error: string | null };
 
 async function staff(supabase: Sb, personaId: string) {
   const {
@@ -33,86 +38,234 @@ async function staff(supabase: Sb, personaId: string) {
   return ok ? user.id : null;
 }
 
-const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-/** Fansly runs on LA time. */
-const TZ = "America/Los_Angeles";
-
-/** "Fri, 13 Nov" — the day in LA. */
-function laDate(iso: string) {
-  const d = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" }).format(
-    new Date(iso)
-  );
-  const i = d.indexOf(" ");
-  return i > 0 ? `${d.slice(0, i)},${d.slice(i)}` : d;
+async function ctx() {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  const userId = await staff(supabase, personaId);
+  return { supabase, personaId, userId };
 }
 
-/** "20:00" — the time in LA. */
-function laClock(iso: string) {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-}
+const done = (error?: { message: string } | null): Result => {
+  revalidatePath("/vault");
+  return { error: error?.message ?? null };
+};
 
+const DENIED = { error: "Only owners and managers" };
+
+/** A post planned by hand: approved as it is, sent the day before. */
 export async function planFanslyPost(input: {
   assetId: string;
   when: string;
   caption: string;
   price: number | null;
   note: string;
-}): Promise<{ error: string | null }> {
-  const supabase = await createClient();
-  const personaId = await requireActivePersonaId();
-  const userId = await staff(supabase, personaId);
-  if (!userId) return { error: "Only owners and managers" };
-
+}): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
   const when = new Date(input.when);
   if (Number.isNaN(when.getTime())) return { error: "Pick a date and time" };
   if (when.getTime() < Date.now() - 60_000) return { error: "That time has passed" };
-  const caption = input.caption.trim().slice(0, 3000);
-  const note = input.note.trim().slice(0, 500);
-  const price = input.price != null && input.price > 0 ? Math.round(input.price * 100) / 100 : null;
-
   const { data: asset } = await supabase
     .from("content_assets")
-    .select("id, file_path, file_name, mime_type, size_bytes, stage, content_requests!inner(persona_id, title)")
+    .select("id, content_requests!inner(persona_id)")
     .eq("id", input.assetId)
     .is("deleted_at", null)
     .maybeSingle();
-  const req = asset?.content_requests as unknown as { persona_id: string; title: string | null } | null;
+  const req = asset?.content_requests as unknown as { persona_id: string } | null;
   if (!asset || req?.persona_id !== personaId) return { error: "Cut not found" };
-
-  const { data: cfg } = await createAdminClient()
-    .from("telegram_config")
-    .select("fansly_thread_id")
-    .eq("persona_id", personaId)
-    .maybeSingle();
-  if (!cfg?.fansly_thread_id) return { error: "No Fansly topic set for this model" };
-
-  const { data: row, error: insErr } = await supabase
-    .from("fansly_posts")
-    .insert({
-      persona_id: personaId,
-      asset_id: asset.id,
-      scheduled_for: when.toISOString(),
-      caption,
-      price,
-      fyp: true,
-      note: note || null,
-      created_by: userId,
-    })
-    .select("id")
-    .single();
-  if (insErr || !row) return { error: insErr?.message ?? "Could not save" };
-
-  const error = await deliver(supabase, personaId, row.id);
-  revalidatePath("/vault");
-  return { error: error ? `Saved, but not sent to the VA: ${error}` : null };
+  const { error } = await supabase.from("fansly_posts").insert({
+    persona_id: personaId,
+    asset_id: asset.id,
+    scheduled_for: when.toISOString(),
+    caption: input.caption.trim().slice(0, 3000),
+    caption_source: "manual",
+    price: input.price != null && input.price > 0 ? Math.round(input.price * 100) / 100 : null,
+    note: input.note.trim().slice(0, 500) || null,
+    status: "approved",
+    fyp: true,
+    created_by: userId,
+  });
+  return done(error);
 }
 
-/** Sends a plan to the VA again, as it stands now, in place of its old task. */
-export async function resendFanslyPost(id: string): Promise<{ error: string | null }> {
-  const supabase = await createClient();
-  const personaId = await requireActivePersonaId();
-  if (!(await staff(supabase, personaId))) return { error: "Only owners and managers" };
+/** Change a post: time, caption, price, note — and approve it in one go. */
+export async function updateFanslyPost(
+  id: string,
+  input: { when: string; caption: string; price: number | null; note: string; approve: boolean }
+): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const when = new Date(input.when);
+  if (Number.isNaN(when.getTime())) return { error: "Pick a date and time" };
+  const { data: post } = await supabase
+    .from("fansly_posts")
+    .select("status, caption")
+    .eq("id", id)
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!post) return { error: "Not found" };
+  const caption = input.caption.trim().slice(0, 3000);
+  const { error } = await supabase
+    .from("fansly_posts")
+    .update({
+      scheduled_for: when.toISOString(),
+      caption,
+      ...(caption === post.caption ? {} : { caption_source: "manual" }),
+      price: input.price != null && input.price > 0 ? Math.round(input.price * 100) / 100 : null,
+      note: input.note.trim().slice(0, 500) || null,
+      // A sent post stays sent; send it again to pass the change on.
+      ...(post.status === "sent" || post.status === "sending" ? {} : { status: input.approve ? "approved" : "draft" }),
+    })
+    .eq("id", id);
+  return done(error);
+}
+
+/** Approve, or take approval back from, posts not sent yet. */
+export async function setFanslyApproved(ids: string[], on: boolean): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  if (!ids.length) return { error: null };
+  const { error } = await supabase
+    .from("fansly_posts")
+    .update({ status: on ? "approved" : "draft" })
+    .eq("persona_id", personaId)
+    .in("id", ids)
+    .in("status", on ? ["draft", "failed"] : ["approved"]);
+  return done(error);
+}
+
+/**
+ * A post dragged to another time. When another post not sent yet holds
+ * that time, the two trade places.
+ */
+export async function moveFanslyPost(id: string, day: string, time: string): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const target = atTime(day, time, FANSLY_TZ);
+  if (Number.isNaN(target.getTime())) return { error: "Unknown time" };
+  const [{ data: moving }, { data: posts }] = await Promise.all([
+    supabase.from("fansly_posts").select("scheduled_for, status").eq("id", id).eq("persona_id", personaId).maybeSingle(),
+    supabase
+      .from("fansly_posts")
+      .select("id, scheduled_for, status")
+      .eq("persona_id", personaId)
+      .gte("scheduled_for", atTime(day, "00:00", FANSLY_TZ).toISOString())
+      .lte("scheduled_for", atTime(day, "23:59", FANSLY_TZ).toISOString()),
+  ]);
+  if (!moving) return { error: "Not found" };
+  if (moving.status === "sent" || moving.status === "sending") return { error: "Already with the VA — take it back to move it" };
+  const other = (posts ?? []).find((p) => p.id !== id && hhmm(new Date(p.scheduled_for), FANSLY_TZ) === time);
+  if (other && (other.status === "sent" || other.status === "sending")) return { error: "That time holds a post the VA already has" };
+  if (other) {
+    const { error } = await supabase.from("fansly_posts").update({ scheduled_for: moving.scheduled_for }).eq("id", other.id);
+    if (error) return done(error);
+  }
+  const { error } = await supabase.from("fansly_posts").update({ scheduled_for: target.toISOString() }).eq("id", id);
+  return done(error);
+}
+
+/** A new caption from the cut's picture. */
+export async function regenerateFanslyCaption(id: string): Promise<{ error: string | null; caption?: string }> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const { data: post } = await supabase
+    .from("fansly_posts")
+    .select("asset_id")
+    .eq("id", id)
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!post) return { error: "Not found" };
+  const admin = createAdminClient();
+  const [{ data: asset }, schedule, { data: past }] = await Promise.all([
+    admin.from("content_assets").select("thumbnail_path").eq("id", post.asset_id).maybeSingle(),
+    readSchedule(admin, personaId),
+    admin
+      .from("fansly_posts")
+      .select("caption, caption_source")
+      .eq("persona_id", personaId)
+      .order("created_at", { ascending: false })
+      .limit(30),
+  ]);
+  const examples = (past ?? [])
+    .filter((p) => p.caption_source !== "emoji")
+    .map((p) => p.caption.replace(/#[^\s#]+/g, "").trim())
+    .filter((l) => l.length > 8);
+  const c = await captionFor(admin, asset?.thumbnail_path ?? null, examples);
+  const caption = withHashtags(c.text, schedule.hashtags);
+  const { error } = await supabase.from("fansly_posts").update({ caption, caption_source: c.source }).eq("id", id);
+  done(error);
+  return { error: error?.message ?? null, caption };
+}
+
+/** Fill the free times of the next two weeks now, instead of waiting for the morning. */
+export async function fillFanslyNow(): Promise<{ error: string | null; created?: number; short?: number }> {
+  const { personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  try {
+    const r = await fillDrafts(createAdminClient(), personaId);
+    revalidatePath("/vault");
+    return { error: null, ...r };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not fill" };
+  }
+}
+
+/** The usual times of a day (LA), as many as posts a day. */
+export async function saveFanslySlots(slots: string[]): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const clean = cleanSlots(slots);
+  if (!clean.length) return { error: "Keep at least one time" };
+  const schedule = await readSchedule(createAdminClient(), personaId);
+  const { error } = await supabase.from("fansly_schedule").upsert({
+    persona_id: personaId,
+    slots: clean,
+    overrides: schedule.overrides,
+    hashtags: schedule.hashtags,
+    updated_at: new Date().toISOString(),
+  });
+  return done(error);
+}
+
+/** One day's own times; null goes back to the usual ones. */
+export async function setFanslyDaySlots(day: string, slots: string[] | null): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: "Unknown day" };
+  const schedule = await readSchedule(createAdminClient(), personaId);
+  const overrides = { ...schedule.overrides };
+  if (slots === null) delete overrides[day];
+  else overrides[day] = cleanSlots(slots);
+  const { error } = await supabase.from("fansly_schedule").upsert({
+    persona_id: personaId,
+    slots: schedule.slots,
+    overrides,
+    hashtags: schedule.hashtags,
+    updated_at: new Date().toISOString(),
+  });
+  return done(error);
+}
+
+/** The hashtags every caption ends with. */
+export async function saveFanslyHashtags(hashtags: string): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const tags = Array.from(new Set(hashtags.match(/#[^\s#]+/g) ?? [])).join(" ");
+  const schedule = await readSchedule(createAdminClient(), personaId);
+  const { error } = await supabase.from("fansly_schedule").upsert({
+    persona_id: personaId,
+    slots: schedule.slots,
+    overrides: schedule.overrides,
+    hashtags: tags,
+    updated_at: new Date().toISOString(),
+  });
+  return done(error);
+}
+
+/** Sends a post to the VA again, as it stands now, in place of its old task. */
+export async function resendFanslyPost(id: string): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
   const { data: row } = await supabase
     .from("fansly_posts")
     .select("message_id")
@@ -120,142 +273,33 @@ export async function resendFanslyPost(id: string): Promise<{ error: string | nu
     .eq("persona_id", personaId)
     .maybeSingle();
   if (!row) return { error: "Not found" };
+  if (row.message_id) await dropMessage(personaId, Number(row.message_id));
+  const error = await deliver(id);
+  revalidatePath("/vault");
+  return { error };
+}
+
+/** Takes a plan back, and the task out of the VA's topic. */
+export async function removeFanslyPost(id: string): Promise<Result> {
+  const { supabase, personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  const { data: row } = await supabase
+    .from("fansly_posts")
+    .select("message_id")
+    .eq("id", id)
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!row) return { error: "Not found" };
+  if (row.message_id) await dropMessage(personaId, Number(row.message_id));
+  const { error } = await supabase.from("fansly_posts").delete().eq("id", id).eq("persona_id", personaId);
+  return done(error);
+}
+
+async function dropMessage(personaId: string, messageId: number) {
   const { data: cfg } = await createAdminClient()
     .from("telegram_config")
     .select("chat_id")
     .eq("persona_id", personaId)
     .maybeSingle();
-  if (row.message_id && cfg?.chat_id) await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(row.message_id) });
-  const error = await deliver(supabase, personaId, id);
-  revalidatePath("/vault");
-  return { error };
-}
-
-/**
- * The task in the VA's Fansly topic: who, the day and the time (LA) on lines
- * of their own, the price, FYP — every Fansly post goes there — the note,
- * the caption to copy, and the cut as its original file. Returns what went
- * wrong, or null.
- */
-async function deliver(supabase: Sb, personaId: string, postId: string): Promise<string | null> {
-  const { data: post } = await supabase
-    .from("fansly_posts")
-    .select("id, asset_id, scheduled_for, caption, price, note")
-    .eq("id", postId)
-    .maybeSingle();
-  if (!post) return "Plan not found";
-  const { data: asset } = await supabase
-    .from("content_assets")
-    .select("file_path, file_name, mime_type, size_bytes")
-    .eq("id", post.asset_id)
-    .maybeSingle();
-  if (!asset) return "Cut not found";
-  const { data: cfg } = await createAdminClient()
-    .from("telegram_config")
-    .select("chat_id, fansly_thread_id, va_username, fansly_va_username")
-    .eq("persona_id", personaId)
-    .maybeSingle();
-  if (!cfg?.chat_id || !cfg.fansly_thread_id) return "No Fansly topic set for this model";
-
-  const price = post.price ? Number(post.price) : null;
-  const va = (cfg.fansly_va_username ?? cfg.va_username)?.replace(/^@/, "");
-  const head = [
-    `📅 <b>Fansly post</b>${va ? ` · @${esc(va)}` : ""}`,
-    "",
-    `🗓 <b>${esc(laDate(post.scheduled_for))}</b>`,
-    `⏰ <b>${esc(laClock(post.scheduled_for))}</b> LA time`,
-    price ? `💰 PPV $${price.toFixed(2)}` : "🆓 Free post",
-    "🔥 FYP post",
-    post.note ? `📝 ${esc(post.note)}` : null,
-  ]
-    .filter((l) => l !== null)
-    .join("\n");
-  const body = post.caption ? `\n\n<b>Caption</b> (tap to copy):\n<pre>${esc(post.caption)}</pre>` : "\n\n<i>No caption</i>";
-  const together = head + body;
-  const fits = together.length <= MAX_CAPTION;
-
-  let messageId: number | null = null;
-  let error: string | null = null;
-  const thread = { chat_id: cfg.chat_id, message_thread_id: cfg.fansly_thread_id };
-
-  if ((asset.size_bytes ?? 0) <= MAX_VIDEO_BYTES) {
-    const { data: file } = await supabase.storage.from("content-assets").download(asset.file_path);
-    if (file) {
-      // A playable video, at its true shape: Telegram stretched it when it
-      // had to guess, so the width, height and length are read from the
-      // file's own header and sent along, with its real name and type.
-      // A file whose header says nothing goes as a plain file instead.
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const info = videoInfo(bytes);
-      const sent = info
-        ? await sendVideo({
-            ...thread,
-            video: bytes,
-            filename: asset.file_name,
-            mime: asset.mime_type,
-            width: info.width,
-            height: info.height,
-            duration: info.duration,
-            caption: fits ? together : head,
-            parse_mode: "HTML",
-          })
-        : await sendDocument({
-            ...thread,
-            file: bytes,
-            filename: asset.file_name,
-            mime: asset.mime_type,
-            caption: fits ? together : head,
-            parse_mode: "HTML",
-          });
-      if (sent.ok) messageId = sent.result?.message_id ?? null;
-      else error = sent.error ?? "Video not sent";
-    } else error = "Video could not be read";
-  }
-  if (messageId == null) {
-    // Too big for a bot, or the upload failed: the task with a download link.
-    const { data: signed } = await supabase.storage.from("content-assets").createSignedUrl(asset.file_path, 7 * 24 * 3600);
-    const sent = await sendMessage({
-      ...thread,
-      text: together + (signed?.signedUrl ? `\n\n<a href="${esc(signed.signedUrl)}">⬇️ Download the video</a>` : ""),
-      parse_mode: "HTML",
-    });
-    if (sent.ok) {
-      messageId = sent.result?.message_id ?? null;
-      error = null;
-    } else error = sent.error ?? error ?? "Not sent";
-  } else if (!fits) {
-    // The caption did not fit under the file: it follows as a reply.
-    await sendMessage({ ...thread, text: body.trim(), parse_mode: "HTML", reply_to_message_id: messageId });
-  }
-
-  await supabase
-    .from("fansly_posts")
-    .update({ status: messageId != null ? "sent" : "failed", message_id: messageId, error })
-    .eq("id", post.id);
-  return messageId != null ? null : error;
-}
-
-/** Takes a plan back, and the task out of the VA's topic. */
-export async function removeFanslyPost(id: string): Promise<{ error: string | null }> {
-  const supabase = await createClient();
-  const personaId = await requireActivePersonaId();
-  if (!(await staff(supabase, personaId))) return { error: "Only owners and managers" };
-  const { data: row } = await supabase
-    .from("fansly_posts")
-    .select("message_id")
-    .eq("id", id)
-    .eq("persona_id", personaId)
-    .maybeSingle();
-  if (!row) return { error: "Not found" };
-  if (row.message_id) {
-    const { data: cfg } = await createAdminClient()
-      .from("telegram_config")
-      .select("chat_id")
-      .eq("persona_id", personaId)
-      .maybeSingle();
-    if (cfg?.chat_id) await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(row.message_id) });
-  }
-  const { error } = await supabase.from("fansly_posts").delete().eq("id", id).eq("persona_id", personaId);
-  revalidatePath("/vault");
-  return { error: error?.message ?? null };
+  if (cfg?.chat_id) await deleteMessage({ chat_id: cfg.chat_id, message_id: messageId });
 }

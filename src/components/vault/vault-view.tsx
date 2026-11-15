@@ -16,11 +16,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  FanslyCalendar,
   FanslyPlanButton,
-  FanslyPlanList,
   FanslyPlannedBadge,
   FanslyPlannerProvider,
   type FanslyPlan,
+  type FanslyScheduleView,
 } from "@/components/vault/fansly-planner";
 import { Input } from "@/components/ui/input";
 import {
@@ -1036,6 +1037,8 @@ export function VaultView({
   members,
   onlyReels = [],
   fanslyPlans = [],
+  fanslySchedule = null,
+  fanslyToday = "",
 }: {
   assets: VaultAsset[];
   accounts: PostingAccount[];
@@ -1043,6 +1046,9 @@ export function VaultView({
   members: VaultMember[];
   /** What owners and managers planned on Fansly; empty for everyone else. */
   fanslyPlans?: FanslyPlan[];
+  /** The calendar's times and hashtags, and today in LA; null for everyone else. */
+  fanslySchedule?: FanslyScheduleView | null;
+  fanslyToday?: string;
   /** Opened from a link to certain reels: their cuts only, until cleared. */
   onlyReels?: string[];
 }) {
@@ -1381,7 +1387,7 @@ export function VaultView({
   const remaining = reels.length - page * PAGE_SIZE;
 
   return (
-    <FanslyPlannerProvider enabled={canSwitch} plans={fanslyPlans}>
+    <FanslyPlannerProvider enabled={canSwitch} plans={fanslyPlans} hashtags={fanslySchedule?.hashtags ?? ""}>
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
@@ -1583,7 +1589,9 @@ export function VaultView({
         </Select>
       </div>
 
-      {canSwitch && stageFilter === "fansly" && <FanslyPlanList plans={fanslyPlans} assets={localAssets} />}
+      {canSwitch && stageFilter === "fansly" && fanslySchedule && fanslyToday && (
+        <FanslyCalendar plans={fanslyPlans} assets={localAssets} schedule={fanslySchedule} today={fanslyToday} />
+      )}
 
       {/* Grid */}
       {filtered.length === 0 ? (
