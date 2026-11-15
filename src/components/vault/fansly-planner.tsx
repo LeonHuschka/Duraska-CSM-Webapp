@@ -4,13 +4,13 @@
 import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, Check, Loader2, Send, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, Loader2, RotateCw, Send, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { atTime, dayKey } from "@/components/planner/planner-utils";
-import { planFanslyPost, removeFanslyPost } from "@/app/(app)/vault/fansly-actions";
+import { planFanslyPost, removeFanslyPost, resendFanslyPost } from "@/app/(app)/vault/fansly-actions";
 import type { VaultAsset } from "@/app/(app)/vault/page";
 
 /**
@@ -245,6 +245,16 @@ export function FanslyPlanList({ plans, assets }: { plans: FanslyPlan[]; assets:
     .filter((p) => new Date(p.scheduled_for).getTime() >= since)
     .sort((a, b) => a.scheduled_for.localeCompare(b.scheduled_for));
 
+  const resend = (id: string) => {
+    setRemoving(id);
+    start(async () => {
+      const res = await resendFanslyPost(id);
+      if (res.error) toast.error(res.error);
+      else toast.success("Sent to the VA again");
+      setRemoving(null);
+      router.refresh();
+    });
+  };
   const remove = (id: string) => {
     setRemoving(id);
     start(async () => {
@@ -279,15 +289,28 @@ export function FanslyPlanList({ plans, assets }: { plans: FanslyPlan[]; assets:
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-1">
                     <p className="text-xs font-semibold">{when(p.scheduled_for)}</p>
-                    <button
-                      type="button"
-                      onClick={() => remove(p.id)}
-                      disabled={removing === p.id}
-                      className="-mr-1 -mt-1 rounded-full p-1 text-white/45 hover:text-rose-300"
-                      title="Take back"
-                    >
-                      {removing === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-                    </button>
+                    {removing === p.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-white/45" />
+                    ) : (
+                      <span className="-mr-1 -mt-1 flex">
+                        <button
+                          type="button"
+                          onClick={() => resend(p.id)}
+                          className="rounded-full p-1 text-white/45 hover:text-white"
+                          title="Send to the VA again"
+                        >
+                          <RotateCw className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => remove(p.id)}
+                          className="rounded-full p-1 text-white/45 hover:text-rose-300"
+                          title="Take back"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-white/60">
                     {p.price ? `PPV $${Number(p.price).toFixed(2)}` : "Free"}

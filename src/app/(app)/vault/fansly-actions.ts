@@ -79,13 +79,12 @@ export async function planFanslyPost(input: {
   const req = asset?.content_requests as unknown as { persona_id: string; title: string | null } | null;
   if (!asset || req?.persona_id !== personaId) return { error: "Cut not found" };
 
-  const admin = createAdminClient();
-  const { data: cfg } = await admin
+  const { data: cfg } = await createAdminClient()
     .from("telegram_config")
-    .select("chat_id, fansly_thread_id, va_username, fansly_va_username")
+    .select("fansly_thread_id")
     .eq("persona_id", personaId)
     .maybeSingle();
-  if (!cfg?.chat_id || !cfg.fansly_thread_id) return { error: "No Fansly topic set for this model" };
+  if (!cfg?.fansly_thread_id) return { error: "No Fansly topic set for this model" };
 
   const { data: row, error: insErr } = await supabase
     .from("fansly_posts")
@@ -103,21 +102,74 @@ export async function planFanslyPost(input: {
     .single();
   if (insErr || !row) return { error: insErr?.message ?? "Could not save" };
 
-  // The task: who, the day and the time (LA) on lines of their own, the
-  // price, FYP — every Fansly post goes there — the note, then the caption.
+  const error = await deliver(supabase, personaId, row.id);
+  revalidatePath("/vault");
+  return { error: error ? `Saved, but not sent to the VA: ${error}` : null };
+}
+
+/** Sends a plan to the VA again, as it stands now, in place of its old task. */
+export async function resendFanslyPost(id: string): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const personaId = await requireActivePersonaId();
+  if (!(await staff(supabase, personaId))) return { error: "Only owners and managers" };
+  const { data: row } = await supabase
+    .from("fansly_posts")
+    .select("message_id")
+    .eq("id", id)
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!row) return { error: "Not found" };
+  const { data: cfg } = await createAdminClient()
+    .from("telegram_config")
+    .select("chat_id")
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (row.message_id && cfg?.chat_id) await deleteMessage({ chat_id: cfg.chat_id, message_id: Number(row.message_id) });
+  const error = await deliver(supabase, personaId, id);
+  revalidatePath("/vault");
+  return { error };
+}
+
+/**
+ * The task in the VA's Fansly topic: who, the day and the time (LA) on lines
+ * of their own, the price, FYP — every Fansly post goes there — the note,
+ * the caption to copy, and the cut as its original file. Returns what went
+ * wrong, or null.
+ */
+async function deliver(supabase: Sb, personaId: string, postId: string): Promise<string | null> {
+  const { data: post } = await supabase
+    .from("fansly_posts")
+    .select("id, asset_id, scheduled_for, caption, price, note")
+    .eq("id", postId)
+    .maybeSingle();
+  if (!post) return "Plan not found";
+  const { data: asset } = await supabase
+    .from("content_assets")
+    .select("file_path, file_name, mime_type, size_bytes")
+    .eq("id", post.asset_id)
+    .maybeSingle();
+  if (!asset) return "Cut not found";
+  const { data: cfg } = await createAdminClient()
+    .from("telegram_config")
+    .select("chat_id, fansly_thread_id, va_username, fansly_va_username")
+    .eq("persona_id", personaId)
+    .maybeSingle();
+  if (!cfg?.chat_id || !cfg.fansly_thread_id) return "No Fansly topic set for this model";
+
+  const price = post.price ? Number(post.price) : null;
   const va = (cfg.fansly_va_username ?? cfg.va_username)?.replace(/^@/, "");
   const head = [
     `📅 <b>Fansly post</b>${va ? ` · @${esc(va)}` : ""}`,
     "",
-    `🗓 <b>${esc(laDate(when.toISOString()))}</b>`,
-    `⏰ <b>${esc(laClock(when.toISOString()))}</b> LA time`,
+    `🗓 <b>${esc(laDate(post.scheduled_for))}</b>`,
+    `⏰ <b>${esc(laClock(post.scheduled_for))}</b> LA time`,
     price ? `💰 PPV $${price.toFixed(2)}` : "🆓 Free post",
     "🔥 FYP post",
-    note ? `📝 ${esc(note)}` : null,
+    post.note ? `📝 ${esc(post.note)}` : null,
   ]
     .filter((l) => l !== null)
     .join("\n");
-  const body = caption ? `\n\n<b>Caption</b> (tap to copy):\n<pre>${esc(caption)}</pre>` : "\n\n<i>No caption</i>";
+  const body = post.caption ? `\n\n<b>Caption</b> (tap to copy):\n<pre>${esc(post.caption)}</pre>` : "\n\n<i>No caption</i>";
   const together = head + body;
   const fits = together.length <= MAX_CAPTION;
 
@@ -156,16 +208,15 @@ export async function planFanslyPost(input: {
       error = null;
     } else error = sent.error ?? error ?? "Not sent";
   } else if (!fits) {
-    // The caption did not fit under the video: it follows as a reply.
+    // The caption did not fit under the file: it follows as a reply.
     await sendMessage({ ...thread, text: body.trim(), parse_mode: "HTML", reply_to_message_id: messageId });
   }
 
   await supabase
     .from("fansly_posts")
     .update({ status: messageId != null ? "sent" : "failed", message_id: messageId, error })
-    .eq("id", row.id);
-  revalidatePath("/vault");
-  return { error: messageId != null ? null : `Saved, but not sent to the VA: ${error}` };
+    .eq("id", post.id);
+  return messageId != null ? null : error;
 }
 
 /** Takes a plan back, and the task out of the VA's topic. */
