@@ -11,8 +11,10 @@ import {
   captionFor,
   cleanSlots,
   deliver,
+  examplesOf,
   fillDrafts,
   readSchedule,
+  recaptionDrafts,
   withHashtags,
 } from "@/lib/fansly-plan";
 
@@ -176,25 +178,29 @@ export async function regenerateFanslyCaption(id: string): Promise<{ error: stri
     .maybeSingle();
   if (!post) return { error: "Not found" };
   const admin = createAdminClient();
-  const [{ data: asset }, schedule, { data: past }] = await Promise.all([
+  const [{ data: asset }, schedule, examples] = await Promise.all([
     admin.from("content_assets").select("thumbnail_path").eq("id", post.asset_id).maybeSingle(),
     readSchedule(admin, personaId),
-    admin
-      .from("fansly_posts")
-      .select("caption, caption_source")
-      .eq("persona_id", personaId)
-      .order("created_at", { ascending: false })
-      .limit(30),
+    examplesOf(admin, personaId),
   ]);
-  const examples = (past ?? [])
-    .filter((p) => p.caption_source !== "emoji")
-    .map((p) => p.caption.replace(/#[^\s#]+/g, "").trim())
-    .filter((l) => l.length > 8);
   const c = await captionFor(admin, asset?.thumbnail_path ?? null, examples);
   const caption = withHashtags(c.text, schedule.hashtags);
   const { error } = await supabase.from("fansly_posts").update({ caption, caption_source: c.source }).eq("id", id);
   done(error);
   return { error: error?.message ?? null, caption };
+}
+
+/** New captions for every draft the app wrote, after the style changed. */
+export async function recaptionFanslyDrafts(): Promise<{ error: string | null; count?: number }> {
+  const { personaId, userId } = await ctx();
+  if (!userId) return DENIED;
+  try {
+    const count = await recaptionDrafts(createAdminClient(), personaId);
+    revalidatePath("/vault");
+    return { error: null, count };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not write captions" };
+  }
 }
 
 /** Fill the free times of the next two weeks now, instead of waiting for the morning. */

@@ -31,6 +31,7 @@ import {
   fillFanslyNow,
   moveFanslyPost,
   planFanslyPost,
+  recaptionFanslyDrafts,
   regenerateFanslyCaption,
   removeFanslyPost,
   resendFanslyPost,
@@ -738,6 +739,24 @@ export function FanslyCalendar({
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />} Fill now
           </button>
+          {drafts.length > 0 && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                start(async () => {
+                  const res = await recaptionFanslyDrafts();
+                  if (res.error) toast.error(res.error);
+                  else toast.success(`${res.count ?? 0} drafts have new captions`);
+                  router.refresh();
+                })
+              }
+              className="glass-pill flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+              title="Claude writes every draft's caption again; captions you wrote yourself stay"
+            >
+              <Sparkles className="h-3.5 w-3.5" /> New captions
+            </button>
+          )}
           {drafts.length > 0 && (
             <button
               type="button"

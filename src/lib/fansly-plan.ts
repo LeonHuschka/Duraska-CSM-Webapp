@@ -63,10 +63,15 @@ const Caption = z.object({
   caption: z.string(),
 });
 
-const SYSTEM = `You write captions for a creator's teaser posts on Fansly. You get one frame of the short video.
-Write one short first-person line in casual English the way she talks to her fans — flirty and teasing, like the examples — at most about 90 characters, ending with one or two fitting emojis.
-Only write a line when the picture makes clear what happens (where she is, what she does or wears). If you are not sure, set sure to false and the caption to two or three fitting emojis only.
-Never add hashtags; they are added afterwards.`;
+const SYSTEM = `You write captions for a creator's posts on Fansly, an adult subscription site; her fans are there for sexual content. You get one frame of the short video.
+The caption is her voice whispering to a fan: one very short line, first person, lowercase, sexual and suggestive — what she wants done to her, what she is about to do, how it feels. Short and direct hits harder than clever or descriptive.
+Keep it to about 3 to 10 words. Do not describe the picture, do not mention clothes, the room or the camera. Now and then — about one caption in four — it may end in a short call to action (e.g. "come see the rest", "check your dms").
+End with exactly one fitting emoji, written straight after the last word with no space.
+If the picture does not make clear what is going on, set sure to false and the caption to one or two fitting emojis only.
+Never add hashtags or quotes; hashtags are added afterwards.`;
+
+/** Her voice: the captions the team wrote that hit the way Fansly needs. */
+const STYLE = ["could you please finish me up so I fall asleep now👀", "omg I like it that way👅"];
 
 /** A caption for a cut from its picture: Claude's line, or emojis when unsure. */
 export async function captionFor(
@@ -98,7 +103,7 @@ export async function captionFor(
                 data: Buffer.from(await file.arrayBuffer()).toString("base64"),
               },
             },
-            { type: "text", text: shown ? `Captions she used before:\n${shown}\n\nWrite the caption for this one.` : "Write the caption for this one." },
+            { type: "text", text: `Captions in her voice — match how short and sexual they are, never copy one:\n${shown}\n\nWrite the caption for this one.` },
           ],
         },
       ],
@@ -118,18 +123,55 @@ export async function captionFor(
 export const withHashtags = (line: string, hashtags: string) => [line.trim(), hashtags.trim()].filter(Boolean).join(" ");
 
 /** Her past captions without their hashtags, newest first — the voice to write in. */
-async function examplesOf(db: Db, personaId: string): Promise<string[]> {
+/**
+ * The captions to write like: the team's own, never the app's — learning
+ * from its own lines would only repeat them.
+ */
+export async function examplesOf(db: Db, personaId: string): Promise<string[]> {
   const { data } = await db
     .from("fansly_posts")
     .select("caption, caption_source")
     .eq("persona_id", personaId)
+    .or("caption_source.is.null,caption_source.eq.manual")
     .order("created_at", { ascending: false })
     .limit(40);
-  const lines = (data ?? [])
-    .filter((p) => p.caption_source !== "emoji")
-    .map((p) => p.caption.replace(/#[^\s#]+/g, "").trim())
-    .filter((l) => l.length > 8);
-  return Array.from(new Set(lines)).slice(0, 8);
+  const lines = (data ?? []).map((p) => p.caption.replace(/#[^\s#]+/g, "").trim()).filter((l) => l.length > 3);
+  return Array.from(new Set([...STYLE, ...lines])).slice(0, 10);
+}
+
+/** New captions for the drafts still to come whose caption the app wrote. */
+export async function recaptionDrafts(db: Db, personaId: string): Promise<number> {
+  const [{ data: drafts }, schedule, examples] = await Promise.all([
+    db
+      .from("fansly_posts")
+      .select("id, asset_id")
+      .eq("persona_id", personaId)
+      .eq("status", "draft")
+      .in("caption_source", ["ai", "emoji"])
+      .gte("scheduled_for", new Date().toISOString()),
+    readSchedule(db, personaId),
+    examplesOf(db, personaId),
+  ]);
+  if (!drafts?.length) return 0;
+  const { data: assets } = await db.from("content_assets").select("id, thumbnail_path").in("id", drafts.map((d) => d.asset_id));
+  const thumb = new Map((assets ?? []).map((a) => [a.id, a.thumbnail_path]));
+  let next = 0;
+  let done = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, drafts.length) }, async () => {
+      while (next < drafts.length) {
+        const d = drafts[next++];
+        const c = await captionFor(db, thumb.get(d.asset_id) ?? null, examples);
+        const { error } = await db
+          .from("fansly_posts")
+          .update({ caption: withHashtags(c.text, schedule.hashtags), caption_source: c.source })
+          .eq("id", d.id)
+          .eq("status", "draft");
+        if (!error) done++;
+      }
+    })
+  );
+  return done;
 }
 
 // ── Filling the calendar ──
