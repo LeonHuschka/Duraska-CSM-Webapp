@@ -1,10 +1,10 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, Check, Loader2, RotateCw, Send, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, Hash, Loader2, RotateCw, Save, Send, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -108,6 +108,21 @@ export function FanslyPlannedBadge({ assetId }: { assetId: string }) {
   );
 }
 
+/** The hashtags that go under most posts, until saved otherwise on this device. */
+const DEFAULT_TAGS =
+  "#brunette #naturalbeauty #girlnextdoor #hotbrunette #squirting #wetpussy #prettyface #ass #booty #tits #boobs #pussy #curves";
+const TAGS_KEY = "fansly-default-hashtags";
+/** A tap away, for when the system picker will not land in the box. */
+const QUICK_EMOJI = ["👅", "💦", "🔥", "👀", "😈", "🍑", "💋", "🥵", "😏", "🫦", "🤤", "❤️"];
+
+function readTags(): string {
+  try {
+    return window.localStorage.getItem(TAGS_KEY) || DEFAULT_TAGS;
+  } catch {
+    return DEFAULT_TAGS;
+  }
+}
+
 function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () => void }) {
   const router = useRouter();
   const tomorrow = dayKey(new Date(Date.now() + 86_400_000), TZ);
@@ -117,7 +132,44 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
   const [ppv, setPpv] = useState(false);
   const [price, setPrice] = useState("");
   const [note, setNote] = useState("");
+  const [tags, setTags] = useState(DEFAULT_TAGS);
   const [busy, start] = useTransition();
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => setTags(readTags()), []);
+
+  /** Put text where the cursor is, or at the end, and keep typing after it. */
+  const insert = (text: string) => {
+    const el = box.current;
+    const at = el ? el.selectionStart : caption.length;
+    const to = el ? el.selectionEnd : caption.length;
+    const next = (caption.slice(0, at) + text + caption.slice(to)).slice(0, 3000);
+    setCaption(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(at + text.length, at + text.length);
+    });
+  };
+  /** The default hashtags at the end, leaving out the ones already in. */
+  const addTags = () => {
+    const have = new Set((caption.match(/#[^\s#]+/g) ?? []).map((t) => t.toLowerCase()));
+    const add = tags.split(/\s+/).filter((t) => t.startsWith("#") && !have.has(t.toLowerCase()));
+    if (!add.length) return void toast.message("The hashtags are already in");
+    setCaption((c) => `${c.trimEnd()}${c.trim() ? " " : ""}${add.join(" ")}`.slice(0, 3000));
+  };
+  /** The hashtags in the caption become the default, on this device. */
+  const saveTags = () => {
+    const found = caption.match(/#[^\s#]+/g) ?? [];
+    if (!found.length) return void toast.error("No hashtags in the caption to save");
+    const next = Array.from(new Set(found)).join(" ");
+    setTags(next);
+    try {
+      window.localStorage.setItem(TAGS_KEY, next);
+    } catch {
+      /* private mode: the default stays for this visit only */
+    }
+    toast.success(`${found.length} hashtags saved as default`);
+  };
 
   const reset = () => {
     setDate(dayKey(new Date(Date.now() + 86_400_000), TZ));
@@ -148,7 +200,13 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
 
   return (
     <Dialog open={!!asset} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        className="max-w-lg"
+        // The macOS emoji picker is a window of its own; picking from it must
+        // not count as leaving the dialog, or the emoji never lands.
+        onFocusOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Plan on Fansly</DialogTitle>
         </DialogHeader>
@@ -178,12 +236,44 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
                 <span className="tabular-nums text-muted-foreground">{caption.length}/3000</span>
               </div>
               <Textarea
+                ref={box}
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 maxLength={3000}
                 rows={5}
                 placeholder="What goes under the post"
               />
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {QUICK_EMOJI.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => insert(e)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-base transition-colors hover:bg-white/10"
+                    title={`Add ${e}`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addTags}
+                  className="glass-pill flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-white/85 hover:text-white"
+                  title={tags}
+                >
+                  <Hash className="h-3.5 w-3.5" /> Add default hashtags
+                </button>
+                <button
+                  type="button"
+                  onClick={saveTags}
+                  className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-[11px] text-white/50 hover:text-white"
+                  title="Make the hashtags in this caption the default"
+                >
+                  <Save className="h-3 w-3" /> Save these as default
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
