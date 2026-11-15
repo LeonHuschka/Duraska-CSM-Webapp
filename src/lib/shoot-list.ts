@@ -12,7 +12,7 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { APP_URL, cellName, type Dimension } from "@/lib/trials";
+import { APP_URL, type Dimension } from "@/lib/trials";
 
 /**
  * The SHOOTING topic: one message a day with the reels to shoot. The
@@ -171,18 +171,20 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
       : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
   const foot =
     `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.` +
-    (trial.lines.length ? `\n🧪 opens the upload of a trial box, with what to do in it.` : "");
+    (trial.lines.length ? `\n👗 🏠 🪝 open the upload of a trial box (outfit, location, hook), with what to do in it.` : "");
   return {
     text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
     keyboard: [...keyboard, ...trial.keyboard],
   };
 }
 
+/** The upload of a trial box: 📍 is taken by the inspo, so a location is a 🏠. */
+const BOX_EMOJI: Record<Dimension, string> = { outfit: "👗", location: "🏠", hook: "🪝" };
+
 /**
  * The running Trial-Maxxing trials, kept short: how many boxes she is asked
  * to shoot, with one link to the trials in the app. The briefs live on the
- * upload page; below, one row a trial — a 🧪 upload per box, then the
- * outlier it reshoots.
+ * upload page; below, per trial its inspo, then a small upload per box.
  */
 async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
   const { data: trials } = await db
@@ -210,14 +212,16 @@ async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; 
     // The reel by the name the team gave it — the handle tells her nothing.
     const who = trialName(t);
     if (!asked.length) continue;
-    // One row a trial: a 🧪 upload per box, then the outlier under its name.
-    const row: LinkButton[] = [];
-    for (const c of asked.slice(0, 3)) {
+    // Telegram gives every button in a row the same width, so the inspo
+    // gets a row of its own to stay readable on a phone, and the uploads
+    // sit small under it: the round's emoji and the box's number.
+    keyboard.push([{ text: `📍 ${who} · Inspo`, url: t.post_url ?? `${APP_URL}/trials/${t.id}` }]);
+    const uploads: LinkButton[] = [];
+    for (const c of asked.slice(0, 4)) {
       const url = shootUrl(c.id, "cell");
-      if (url) row.push({ text: `🧪 ${cellName({ dimension: c.dimension as Dimension, slot: c.slot, label: c.label })}`, url });
+      if (url) uploads.push({ text: `${BOX_EMOJI[c.dimension as Dimension]} ${c.slot}`, url });
     }
-    row.push({ text: `📍 ${who}`, url: t.post_url ?? `${APP_URL}/trials/${t.id}` });
-    keyboard.push(row);
+    if (uploads.length) keyboard.push(uploads);
   }
   if (!open) return { lines: [], keyboard: [] };
   return {
