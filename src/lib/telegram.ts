@@ -53,6 +53,12 @@ export async function sendVideo(opts: {
   parse_mode?: "HTML" | "Markdown";
   /** One row of link buttons under the message. */
   buttons?: { text: string; url: string }[];
+  /** The shape and length; without them Telegram guesses, and may stretch it. */
+  width?: number;
+  height?: number;
+  duration?: number | null;
+  /** The file's own type — a .mov sent as mp4 is drawn wrong. */
+  mime?: string | null;
 }): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
   const t = token();
   if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
@@ -60,6 +66,11 @@ export async function sendVideo(opts: {
   form.append("chat_id", String(opts.chat_id));
   if (opts.buttons?.length) form.append("reply_markup", JSON.stringify({ inline_keyboard: [opts.buttons] }));
   if (opts.message_thread_id) form.append("message_thread_id", String(opts.message_thread_id));
+  if (opts.width && opts.height) {
+    form.append("width", String(opts.width));
+    form.append("height", String(opts.height));
+  }
+  if (opts.duration) form.append("duration", String(Math.round(opts.duration)));
   if (opts.reply_to_message_id) {
     form.append("reply_to_message_id", String(opts.reply_to_message_id));
     // Still post if the link message has since been deleted.
@@ -73,7 +84,7 @@ export async function sendVideo(opts: {
   form.append("disable_notification", "true");
   form.append(
     "video",
-    new Blob([opts.video as BlobPart], { type: "video/mp4" }),
+    new Blob([opts.video as BlobPart], { type: opts.mime || "video/mp4" }),
     opts.filename ?? "video.mp4"
   );
   try {

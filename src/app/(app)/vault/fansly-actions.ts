@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
-import { deleteMessage, sendDocument, sendMessage } from "@/lib/telegram";
+import { deleteMessage, sendDocument, sendMessage, sendVideo } from "@/lib/telegram";
+import { videoInfo } from "@/lib/video-info";
 
 /**
  * The Fansly planner. A Fansly cut, planned for a time with its caption,
@@ -180,17 +181,32 @@ async function deliver(supabase: Sb, personaId: string, postId: string): Promise
   if ((asset.size_bytes ?? 0) <= MAX_VIDEO_BYTES) {
     const { data: file } = await supabase.storage.from("content-assets").download(asset.file_path);
     if (file) {
-      // As a file, not a video: sent as a video it came out stretched — the
-      // vault knows no width or height to give Telegram, and a .mov sent
-      // as .mp4 made it guess. The file is also what she uploads to Fansly.
-      const sent = await sendDocument({
-        ...thread,
-        file: new Uint8Array(await file.arrayBuffer()),
-        filename: asset.file_name,
-        mime: asset.mime_type,
-        caption: fits ? together : head,
-        parse_mode: "HTML",
-      });
+      // A playable video, at its true shape: Telegram stretched it when it
+      // had to guess, so the width, height and length are read from the
+      // file's own header and sent along, with its real name and type.
+      // A file whose header says nothing goes as a plain file instead.
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const info = videoInfo(bytes);
+      const sent = info
+        ? await sendVideo({
+            ...thread,
+            video: bytes,
+            filename: asset.file_name,
+            mime: asset.mime_type,
+            width: info.width,
+            height: info.height,
+            duration: info.duration,
+            caption: fits ? together : head,
+            parse_mode: "HTML",
+          })
+        : await sendDocument({
+            ...thread,
+            file: bytes,
+            filename: asset.file_name,
+            mime: asset.mime_type,
+            caption: fits ? together : head,
+            parse_mode: "HTML",
+          });
       if (sent.ok) messageId = sent.result?.message_id ?? null;
       else error = sent.error ?? "Video not sent";
     } else error = "Video could not be read";
