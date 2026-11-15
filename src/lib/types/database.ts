@@ -1355,6 +1355,7 @@ export type Database = {
           slow_post_days: number;
           reports_thread_id: number | null;
           fansly_thread_id: number | null;
+          shoot_trial_messages: Json;
           last_daily_report_at: string | null;
           last_weekly_report_at: string | null;
           shoot_notice_message_id: number | null;
@@ -1392,6 +1393,7 @@ export type Database = {
           slow_post_days?: number;
           reports_thread_id?: number | null;
           fansly_thread_id?: number | null;
+          shoot_trial_messages?: Json;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;
@@ -1429,6 +1431,7 @@ export type Database = {
           slow_post_days?: number;
           reports_thread_id?: number | null;
           fansly_thread_id?: number | null;
+          shoot_trial_messages?: Json;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;

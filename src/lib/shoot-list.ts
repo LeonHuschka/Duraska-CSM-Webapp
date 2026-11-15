@@ -12,7 +12,8 @@ import {
   type LinkButton,
 } from "@/lib/telegram";
 import { shootUrl } from "@/lib/shoot-token";
-import { APP_URL, type Dimension } from "@/lib/trials";
+import { APP_URL, DIMENSIONS, DIM_META, type Dimension } from "@/lib/trials";
+import { accountLabel } from "@/lib/account-analytics";
 
 /**
  * The SHOOTING topic: one message a day with the reels to shoot. The
@@ -21,9 +22,10 @@ import { APP_URL, type Dimension } from "@/lib/trials";
  * yesterday first, then the oldest open links, and two of the newest so a
  * fresh trend does not wait for the backlog. Each line has a button to its
  * upload page and one to the inspo in the requests topic, and the message
- * is edited as the reels get shot. Under them, the running Trial-Maxxing
- * rounds, each with a button to its matrix in the app. There is only ever
- * one list in the topic: the morning's replaces yesterday's.
+ * is edited as the reels get shot. Under it, a message of its own per
+ * running Trial-Maxxing winner, with the buttons that belong to it alone.
+ * There is only ever one list in the topic: the morning's replaces
+ * yesterday's, and the winner messages with it.
  */
 export const SHOOT_PER_DAY = 5;
 
@@ -164,71 +166,116 @@ async function render(db: Db, personaId: string, day: string, ids: string[]): Pr
     keyboard.push([...(upload ? [{ text: `🎥 ${n} · Upload takes`, url: upload }] : []), jump]);
   });
 
-  const trial = await trialPart(db, personaId);
   const head =
     links.length === 0
       ? `🎬 <b>To shoot · ${date}</b>\n\nNothing open — every inspo link is shot. New ones go into the requests topic.`
       : `🎬 <b>To shoot · ${date}</b> — <b>${done}/${links.length}</b>${done === links.length ? " 🎉" : ""}\n\n${lines.join("\n")}`;
-  const foot =
-    `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.` +
-    (trial.lines.length ? `\n👗 🏠 🪝 open the upload of a trial box (outfit, location, hook), with what to do in it.` : "");
-  return {
-    text: [head, ...(trial.lines.length ? [trial.lines.join("\n")] : []), foot].join("\n\n"),
-    keyboard: [...keyboard, ...trial.keyboard],
-  };
+  const foot = `🎥 opens the upload with the inspo and notes filled in — add the videos and send.\n📍 jumps to the inspo.`;
+  return { text: [head, foot].join("\n\n"), keyboard };
 }
 
 /** The upload of a trial box: 📍 is taken by the inspo, so a location is a 🏠. */
 const BOX_EMOJI: Record<Dimension, string> = { outfit: "👗", location: "🏠", hook: "🪝" };
 
+type TrialMessage = { trialId: string; text: string; keyboard: LinkButton[][] };
+
+const compact = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
 /**
- * The running Trial-Maxxing trials, kept short: how many boxes she is asked
- * to shoot, with one link to the trials in the app. The briefs live on the
- * upload page; below, per trial its inspo, then a small upload per box.
+ * A message per running Trial-Maxxing winner, under the morning's list:
+ * which winner, the round it is at and how much of it is shot, a link to
+ * it in the hub — and below, only its own buttons: the inspo across the
+ * width so it reads on a phone, then a small upload per box she is asked
+ * to shoot, the round's emoji and the box's number.
  */
-async function trialPart(db: Db, personaId: string): Promise<{ lines: string[]; keyboard: LinkButton[][] }> {
+async function trialMessages(db: Db, personaId: string): Promise<TrialMessage[]> {
   const { data: trials } = await db
     .from("trials")
-    .select("id, created_at, nickname, caption, post_url")
+    .select("id, created_at, nickname, caption, post_url, phase, views, account_id")
     .eq("persona_id", personaId)
     .eq("status", "active")
     .neq("phase", "done")
     .order("created_at", { ascending: true });
-  if (!trials?.length) return { lines: [], keyboard: [] };
-  const { data: cells } = await db
-    .from("trial_cells")
-    .select("id, trial_id, dimension, slot, label, finished_at, requested_at")
-    .in("trial_id", trials.map((t) => t.id))
-    .order("slot");
+  if (!trials?.length) return [];
+  const accountIds = trials.map((t) => t.account_id).filter((x): x is string => !!x);
+  const [{ data: cells }, { data: accounts }] = await Promise.all([
+    db
+      .from("trial_cells")
+      .select("id, trial_id, dimension, slot, finished_at, requested_at")
+      .in("trial_id", trials.map((t) => t.id))
+      .order("slot"),
+    accountIds.length ? db.from("accounts").select("id, handle").in("id", accountIds) : Promise.resolve({ data: [] as { id: string; handle: string }[] }),
+  ]);
+  const handle = new Map((accounts ?? []).map((a) => [a.id, a.handle]));
 
-  const keyboard: LinkButton[][] = [];
-  let open = 0;
-  for (const t of trials) {
+  return trials.map((t, i) => {
+    const mine = (cells ?? []).filter((c) => c.trial_id === t.id);
+    // The round it is at: the furthest one begun, which is often ahead of the phase.
+    let at: { d: Dimension; done: number; of: number } | null = null;
+    for (const d of DIMENSIONS) {
+      const round = mine.filter((c) => c.dimension === d);
+      const done = round.filter((c) => c.finished_at).length;
+      if (round.length && (d === t.phase || done > 0)) at = { d, done, of: round.length };
+    }
     // What the team asked her to shoot and she has not finished yet.
-    const asked = (cells ?? [])
-      .filter((c) => c.trial_id === t.id && c.requested_at && !c.finished_at)
+    const asked = mine
+      .filter((c) => c.requested_at && !c.finished_at)
       .sort((a, b) => (a.requested_at ?? "").localeCompare(b.requested_at ?? ""));
-    open += asked.length;
-    // The reel by the name the team gave it — the handle tells her nothing.
-    const who = trialName(t);
-    if (!asked.length) continue;
-    // Telegram gives every button in a row the same width, so the inspo
-    // gets a row of its own to stay readable on a phone, and the uploads
-    // sit small under it: the round's emoji and the box's number.
-    keyboard.push([{ text: `📍 ${who} · Inspo`, url: t.post_url ?? `${APP_URL}/trials/${t.id}` }]);
+    const acc = t.account_id ? handle.get(t.account_id) : null;
+    const lines = [`🏆 <b>WINNER ${i + 1} · ${esc(trialName(t))}</b>`];
+    if (t.views) lines.push(`🔥 ${compact(Number(t.views))} plays${acc ? ` on ${esc(accountLabel(acc))}` : ""}`);
+    if (at) lines.push(`${DIM_META[at.d].emoji} Round ${DIM_META[at.d].round}/3 · ${DIM_META[at.d].title} — <b>${at.done}/${at.of}</b> shot`);
+    lines.push(asked.length ? `📲 <b>${asked.length}</b> to shoot — tap a box below` : "Nothing to shoot right now.");
+    lines.push(`👉 <a href="${APP_URL}/trials/${t.id}">Open it in the hub</a>`);
+
+    const keyboard: LinkButton[][] = [[{ text: "📍 Inspo", url: t.post_url ?? `${APP_URL}/trials/${t.id}` }]];
     const uploads: LinkButton[] = [];
-    for (const c of asked.slice(0, 4)) {
+    for (const c of asked) {
       const url = shootUrl(c.id, "cell");
       if (url) uploads.push({ text: `${BOX_EMOJI[c.dimension as Dimension]} ${c.slot}`, url });
     }
-    if (uploads.length) keyboard.push(uploads);
-  }
-  if (!open) return { lines: [], keyboard: [] };
-  return {
-    lines: [`🧪 <b>Trial-Maxxing</b> · <b>${open}</b> to shoot — <a href="${APP_URL}/trials">open the trials</a>`],
-    keyboard,
-  };
+    for (let k = 0; k < uploads.length; k += 4) keyboard.push(uploads.slice(k, k + 4));
+    return { trialId: t.id, text: lines.join("\n"), keyboard };
+  });
 }
+
+type Thread = { chat_id: number; message_thread_id: number };
+
+/** Post the winner messages under the list, after clearing the ones before. */
+async function postTrialMessages(db: Db, personaId: string, thread: Thread, old: Record<string, number>) {
+  for (const id of Object.values(old)) await deleteMessage({ chat_id: thread.chat_id, message_id: Number(id) });
+  const map: Record<string, number> = {};
+  for (const m of await trialMessages(db, personaId)) {
+    const sent = await sendMessage({ ...thread, text: m.text, keyboard: m.keyboard, disable_notification: true });
+    if (sent.ok && sent.result) map[m.trialId] = sent.result.message_id;
+  }
+  await db.from("telegram_config").update({ shoot_trial_messages: map }).eq("persona_id", personaId);
+}
+
+/** Bring the winner messages up to date: edit, add the new, drop the ended. */
+async function refreshTrialMessages(db: Db, personaId: string, thread: Thread, old: Record<string, number>) {
+  const now = await trialMessages(db, personaId);
+  const map: Record<string, number> = {};
+  for (const m of now) {
+    const id = old[m.trialId];
+    if (id) {
+      const res = await editMessageText({ chat_id: thread.chat_id, message_id: Number(id), text: m.text, keyboard: m.keyboard });
+      if (res.ok || /not modified/i.test(res.error ?? "")) {
+        map[m.trialId] = Number(id);
+        continue;
+      }
+    }
+    const sent = await sendMessage({ ...thread, text: m.text, keyboard: m.keyboard, disable_notification: true });
+    if (sent.ok && sent.result) map[m.trialId] = sent.result.message_id;
+  }
+  for (const [trialId, id] of Object.entries(old)) {
+    if (!map[trialId]) await deleteMessage({ chat_id: thread.chat_id, message_id: Number(id) });
+  }
+  await db.from("telegram_config").update({ shoot_trial_messages: map }).eq("persona_id", personaId);
+}
+
+const asMap = (v: unknown): Record<string, number> =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, number>) : {};
 
 /** What a trial is called for her: its nickname, else the first words of its caption. */
 function trialName(t: { nickname: string | null; caption: string | null }): string {
@@ -253,7 +300,7 @@ function trialName(t: { nickname: string | null; caption: string | null }): stri
 export async function postShootList(db: Db, personaId: string, fresh = false): Promise<string> {
   const { data: cfg } = await db
     .from("telegram_config")
-    .select("chat_id, shoot_thread_id, shoot_list_message_id, shoot_list_day, shoot_list_links")
+    .select("chat_id, shoot_thread_id, shoot_list_message_id, shoot_list_day, shoot_list_links, shoot_trial_messages")
     .eq("persona_id", personaId)
     .maybeSingle();
   if (!cfg?.chat_id || !cfg.shoot_thread_id) return "no SHOOTING topic";
@@ -282,6 +329,12 @@ export async function postShootList(db: Db, personaId: string, fresh = false): P
     .update({ shoot_list_message_id: messageId, shoot_list_day: today, shoot_list_links: ids })
     .eq("persona_id", personaId);
   const pin = await pinChatMessage({ chat_id: cfg.chat_id, message_id: messageId });
+  await postTrialMessages(
+    db,
+    personaId,
+    { chat_id: Number(cfg.chat_id), message_thread_id: Number(cfg.shoot_thread_id) },
+    asMap(cfg.shoot_trial_messages)
+  );
   return `${ids.length} reels${pin.ok ? "" : ` (not pinned: ${pin.error})`}`;
 }
 
@@ -290,7 +343,7 @@ export async function refreshShootList(db: Db, personaId: string): Promise<void>
   try {
     const { data: cfg } = await db
       .from("telegram_config")
-      .select("chat_id, shoot_list_message_id, shoot_list_day, shoot_list_links")
+      .select("chat_id, shoot_thread_id, shoot_list_message_id, shoot_list_day, shoot_list_links, shoot_trial_messages")
       .eq("persona_id", personaId)
       .maybeSingle();
     if (!cfg?.chat_id || !cfg.shoot_list_message_id || !cfg.shoot_list_day) return;
@@ -302,6 +355,14 @@ export async function refreshShootList(db: Db, personaId: string): Promise<void>
       keyboard,
     });
     if (!res.ok && !/not modified/i.test(res.error ?? "")) console.warn("[shoot-list] not edited:", res.error);
+    if (cfg.shoot_thread_id) {
+      await refreshTrialMessages(
+        db,
+        personaId,
+        { chat_id: Number(cfg.chat_id), message_thread_id: Number(cfg.shoot_thread_id) },
+        asMap(cfg.shoot_trial_messages)
+      );
+    }
   } catch (err) {
     console.warn("[shoot-list] refresh failed", err);
   }
