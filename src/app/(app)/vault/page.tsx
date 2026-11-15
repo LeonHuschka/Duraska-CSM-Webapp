@@ -84,7 +84,9 @@ export interface VaultMember {
   name: string;
 }
 
-export default async function VaultPage({ searchParams }: { searchParams: { reel?: string } }) {
+export default async function VaultPage({ searchParams }: { searchParams: { reel?: string; view?: string } }) {
+  // "?view=fansly": the rail's shortcut to the Fansly calendar.
+  const initialView = searchParams.view === "fansly" ? "fansly" : null;
   // "?reel=<job id>[,<job id>]": the bot's link to the cuts of one reel.
   const onlyReels = (searchParams.reel ?? "").split(",").filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   const supabase = await createClient();
@@ -394,6 +396,8 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
 
   return (
     <VaultView
+      key={initialView ?? "all"}
+      initialView={initialView}
       assets={assetsWithUrls}
       accounts={accounts}
       viewer={viewer}

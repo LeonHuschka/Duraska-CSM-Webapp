@@ -3,19 +3,24 @@
 import { useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Workflow, Users, Link2 } from "lucide-react";
+import { CalendarHeart, Link2, Trophy, Users, Workflow } from "lucide-react";
 import { switchPersona } from "@/app/(app)/actions";
 import { usePersona } from "@/hooks/use-persona";
 import { cn } from "@/lib/utils";
 
 /**
  * The floating rail on the left: one round button per persona, then the
- * dashboard's three views. The open one is white; hovering names it.
+ * dashboard's three views, then shortcuts to the Fansly calendar and the
+ * winner hub. The open one is white; hovering names it.
  */
 const VIEWS = [
   { key: "pipeline", label: "Pipeline", icon: Workflow, href: "/" },
   { key: "accounts", label: "Accounts", icon: Users, href: "/?tab=accounts" },
   { key: "link", label: "Link", icon: Link2, href: "/?tab=link" },
+];
+const SHORTCUTS = [
+  { key: "fansly", label: "Fansly calendar", icon: CalendarHeart, href: "/vault?view=fansly" },
+  { key: "trials", label: "Winner hub", icon: Trophy, href: "/trials" },
 ];
 const ITEM = "group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all duration-200";
 const ON = "bg-white text-neutral-900 shadow-[0_6px_18px_-4px_rgba(255,255,255,0.5)]";
@@ -31,7 +36,10 @@ export function PersonaRail() {
   const { activePersona, personas } = usePersona();
   const [pending, start] = useTransition();
   const pathname = usePathname();
-  const tab = useSearchParams().get("tab") ?? "pipeline";
+  const params = useSearchParams();
+  const tab = params.get("tab") ?? "pipeline";
+  const on = (key: string) =>
+    key === "fansly" ? pathname === "/vault" && params.get("view") === "fansly" : pathname.startsWith("/trials");
   if (activePersona.role === "model" || personas.length === 0) return null;
   return (
     <aside className="glass-rail fixed left-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-center gap-2 rounded-full p-2 md:flex">
@@ -67,6 +75,13 @@ export function PersonaRail() {
           </Link>
         );
       })}
+      <span className="my-1 h-px w-6 bg-white/20" />
+      {SHORTCUTS.map((v) => (
+        <Link key={v.key} href={v.href} className={cn(ITEM, on(v.key) ? ON : OFF)}>
+          <v.icon className="h-[18px] w-[18px]" />
+          <Tip>{v.label}</Tip>
+        </Link>
+      ))}
     </aside>
   );
 }

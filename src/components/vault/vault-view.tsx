@@ -1039,6 +1039,7 @@ export function VaultView({
   fanslyPlans = [],
   fanslySchedule = null,
   fanslyToday = "",
+  initialView = null,
 }: {
   assets: VaultAsset[];
   accounts: PostingAccount[];
@@ -1049,6 +1050,8 @@ export function VaultView({
   /** The calendar's times and hashtags, and today in LA; null for everyone else. */
   fanslySchedule?: FanslyScheduleView | null;
   fanslyToday?: string;
+  /** Opened from the rail's Fansly shortcut: start on the Fansly view. */
+  initialView?: "fansly" | null;
   /** Opened from a link to certain reels: their cuts only, until cleared. */
   onlyReels?: string[];
 }) {
@@ -1109,7 +1112,7 @@ export function VaultView({
   // or no account names her as manager. Either way, say so instead of
   // showing an empty picker.
   const unassigned = lens !== null && !canSwitch && visibleAccounts.length === 0;
-  const [stageFilter, setStageFilter] = useState<string>("edited");
+  const [stageFilter, setStageFilter] = useState<string>(initialView === "fansly" ? "fansly" : "edited");
   const [nsfwFilter, setNsfwFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
