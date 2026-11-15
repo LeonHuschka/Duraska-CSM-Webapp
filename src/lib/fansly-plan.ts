@@ -20,8 +20,8 @@ export const FANSLY_TZ = "America/Los_Angeles";
 export const DEFAULT_SLOTS = ["11:00", "20:00"];
 export const DEFAULT_HASHTAGS =
   "#brunette #naturalbeauty #girlnextdoor #hotbrunette #squirting #wetpussy #prettyface #ass #booty #tits #boobs #pussy #curves";
-/** How far ahead the calendar is filled. */
-export const FILL_DAYS = 14;
+/** How far ahead the calendar is filled: the days after today it shows (two weeks with today). */
+export const FILL_DAYS = 13;
 
 type Db = ReturnType<typeof createAdminClient>;
 

@@ -693,7 +693,8 @@ export function FanslyCalendar({
     const moving = list.find((p) => p.id === id);
     if (!moving || (dayKey(new Date(moving.scheduled_for), TZ) === day && hhmm(new Date(moving.scheduled_for), TZ) === time)) return;
     const target = atTime(day, time, TZ).toISOString();
-    const other = list.find((p) => p.id !== id && p.scheduled_for === target);
+    // Compared as moments: the database writes "+00:00" where JS writes "Z".
+    const other = list.find((p) => p.id !== id && new Date(p.scheduled_for).getTime() === new Date(target).getTime());
     const before = list;
     setList((l) =>
       l.map((p) =>
