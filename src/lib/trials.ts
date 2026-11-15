@@ -393,6 +393,38 @@ export async function listTrials(supabase: Sb, personaId: string, includeDone = 
   return out;
 }
 
+/** A video she can look at while shooting a box: the outlier, or a winner it builds on. */
+export type ReferenceVideo = { key: string; title: string; sub: string | null; url: string; poster: string | null };
+
+const plays = (n: number | null | undefined) =>
+  n == null ? null : `${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n)} plays`;
+
+/**
+ * What a box builds on: the original outlier first, then the winners of
+ * each round up to its own, in order. The last one is what she shoots
+ * from now: an extra outfit after the outfit winner is picked copies that
+ * winner, not the reel that first went viral.
+ */
+export function referenceVideos(view: TrialView, cell: Pick<CellView, "id" | "dimension">): ReferenceVideo[] {
+  const out: ReferenceVideo[] = [];
+  if (view.video) out.push({ key: "original", title: "Original", sub: plays(view.views), url: view.video, poster: view.cover });
+  const upTo = DIMENSIONS.indexOf(cell.dimension);
+  for (const d of DIMENSIONS.slice(0, upTo + 1)) {
+    for (const c of view.cells) {
+      if (c.dimension !== d || !c.winner || !c.video || c.id === cell.id) continue;
+      const top = c.plays[0]?.views ?? c.views;
+      out.push({
+        key: c.id,
+        title: `🏆 Winner ${DIM_META[d].one}`,
+        sub: [cellName(c), plays(top)].filter(Boolean).join(" · "),
+        url: c.video.url,
+        poster: c.thumb,
+      });
+    }
+  }
+  return out;
+}
+
 /** The names of the cells marked winner in the decided rounds. */
 export function winnersOf(t: Pick<TrialView, "cells">): { outfit: string[]; location: string[]; hook: string[] } {
   const pick = (d: Dimension) => t.cells.filter((c) => c.dimension === d && c.winner).map(cellName);

@@ -3,9 +3,10 @@ import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readShootToken } from "@/lib/shoot-token";
 import { notePlain } from "@/lib/shoot-list";
-import { DIM_META, cellName, loadTrial, roundBrief, winnersOf } from "@/lib/trials";
+import { DIM_META, cellName, loadTrial, referenceVideos, roundBrief, winnersOf } from "@/lib/trials";
 import { ShootUpload } from "@/components/shoot/shoot-upload";
 import { BriefPoints } from "@/components/trials/brief-points";
+import { ReferenceVideos } from "@/components/shoot/reference-videos";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Upload takes", robots: { index: false, follow: false } };
@@ -112,9 +113,7 @@ async function CellPage({ token, cellId }: { token: string; cellId: string }) {
         </p>
       </div>
 
-      {view.video ? (
-        <video src={view.video} controls playsInline preload="metadata" className="max-h-[55dvh] w-full rounded-xl bg-black object-contain" />
-      ) : null}
+      <ReferenceVideos videos={referenceVideos(view, cell)} />
       {view.postUrl && (
         <a href={view.postUrl} target="_blank" rel="noreferrer" className="block truncate text-sm text-primary underline underline-offset-2">
           Open the outlier on Instagram
