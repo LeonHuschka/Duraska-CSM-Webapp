@@ -34,15 +34,18 @@ async function staff(supabase: Sb, personaId: string) {
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function berlinTime(iso: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Berlin",
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(iso));
+/** "Fri, 13 Nov" — the day in Berlin. */
+function berlinDate(iso: string) {
+  const d = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", weekday: "short", day: "numeric", month: "short" }).format(
+    new Date(iso)
+  );
+  const i = d.indexOf(" ");
+  return i > 0 ? `${d.slice(0, i)},${d.slice(i)}` : d;
+}
+
+/** "20:00" — the time in Berlin. */
+function berlinClock(iso: string) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
 export async function planFanslyPost(input: {
@@ -50,6 +53,7 @@ export async function planFanslyPost(input: {
   when: string;
   caption: string;
   price: number | null;
+  fyp: boolean;
   note: string;
 }): Promise<{ error: string | null }> {
   const supabase = await createClient();
@@ -76,7 +80,7 @@ export async function planFanslyPost(input: {
   const admin = createAdminClient();
   const { data: cfg } = await admin
     .from("telegram_config")
-    .select("chat_id, fansly_thread_id, va_username")
+    .select("chat_id, fansly_thread_id, va_username, fansly_va_username")
     .eq("persona_id", personaId)
     .maybeSingle();
   if (!cfg?.chat_id || !cfg.fansly_thread_id) return { error: "No Fansly topic set for this model" };
@@ -89,6 +93,7 @@ export async function planFanslyPost(input: {
       scheduled_for: when.toISOString(),
       caption,
       price,
+      fyp: input.fyp,
       note: note || null,
       created_by: userId,
     })
@@ -96,14 +101,19 @@ export async function planFanslyPost(input: {
     .single();
   if (insErr || !row) return { error: insErr?.message ?? "Could not save" };
 
-  // The task: when, price, note, then the caption to copy.
+  // The task: who, the day and the time on lines of their own, price, FYP,
+  // the note, then the caption to copy.
+  const va = (cfg.fansly_va_username ?? cfg.va_username)?.replace(/^@/, "");
   const head = [
-    `📅 <b>Fansly post — schedule for ${esc(berlinTime(when.toISOString()))} (Berlin)</b>`,
-    cfg.va_username ? `@${esc(cfg.va_username.replace(/^@/, ""))}` : null,
+    `📅 <b>Fansly post</b>${va ? ` · @${esc(va)}` : ""}`,
+    "",
+    `🗓 <b>${esc(berlinDate(when.toISOString()))}</b>`,
+    `⏰ <b>${esc(berlinClock(when.toISOString()))}</b> Berlin time`,
     price ? `💰 PPV $${price.toFixed(2)}` : "🆓 Free post",
+    input.fyp ? "🔥 FYP: on" : "🚫 FYP: off",
     note ? `📝 ${esc(note)}` : null,
   ]
-    .filter(Boolean)
+    .filter((l) => l !== null)
     .join("\n");
   const body = caption ? `\n\n<b>Caption</b> (tap to copy):\n<pre>${esc(caption)}</pre>` : "\n\n<i>No caption</i>";
   const together = head + body;

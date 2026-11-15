@@ -139,7 +139,7 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
       ? ((
           await supabase
             .from("fansly_posts")
-            .select("id, asset_id, scheduled_for, caption, price, note, status, error")
+            .select("id, asset_id, scheduled_for, caption, price, fyp, note, status, error")
             .eq("persona_id", personaId)
             .gte("scheduled_for", new Date(Date.now() - 30 * 86_400_000).toISOString())
             .order("scheduled_for")

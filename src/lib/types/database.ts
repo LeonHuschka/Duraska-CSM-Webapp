@@ -685,6 +685,7 @@ export type Database = {
           scheduled_for: string;
           caption: string;
           price: number | null;
+          fyp: boolean;
           note: string | null;
           status: string;
           message_id: number | null;
@@ -699,6 +700,7 @@ export type Database = {
           scheduled_for: string;
           caption?: string;
           price?: number | null;
+          fyp?: boolean;
           note?: string | null;
           status?: string;
           message_id?: number | null;
@@ -713,6 +715,7 @@ export type Database = {
           scheduled_for?: string;
           caption?: string;
           price?: number | null;
+          fyp?: boolean;
           note?: string | null;
           status?: string;
           message_id?: number | null;
@@ -1356,6 +1359,7 @@ export type Database = {
           reports_thread_id: number | null;
           fansly_thread_id: number | null;
           shoot_trial_messages: Json;
+          fansly_va_username: string | null;
           last_daily_report_at: string | null;
           last_weekly_report_at: string | null;
           shoot_notice_message_id: number | null;
@@ -1394,6 +1398,7 @@ export type Database = {
           reports_thread_id?: number | null;
           fansly_thread_id?: number | null;
           shoot_trial_messages?: Json;
+          fansly_va_username?: string | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;
@@ -1432,6 +1437,7 @@ export type Database = {
           reports_thread_id?: number | null;
           fansly_thread_id?: number | null;
           shoot_trial_messages?: Json;
+          fansly_va_username?: string | null;
           last_daily_report_at?: string | null;
           last_weekly_report_at?: string | null;
           shoot_notice_message_id?: number | null;
