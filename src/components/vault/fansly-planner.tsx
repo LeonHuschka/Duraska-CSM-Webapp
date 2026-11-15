@@ -312,7 +312,7 @@ function PostDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent
-        className="max-h-[92dvh] max-w-lg overflow-y-auto"
+        className="max-h-[94dvh] max-w-4xl overflow-y-auto"
         // The macOS emoji picker is a window of its own; picking from it must
         // not count as leaving the dialog, or the emoji never lands.
         onFocusOutside={(e) => e.preventDefault()}
@@ -325,16 +325,21 @@ function PostDialog({
           </DialogTitle>
         </DialogHeader>
         {asset && (
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <div className="aspect-[9/16] w-20 shrink-0 overflow-hidden rounded-xl bg-black/40">
-                {asset.thumbnailUrl ? (
-                  <img src={asset.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <video src={asset.signedUrl} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1 space-y-2">
+          <div className="grid gap-5 md:grid-cols-[minmax(0,300px)_1fr]">
+            {/* The cut itself, big and playable, to judge the caption against. */}
+            <div className="mx-auto w-full max-w-[300px]">
+              <video
+                key={asset.id}
+                src={asset.signedUrl}
+                poster={asset.thumbnailUrl ?? undefined}
+                controls
+                playsInline
+                preload="metadata"
+                className="aspect-[9/16] max-h-[70dvh] w-full rounded-2xl bg-black object-cover"
+              />
+            </div>
+            <div className="min-w-0 space-y-4">
+              <div className="space-y-2">
                 <p className="truncate text-sm font-medium">{asset.request_title}</p>
                 <div className="grid grid-cols-2 gap-2">
                   <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9" />
@@ -349,7 +354,6 @@ function PostDialog({
                   </p>
                 )}
               </div>
-            </div>
 
             <CaptionField
               value={caption}
@@ -456,6 +460,7 @@ function PostDialog({
                 </div>
               </div>
             )}
+          </div>
           </div>
         )}
       </DialogContent>
