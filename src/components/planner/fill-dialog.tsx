@@ -1,12 +1,13 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Loader2, Sparkles, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiRow } from "@/components/ui/emoji-row";
 import { fillSlots } from "@/app/(app)/planner/[accountId]/actions";
 import type { PlannerCut, PlannerPost } from "@/components/planner/planner-view";
 import { SAME_REEL_GAP_MS, whenLabel } from "@/components/planner/planner-utils";
@@ -77,6 +78,7 @@ export function FillDialog({
 }) {
   const [list, setList] = useState<FillItem[]>([]);
   const [caption, setCaption] = useState("");
+  const captionBox = useRef<HTMLTextAreaElement>(null);
   const [busy, start] = useTransition();
   useEffect(() => {
     if (!items) return;
@@ -150,7 +152,8 @@ export function FillDialog({
         <div className="space-y-2 border-t border-border/50 p-4">
           <label className="space-y-1">
             <span className="text-[11px] font-medium text-muted-foreground">Caption for all of them (change single ones later)</span>
-            <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} className="resize-none text-sm" />
+            <Textarea ref={captionBox} value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} className="resize-none text-sm" />
+            <EmojiRow target={captionBox} value={caption} onChange={setCaption} />
           </label>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>

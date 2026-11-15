@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { isVideoUrl } from "@/lib/feed-media";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowUpRight, ChevronLeft, ChevronRight, FlaskConical, Loader2, RotateCcw, Send, Trash2 } from "lucide-react";
@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiRow } from "@/components/ui/emoji-row";
 import { deletePost, postNow, schedulePost, updatePost } from "@/app/(app)/planner/[accountId]/actions";
 import type { PlannerCut, PlannerPost } from "@/components/planner/planner-view";
 import {
@@ -56,6 +57,7 @@ export function PostEditor({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [caption, setCaption] = useState("");
+  const captionBox = useRef<HTMLTextAreaElement>(null);
   const [trial, setTrial] = useState(false);
   const [feed, setFeed] = useState(true);
   const [busy, start] = useTransition();
@@ -266,6 +268,7 @@ export function PostEditor({
                 </span>
               </span>
               <Textarea
+                ref={captionBox}
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 disabled={locked}
@@ -283,6 +286,7 @@ export function PostEditor({
                 </button>
               )}
             </label>
+            <EmojiRow target={captionBox} value={caption} onChange={setCaption} max={MAX_CAPTION} disabled={locked} />
 
             {!isFeed && <div className="space-y-2">
               <Toggle

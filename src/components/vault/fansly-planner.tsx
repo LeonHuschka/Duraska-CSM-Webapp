@@ -25,6 +25,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiRow } from "@/components/ui/emoji-row";
 import { cn } from "@/lib/utils";
 import { addDays, atTime, dayKey, hhmm } from "@/components/planner/planner-utils";
 import {
@@ -160,9 +161,6 @@ export function FanslyPlannedBadge({ assetId }: { assetId: string }) {
 
 // ── The caption box ──
 
-/** A tap away, for when the system picker will not land in the box. */
-const QUICK_EMOJI = ["👅", "💦", "🔥", "👀", "😈", "🍑", "💋", "🥵", "😏", "🫦", "🤤", "❤️"];
-
 function CaptionField({
   value,
   onChange,
@@ -178,18 +176,6 @@ function CaptionField({
   const box = useRef<HTMLTextAreaElement>(null);
   const [regenerating, setRegenerating] = useState(false);
 
-  /** Put text where the cursor is, or at the end, and keep typing after it. */
-  const insert = (text: string) => {
-    const el = box.current;
-    const at = el ? el.selectionStart : value.length;
-    const to = el ? el.selectionEnd : value.length;
-    onChange((value.slice(0, at) + text + value.slice(to)).slice(0, 3000));
-    requestAnimationFrame(() => {
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(at + text.length, at + text.length);
-    });
-  };
   const addTags = () => {
     const have = new Set((value.match(/#[^\s#]+/g) ?? []).map((t) => t.toLowerCase()));
     const add = hashtags.split(/\s+/).filter((t) => t.startsWith("#") && !have.has(t.toLowerCase()));
@@ -219,19 +205,7 @@ function CaptionField({
         rows={5}
         placeholder="What goes under the post"
       />
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        {QUICK_EMOJI.map((e) => (
-          <button
-            key={e}
-            type="button"
-            onClick={() => insert(e)}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-base transition-colors hover:bg-white/10"
-            title={`Add ${e}`}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
+      <EmojiRow target={box} value={value} onChange={onChange} className="mt-2" />
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {onRegenerate && (
           <button

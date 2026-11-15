@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiRow } from "@/components/ui/emoji-row";
 import { createClient } from "@/lib/supabase/client";
 import { postNow, schedulePost } from "@/app/(app)/planner/[accountId]/actions";
 import { atTime, dayKey, hhmm, tzLabel, whenLabel } from "@/components/planner/planner-utils";
@@ -55,6 +56,7 @@ export function FeedComposer({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [caption, setCaption] = useState("");
+  const captionBox = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState<null | "save" | "post">(null);
   const [dragOver, setDragOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -272,6 +274,7 @@ export function FeedComposer({
                 </span>
               </span>
               <Textarea
+                ref={captionBox}
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 rows={8}
@@ -284,6 +287,7 @@ export function FeedComposer({
                 </button>
               )}
             </label>
+            <EmojiRow target={captionBox} value={caption} onChange={setCaption} max={MAX_CAPTION} />
             <div className="mt-auto flex justify-end gap-2 pt-2">
               <Button
                 variant="outline"
