@@ -94,6 +94,49 @@ export async function sendVideo(opts: {
   }
 }
 
+/**
+ * Send a file as it is — no video player, no re-encoding, no guessed shape.
+ * Telegram is told not to treat it as a video, so a cut the VA downloads is
+ * byte for byte the one in the vault.
+ */
+export async function sendDocument(opts: {
+  chat_id: number | string;
+  file: Uint8Array;
+  filename: string;
+  mime?: string | null;
+  message_thread_id?: number | null;
+  caption?: string;
+  parse_mode?: "HTML" | "Markdown";
+}): Promise<{ ok: boolean; result?: { message_id: number }; error?: string }> {
+  const t = token();
+  if (!t) return { ok: false, error: "TELEGRAM_BOT_TOKEN not set" };
+  const form = new FormData();
+  form.append("chat_id", String(opts.chat_id));
+  if (opts.message_thread_id) form.append("message_thread_id", String(opts.message_thread_id));
+  if (opts.caption) {
+    form.append("caption", opts.caption);
+    if (opts.parse_mode) form.append("parse_mode", opts.parse_mode);
+  }
+  form.append("disable_content_type_detection", "true");
+  form.append(
+    "document",
+    new Blob([opts.file as BlobPart], { type: opts.mime || "application/octet-stream" }),
+    opts.filename
+  );
+  try {
+    const res = await fetch(`${API}/bot${t}/sendDocument`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+    });
+    const json = (await res.json()) as { ok: boolean; result?: { message_id: number }; description?: string };
+    if (!json.ok) return { ok: false, error: json.description ?? "unknown error" };
+    return { ok: true, result: json.result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "network error" };
+  }
+}
+
 /** Post a picture with a caption — the cover, when the video is out of reach. */
 export async function sendPhoto(opts: {
   chat_id: number | string;

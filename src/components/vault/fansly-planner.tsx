@@ -31,7 +31,8 @@ export type FanslyPlan = {
   error: string | null;
 };
 
-const TZ = "Europe/Berlin";
+/** Fansly runs on LA time, so the plan is set and shown in it. */
+const TZ = "America/Los_Angeles";
 const when = (iso: string) =>
   new Intl.DateTimeFormat("en-GB", {
     timeZone: TZ,
@@ -115,7 +116,6 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
   const [caption, setCaption] = useState("");
   const [ppv, setPpv] = useState(false);
   const [price, setPrice] = useState("");
-  const [fyp, setFyp] = useState(true);
   const [note, setNote] = useState("");
   const [busy, start] = useTransition();
 
@@ -125,7 +125,6 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
     setCaption("");
     setPpv(false);
     setPrice("");
-    setFyp(true);
     setNote("");
   };
 
@@ -136,7 +135,7 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
     const amount = ppv ? Number(price.replace(",", ".")) : null;
     if (ppv && !(amount && amount > 0)) return void toast.error("Set the PPV price");
     start(async () => {
-      const res = await planFanslyPost({ assetId: asset.id, when: at.toISOString(), caption, price: amount, fyp, note });
+      const res = await planFanslyPost({ assetId: asset.id, when: at.toISOString(), caption, price: amount, note });
       if (res.error) toast.error(res.error);
       else {
         toast.success("Sent to the VA");
@@ -169,7 +168,7 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
                   <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9" />
                   <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="h-9" />
                 </div>
-                <p className="text-[11px] text-muted-foreground">Berlin time. The VA sets it in Fansly&apos;s scheduler.</p>
+                <p className="text-[11px] text-muted-foreground">LA time, as in Fansly. Every post goes on the FYP.</p>
               </div>
             </div>
 
@@ -203,17 +202,6 @@ function PlanDialog({ asset, onClose }: { asset: VaultAsset | null; onClose: () 
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={() => setFyp((v) => !v)}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
-                  fyp ? "border-orange-300/50 bg-orange-400/20 text-orange-200" : "border-white/15 text-white/50 hover:text-white"
-                )}
-                title="Put the post on Fansly's For You page"
-              >
-                {fyp ? "🔥 FYP on" : "FYP off"}
-              </button>
               {ppv && (
                 <div className="relative w-28">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
@@ -303,7 +291,6 @@ export function FanslyPlanList({ plans, assets }: { plans: FanslyPlan[]; assets:
                   </div>
                   <p className="text-[11px] text-white/60">
                     {p.price ? `PPV $${Number(p.price).toFixed(2)}` : "Free"}
-                    {p.fyp ? " · 🔥 FYP" : ""}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-[11px] text-white/80">{p.caption || <i className="text-white/40">No caption</i>}</p>
                   {p.status === "sent" ? (

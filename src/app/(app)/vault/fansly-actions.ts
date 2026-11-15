@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireActivePersonaId } from "@/lib/persona";
-import { deleteMessage, sendMessage, sendVideo } from "@/lib/telegram";
+import { deleteMessage, sendDocument, sendMessage } from "@/lib/telegram";
 
 /**
  * The Fansly planner. A Fansly cut, planned for a time with its caption,
@@ -34,18 +34,21 @@ async function staff(supabase: Sb, personaId: string) {
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** "Fri, 13 Nov" — the day in Berlin. */
-function berlinDate(iso: string) {
-  const d = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", weekday: "short", day: "numeric", month: "short" }).format(
+/** Fansly runs on LA time. */
+const TZ = "America/Los_Angeles";
+
+/** "Fri, 13 Nov" — the day in LA. */
+function laDate(iso: string) {
+  const d = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" }).format(
     new Date(iso)
   );
   const i = d.indexOf(" ");
   return i > 0 ? `${d.slice(0, i)},${d.slice(i)}` : d;
 }
 
-/** "20:00" — the time in Berlin. */
-function berlinClock(iso: string) {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+/** "20:00" — the time in LA. */
+function laClock(iso: string) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
 export async function planFanslyPost(input: {
@@ -53,7 +56,6 @@ export async function planFanslyPost(input: {
   when: string;
   caption: string;
   price: number | null;
-  fyp: boolean;
   note: string;
 }): Promise<{ error: string | null }> {
   const supabase = await createClient();
@@ -70,7 +72,7 @@ export async function planFanslyPost(input: {
 
   const { data: asset } = await supabase
     .from("content_assets")
-    .select("id, file_path, file_name, size_bytes, stage, content_requests!inner(persona_id, title)")
+    .select("id, file_path, file_name, mime_type, size_bytes, stage, content_requests!inner(persona_id, title)")
     .eq("id", input.assetId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -93,7 +95,7 @@ export async function planFanslyPost(input: {
       scheduled_for: when.toISOString(),
       caption,
       price,
-      fyp: input.fyp,
+      fyp: true,
       note: note || null,
       created_by: userId,
     })
@@ -101,16 +103,16 @@ export async function planFanslyPost(input: {
     .single();
   if (insErr || !row) return { error: insErr?.message ?? "Could not save" };
 
-  // The task: who, the day and the time on lines of their own, price, FYP,
-  // the note, then the caption to copy.
+  // The task: who, the day and the time (LA) on lines of their own, the
+  // price, FYP — every Fansly post goes there — the note, then the caption.
   const va = (cfg.fansly_va_username ?? cfg.va_username)?.replace(/^@/, "");
   const head = [
     `📅 <b>Fansly post</b>${va ? ` · @${esc(va)}` : ""}`,
     "",
-    `🗓 <b>${esc(berlinDate(when.toISOString()))}</b>`,
-    `⏰ <b>${esc(berlinClock(when.toISOString()))}</b> Berlin time`,
+    `🗓 <b>${esc(laDate(when.toISOString()))}</b>`,
+    `⏰ <b>${esc(laClock(when.toISOString()))}</b> LA time`,
     price ? `💰 PPV $${price.toFixed(2)}` : "🆓 Free post",
-    input.fyp ? "🔥 FYP: on" : "🚫 FYP: off",
+    "🔥 FYP post",
     note ? `📝 ${esc(note)}` : null,
   ]
     .filter((l) => l !== null)
@@ -126,10 +128,14 @@ export async function planFanslyPost(input: {
   if ((asset.size_bytes ?? 0) <= MAX_VIDEO_BYTES) {
     const { data: file } = await supabase.storage.from("content-assets").download(asset.file_path);
     if (file) {
-      const sent = await sendVideo({
+      // As a file, not a video: sent as a video it came out stretched — the
+      // vault knows no width or height to give Telegram, and a .mov sent
+      // as .mp4 made it guess. The file is also what she uploads to Fansly.
+      const sent = await sendDocument({
         ...thread,
-        video: new Uint8Array(await file.arrayBuffer()),
-        filename: asset.file_name.replace(/\.[^.]+$/, "") + ".mp4",
+        file: new Uint8Array(await file.arrayBuffer()),
+        filename: asset.file_name,
+        mime: asset.mime_type,
         caption: fits ? together : head,
         parse_mode: "HTML",
       });
