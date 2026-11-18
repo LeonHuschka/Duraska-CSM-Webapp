@@ -324,7 +324,11 @@ async function cellsView(supabase: Sb, cells: CellRow[], accountId: string | nul
 
 export type TrialSummary = {
   id: string;
+  /** What the team calls it: its nickname, else the caption's first words. */
+  name: string;
   accountLabel: string;
+  /** The account the outlier ran on is no longer in the app. */
+  accountGone: boolean;
   platform: string;
   avatar: string | null;
   cover: string | null;
@@ -354,7 +358,8 @@ export type RoundSummary = {
 /** The active trials of a persona, as cards for the dashboards. */
 export async function listTrials(supabase: Sb, personaId: string, includeDone = false): Promise<TrialSummary[]> {
   let q = supabase.from("trials").select("id").eq("persona_id", personaId).order("created_at", { ascending: false });
-  if (!includeDone) q = q.eq("status", "active");
+  // Archived, dismissed and replaced trials are done with; never on show.
+  q = includeDone ? q.not("status", "in", "(archived,dismissed,replaced)") : q.eq("status", "active");
   const { data: rows } = await q.limit(30);
   const out: TrialSummary[] = [];
   for (const r of rows ?? []) {
@@ -363,8 +368,18 @@ export async function listTrials(supabase: Sb, personaId: string, includeDone = 
     const dim: Dimension = t.phase === "done" ? "hook" : t.phase;
     const row = t.cells.filter((c) => c.dimension === dim);
     const winners = winnersOf(t);
+    const words = (t.caption ?? "")
+      .replace(/https?:\/\/\S+|[#@]\S+/g, "")
+      .replace(/[^A-Za-z0-9À-ÿ' ]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(" ");
     out.push({
       id: t.id,
+      name: t.nickname?.trim() || words || "Untitled outlier",
+      accountGone: !t.account,
       accountLabel: t.account?.label ?? "account gone",
       platform: t.account?.platform ?? "instagram",
       avatar: t.account?.avatar ?? null,
