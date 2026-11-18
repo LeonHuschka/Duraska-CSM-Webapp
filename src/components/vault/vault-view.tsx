@@ -1277,6 +1277,11 @@ export function VaultView({
     if (only.length) {
       items = items.filter((a) => only.includes(a.request_id));
     }
+    // Through a VA's eyes, a trial cut meant for someone else's account is
+    // not hers to post: it goes out on its own account only.
+    if (lens !== null) {
+      items = items.filter((a) => !a.trialAccountId || visibleAccounts.some((x) => x.id === a.trialAccountId));
+    }
 
     if (stageFilter !== "all") {
       items = items.filter((a) => a.stage === stageFilter);
@@ -1303,7 +1308,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, only, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
+  }, [localAssets, only, lens, visibleAccounts, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
