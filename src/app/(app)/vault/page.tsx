@@ -158,7 +158,7 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
     fanslySchedule = { slots: s ? cleanSlots(s.slots) : DEFAULT_SLOTS, overrides, hashtags: s?.hashtags ?? DEFAULT_HASHTAGS };
   }
   const fanslyToday = dayKey(new Date(), FANSLY_TZ);
-  const members: VaultMember[] = (teammates ?? [])
+  const people: VaultMember[] = (teammates ?? [])
     .filter((m) => m.user_profiles?.telegram_username)
     .map((m) => ({
       username: m.user_profiles!.telegram_username!,
@@ -173,6 +173,16 @@ export default async function VaultPage({ searchParams }: { searchParams: { reel
     .neq("status", "dead")
     .order("platform", { ascending: true });
   const accounts = (accountRows ?? []) as PostingAccount[];
+  // Everyone who runs an account, with a login or not: a VA who works only
+  // through Telegram can still be looked at.
+  const known = new Set(people.map((m) => m.username.toLowerCase()));
+  const members: VaultMember[] = [...people];
+  for (const a of accounts) {
+    const u = a.manager_username?.trim();
+    if (!u || known.has(u.toLowerCase())) continue;
+    known.add(u.toLowerCase());
+    members.push({ username: u, name: "no login yet" });
+  }
 
   // 1. All requests for this persona (lightweight — just what we need).
   //    Explicit high limit to bypass the default 1000-row cap.
