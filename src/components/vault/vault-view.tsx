@@ -1088,25 +1088,17 @@ export function VaultView({
   // cuts are left, but the reel already ran on one of her accounts — only
   // for the rare second cut of something that took off.
   const isFree = (a: VaultAsset) => a.postedAccountIds.length === 0 && !a.postedWithoutAccount;
-  // A Trial-Maxxing cut is only work for whoever posts on its account.
-  const trialFits = useCallback(
-    (a: VaultAsset) => !a.trialAccountId || postingTargets.some((acc) => acc.id === a.trialAccountId),
-    [postingTargets]
-  );
+  // A Trial-Maxxing reel is a reel like any other: its cuts go out on every
+  // account, the trial's own account among them.
   const isFreshForViewer = useCallback(
     (a: VaultAsset) =>
-      isFree(a) && trialFits(a) && postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
-    [postingTargets, trialFits]
+      isFree(a) && postingTargets.every((acc) => (a.reelPostings[acc.id]?.count ?? 0) === 0),
+    [postingTargets]
   );
   const isPostedForViewer = useCallback(
     (a: VaultAsset) =>
-      isFree(a) && trialFits(a) && postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) > 0),
-    [postingTargets, trialFits]
-  );
-  // The accounts a card offers to mark it posted on.
-  const accountsFor = useCallback(
-    (a: VaultAsset) => (a.trialAccountId ? visibleAccounts.filter((x) => x.id === a.trialAccountId) : visibleAccounts),
-    [visibleAccounts]
+      isFree(a) && postingTargets.some((acc) => (a.reelPostings[acc.id]?.count ?? 0) > 0),
+    [postingTargets]
   );
   // A VA with nothing to see: either nobody typed her handle on her profile,
   // or no account names her as manager. Either way, say so instead of
@@ -1277,11 +1269,6 @@ export function VaultView({
     if (only.length) {
       items = items.filter((a) => only.includes(a.request_id));
     }
-    // Through a VA's eyes, a trial cut meant for someone else's account is
-    // not hers to post: it goes out on its own account only.
-    if (lens !== null) {
-      items = items.filter((a) => !a.trialAccountId || visibleAccounts.some((x) => x.id === a.trialAccountId));
-    }
 
     if (stageFilter !== "all") {
       items = items.filter((a) => a.stage === stageFilter);
@@ -1308,7 +1295,7 @@ export function VaultView({
     }
 
     return items;
-  }, [localAssets, only, lens, visibleAccounts, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
+  }, [localAssets, only, stageFilter, nsfwFilter, platformFilter, search, isPostedForViewer, isFreshForViewer]);
 
   // Carried on the button so the VA sees whether there is anything to do
   // before tapping.
@@ -1625,7 +1612,7 @@ export function VaultView({
                 <VaultCard
                   key={reel.cuts[0].id}
                   asset={reel.cuts[0]}
-                  accounts={accountsFor(reel.cuts[0])}
+                  accounts={visibleAccounts}
                   reelCuts={cutsByRequest.get(reel.requestId)}
                   onUpdateNsfw={handleNsfwUpdate}
                   onUpdatePosted={handlePostedUpdate}
@@ -1636,7 +1623,7 @@ export function VaultView({
                   key={reel.requestId}
                   reel={reel}
                   allCuts={cutsByRequest.get(reel.requestId) ?? reel.cuts}
-                  accounts={accountsFor(reel.cover)}
+                  accounts={visibleAccounts}
                   expanded={expandedId === reel.requestId}
                   onToggle={() =>
                     setExpandedId((cur) => (cur === reel.requestId ? null : reel.requestId))
