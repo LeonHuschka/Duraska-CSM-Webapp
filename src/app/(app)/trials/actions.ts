@@ -611,3 +611,138 @@ export async function setTrialNickname(trialId: string, nickname: string) {
   await shootListOf(trialId);
   return { error: null };
 }
+
+export type LinkableReel = { requestId: string; title: string; thumb: string | null; plays: number | null; status: string };
+
+/**
+ * Reels already shot and cut, to take into a round by hand — a variation
+ * that was shot outside the trial, or a new best performer. Newest first;
+ * the ones already in this trial are left out.
+ */
+export async function listLinkableReels(trialId: string): Promise<{ error: string | null; reels: LinkableReel[] }> {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", trialId).maybeSingle();
+  if (!t) return { error: "No such trial", reels: [] };
+  const me = await who(supabase, t.persona_id);
+  if (!me?.staff) return { error: "Only owners and managers", reels: [] };
+  const [{ data: reqs }, { data: used }] = await Promise.all([
+    supabase
+      .from("content_requests")
+      .select("id, title, status, created_at")
+      .eq("persona_id", t.persona_id)
+      .in("status", ["edited", "scheduled", "posted"])
+      .order("created_at", { ascending: false })
+      .limit(120),
+    supabase.from("trial_cells").select("request_id").eq("trial_id", trialId).not("request_id", "is", null),
+  ]);
+  const taken = new Set((used ?? []).map((u) => u.request_id));
+  const list = (reqs ?? []).filter((r) => !taken.has(r.id));
+  const ids = list.map((r) => r.id);
+  if (!ids.length) return { error: null, reels: [] };
+  const [{ data: cuts }, { data: metrics }] = await Promise.all([
+    supabase
+      .from("content_assets")
+      .select("request_id, thumbnail_path, uploaded_at")
+      .in("request_id", ids)
+      .eq("stage", "edited")
+      .is("deleted_at", null)
+      .not("thumbnail_path", "is", null)
+      .order("uploaded_at", { ascending: true }),
+    supabase
+      .from("reel_metrics")
+      .select("request_id, shortcode, views, captured_at")
+      .in("request_id", ids)
+      .neq("source", "screenshot")
+      .not("views", "is", null)
+      .order("captured_at", { ascending: false })
+      .limit(5000),
+  ]);
+  const thumbOf = new Map<string, string>();
+  for (const c of cuts ?? []) if (c.request_id && c.thumbnail_path && !thumbOf.has(c.request_id)) thumbOf.set(c.request_id, c.thumbnail_path);
+  // Every posting of the reel, at its newest count.
+  const seen = new Set<string>();
+  const plays = new Map<string, number>();
+  for (const m of metrics ?? []) {
+    if (!m.request_id || !m.shortcode || seen.has(m.shortcode)) continue;
+    seen.add(m.shortcode);
+    plays.set(m.request_id, (plays.get(m.request_id) ?? 0) + Number(m.views ?? 0));
+  }
+  const { data: signed } = await supabase.storage
+    .from("content-assets")
+    .createSignedUrls(Array.from(new Set(thumbOf.values())), 3600);
+  const url = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path!, s.signedUrl]));
+  return {
+    error: null,
+    reels: list
+      .filter((r) => thumbOf.has(r.id))
+      .map((r) => ({
+        requestId: r.id,
+        title: r.title ?? "Untitled",
+        thumb: url.get(thumbOf.get(r.id)!) ?? null,
+        plays: plays.get(r.id) ?? null,
+        status: r.status,
+      })),
+  };
+}
+
+/**
+ * A reel shot already, into a round: into an empty box when one is given,
+ * else into a new one at the end. It counts as shot; out of SHOOTING.
+ */
+export async function linkReel(input: { trialId: string; dimension: Dimension; requestId: string; cellId?: string | null }) {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("trials").select("persona_id").eq("id", input.trialId).maybeSingle();
+  if (!t) return { error: "No such trial" };
+  const me = await who(supabase, t.persona_id);
+  if (!me?.staff) return { error: "Only owners and managers can change the rounds" };
+  if (!DIMENSIONS.includes(input.dimension)) return { error: "No such round" };
+  const { data: req } = await supabase
+    .from("content_requests")
+    .select("id")
+    .eq("id", input.requestId)
+    .eq("persona_id", t.persona_id)
+    .maybeSingle();
+  if (!req) return { error: "Reel not found" };
+  const { data: dup } = await supabase
+    .from("trial_cells")
+    .select("id")
+    .eq("trial_id", input.trialId)
+    .eq("request_id", input.requestId)
+    .maybeSingle();
+  if (dup) return { error: "That reel is in this trial already" };
+  const now = new Date().toISOString();
+  if (input.cellId) {
+    const { data: cell } = await supabase
+      .from("trial_cells")
+      .select("id, trial_id, request_id, winner")
+      .eq("id", input.cellId)
+      .maybeSingle();
+    if (!cell || cell.trial_id !== input.trialId) return { error: "No such box" };
+    let emptyJob: string | null = null;
+    if (cell.request_id) {
+      const { count } = await supabase
+        .from("content_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("request_id", cell.request_id)
+        .is("deleted_at", null);
+      if (count) return { error: "That box has takes already" };
+      emptyJob = cell.request_id;
+    }
+    const { error } = await supabase
+      .from("trial_cells")
+      .update({ request_id: input.requestId, finished_at: now, requested_at: null, updated_at: now })
+      .eq("id", cell.id);
+    if (error) return { error: error.message };
+    if (emptyJob) await supabase.from("content_requests").delete().eq("id", emptyJob).eq("status", "requested");
+  } else {
+    const slot = await nextSlot(supabase, input.trialId, input.dimension);
+    if (slot > MAX_RESHOOTS) return { error: `A round takes ${MAX_RESHOOTS} at most` };
+    const { error } = await supabase
+      .from("trial_cells")
+      .insert({ trial_id: input.trialId, dimension: input.dimension, slot, request_id: input.requestId, finished_at: now });
+    if (error) return { error: error.message };
+  }
+  touch(input.trialId);
+  await shootListOf(input.trialId);
+  return { error: null };
+}

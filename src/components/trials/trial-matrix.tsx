@@ -21,6 +21,9 @@ import { briefPoints } from "@/lib/brief-points";
 import { setAssetFansly } from "@/app/(app)/requests/[id]/actions";
 import {
   addCell,
+  linkReel,
+  listLinkableReels,
+  type LinkableReel,
   advanceTrial,
   archiveTrial,
   moveCell,
@@ -444,6 +447,7 @@ function Round({
   const posted = row.filter((c) => c.state === "posted").length;
   const [over, setOver] = useState(false);
   const [adding, startAdd] = useTransition();
+  const [linking, setLinking] = useState(false);
   // Rank by plays across all accounts — the numbers to decide on.
   const ranked = row.filter((c) => c.plays.length).sort((a, b) => totalPlays(b) - totalPlays(a));
   const rank = new Map(ranked.map((c, i) => [c.id, i + 1]));
@@ -500,13 +504,14 @@ function Round({
             rank={rank.get(c.id) ?? null}
             best={best}
             outlier={trial.views}
+            trialId={trial.id}
             staff={staff}
             onOpen={() => onOpen(c.id)}
             onChanged={onChanged}
           />
         ))}
         {staff && row.length < MAX_PER_ROUND && (
-          <div className="p-1.5">
+          <div className="flex flex-col gap-1.5 p-1.5">
             <button
               type="button"
               disabled={adding}
@@ -522,6 +527,22 @@ function Round({
               {adding ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-6 w-6" />}
               <span className="text-[11px]">Add {META[d].one.toLowerCase()}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setLinking(true)}
+              className="rounded-lg border border-border/60 px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
+              title="Take a reel that is shot and cut already into this round"
+            >
+              <Film className="mr-1 inline h-3.5 w-3.5" /> or a reel shot already
+            </button>
+            <LinkReelDialog
+              open={linking}
+              onClose={() => setLinking(false)}
+              trialId={trial.id}
+              dimension={d}
+              cellId={null}
+              onChanged={onChanged}
+            />
           </div>
         )}
       </div>
@@ -540,6 +561,7 @@ function VariantCard({
   rank,
   best,
   outlier,
+  trialId,
   staff,
   onOpen,
   onChanged,
@@ -550,6 +572,7 @@ function VariantCard({
   rank: number | null;
   best: number;
   outlier: number | null;
+  trialId: string;
   staff: boolean;
   onOpen: () => void;
   onChanged: () => void;
@@ -634,7 +657,7 @@ function VariantCard({
       {staff ? (
         <div className="flex min-w-0 items-center gap-1">
           <NameField c={c} onChanged={onChanged} />
-          <MoveMenu c={c} prev={prev} next={next} onChanged={onChanged} />
+          <MoveMenu c={c} trialId={trialId} prev={prev} next={next} onChanged={onChanged} />
           {c.state === "empty" && !c.winner && <RemoveButton c={c} onChanged={onChanged} />}
         </div>
       ) : (
@@ -748,8 +771,21 @@ function RequestButton({ c, onChanged }: { c: MatrixCell; onChanged: () => void 
 }
 
 /** Into another round, or out of this one while it is still empty. */
-function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | null; next: string | null; onChanged: () => void }) {
+function MoveMenu({
+  c,
+  trialId,
+  prev,
+  next,
+  onChanged,
+}: {
+  c: MatrixCell;
+  trialId: string;
+  prev: string | null;
+  next: string | null;
+  onChanged: () => void;
+}) {
   const [busy, start] = useTransition();
+  const [linking, setLinking] = useState(false);
   const run = (fn: () => Promise<{ error: string | null }>, ok: string) =>
     start(async () => {
       const r = await fn();
@@ -759,6 +795,8 @@ function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | 
     });
   const empty = c.state === "empty" && !c.winner;
   return (
+    <>
+    <LinkReelDialog open={linking} onClose={() => setLinking(false)} trialId={trialId} dimension={c.dimension} cellId={c.id} onChanged={onChanged} />
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="ghost" className="h-6 w-6 shrink-0 p-0 text-muted-foreground" disabled={busy} title="Move or remove">
@@ -786,8 +824,108 @@ function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | 
         >
           <Trash2 className="mr-1.5 h-3.5 w-3.5" /> {empty ? "Remove" : "Remove (has takes — move it instead)"}
         </DropdownMenuItem>
+        {empty && (
+          <DropdownMenuItem onClick={() => setLinking(true)}>
+            <Film className="mr-1.5 h-3.5 w-3.5" /> Put a reel shot already here
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
+  );
+}
+
+const compactPlays = (n: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
+/** Reels shot and cut already, to take into a round — into one box, or a new one. */
+function LinkReelDialog({
+  open,
+  onClose,
+  trialId,
+  dimension,
+  cellId,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  trialId: string;
+  dimension: Dimension;
+  cellId: string | null;
+  onChanged: () => void;
+}) {
+  const [reels, setReels] = useState<LinkableReel[] | null>(null);
+  const [q, setQ] = useState("");
+  const [byPlays, setByPlays] = useState(false);
+  const [busy, start] = useTransition();
+  useEffect(() => {
+    if (!open) return;
+    setReels(null);
+    setQ("");
+    listLinkableReels(trialId).then((r) => {
+      if (r.error) toast.error(r.error);
+      setReels(r.reels);
+    });
+  }, [open, trialId]);
+  const needle = q.trim().toLowerCase().replace(/^#/, "");
+  const shown = (reels ?? [])
+    .filter((r) => !needle || r.title.toLowerCase().includes(needle))
+    .sort((a, b) => (byPlays ? (b.plays ?? -1) - (a.plays ?? -1) : 0));
+  const pick = (r: LinkableReel) =>
+    start(async () => {
+      const res = await linkReel({ trialId, dimension, requestId: r.requestId, cellId });
+      if (res.error) return void toast.error(res.error);
+      toast.success(`${r.title} is in ${META[dimension].title}`);
+      onClose();
+      onChanged();
+    });
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[85dvh] max-w-3xl overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>
+            {META[dimension].emoji} A reel shot already, into {META[dimension].title}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Reel #…" className="h-8 text-sm" autoFocus />
+          <Button size="sm" variant={byPlays ? "default" : "outline"} className="h-8 shrink-0 text-xs" onClick={() => setByPlays((v) => !v)}>
+            {byPlays ? "Most plays first" : "Newest first"}
+          </Button>
+        </div>
+        <div className="-mx-1 max-h-[62dvh] overflow-y-auto px-1">
+          {reels === null ? (
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading reels…
+            </p>
+          ) : shown.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">No cut reels found.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+              {shown.map((r) => (
+                <button
+                  key={r.requestId}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => pick(r)}
+                  className="group text-left disabled:opacity-50"
+                  title={`Take ${r.title} into this round`}
+                >
+                  <div className="relative aspect-[9/16] overflow-hidden rounded-lg bg-black/40 ring-primary transition group-hover:ring-2">
+                    {r.thumb && <img src={r.thumb} alt="" className="h-full w-full object-cover" loading="lazy" />}
+                    {r.plays != null && (
+                      <span className="absolute inset-x-1 bottom-1 rounded-full bg-black/60 px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums text-white">
+                        ▶ {compactPlays(r.plays)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 truncate text-[11px] font-medium">{r.title}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
