@@ -120,11 +120,21 @@ export function cellName(c: { dimension: Dimension; slot: number; label: string 
 export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialView | null> {
   const { data: t } = await supabase.from("trials").select("*").eq("id", trialId).maybeSingle();
   if (!t) return null;
-  const [{ data: cells }, { data: account }] = await Promise.all([
+  const [{ data: cells }, { data: account }, { data: latest }] = await Promise.all([
     supabase.from("trial_cells").select("*").eq("trial_id", t.id).order("dimension").order("slot"),
     t.account_id
       ? supabase.from("accounts").select("id, handle, display_name, platform, avatar_path").eq("id", t.account_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    // The outlier keeps running after the trial starts: its newest count.
+    supabase
+      .from("reel_metrics")
+      .select("views")
+      .eq("shortcode", t.shortcode)
+      .neq("source", "screenshot")
+      .not("views", "is", null)
+      .order("captured_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   const views = await cellsView(supabase, cells ?? [], t.account_id);
 
@@ -150,6 +160,9 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
   const paths = [t.cover_path, account?.avatar_path, videoPath].filter((p): p is string => !!p);
   const signed = await sign(supabase, paths);
   const median = t.views && t.lift ? Math.round(Number(t.views) / Number(t.lift)) : null;
+  // Never below what was counted when the trial started; the lift grows with it.
+  const nowViews = Math.max(Number(t.views ?? 0), Number(latest?.views ?? 0)) || null;
+  const lift = median && nowViews ? Math.round((nowViews / median) * 10) / 10 : t.lift == null ? null : Number(t.lift);
   return {
     id: t.id,
     personaId: t.persona_id,
@@ -168,8 +181,8 @@ export async function loadTrial(supabase: Sb, trialId: string): Promise<TrialVie
     nickname: t.nickname ?? null,
     cover: t.cover_path ? signed.get(t.cover_path) ?? null : null,
     video: videoPath ? signed.get(videoPath) ?? null : null,
-    views: t.views,
-    lift: t.lift == null ? null : Number(t.lift),
+    views: nowViews,
+    lift,
     sourceTitle,
     phase: t.phase as Phase,
     status: t.status,
