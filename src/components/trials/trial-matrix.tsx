@@ -635,6 +635,7 @@ function VariantCard({
         <div className="flex min-w-0 items-center gap-1">
           <NameField c={c} onChanged={onChanged} />
           <MoveMenu c={c} prev={prev} next={next} onChanged={onChanged} />
+          {c.state === "empty" && !c.winner && <RemoveButton c={c} onChanged={onChanged} />}
         </div>
       ) : (
         <p className="truncate text-sm font-medium">{name(c)}</p>
@@ -756,7 +757,7 @@ function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | 
       else toast.success(ok);
       onChanged();
     });
-  const empty = c.state === "empty" && !c.requestId && !c.winner;
+  const empty = c.state === "empty" && !c.winner;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -787,6 +788,38 @@ function MoveMenu({ c, prev, next, onChanged }: { c: MatrixCell; prev: string | 
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Out of the round, in two taps: the first asks, the second removes. */
+function RemoveButton({ c, onChanged }: { c: MatrixCell; onChanged: () => void }) {
+  const [sure, setSure] = useState(false);
+  const [busy, start] = useTransition();
+  useEffect(() => {
+    if (!sure) return;
+    const t = setTimeout(() => setSure(false), 3000);
+    return () => clearTimeout(t);
+  }, [sure]);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={busy}
+      title={sure ? "Tap again to remove" : `Remove ${name(c)}`}
+      className={`h-6 shrink-0 p-0 ${sure ? "w-auto bg-rose-500/20 px-1.5 text-[10px] font-semibold text-rose-300" : "w-6 text-muted-foreground hover:text-rose-400"}`}
+      onClick={() => {
+        if (!sure) return setSure(true);
+        start(async () => {
+          const r = await removeCell(c.id);
+          if (r.error) toast.error(r.error);
+          else toast.success(`${name(c)} removed${c.requestedAt ? " — SHOOTING updated" : ""}`);
+          setSure(false);
+          onChanged();
+        });
+      }}
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : sure ? "Remove?" : <Trash2 className="h-3.5 w-3.5" />}
+    </Button>
   );
 }
 

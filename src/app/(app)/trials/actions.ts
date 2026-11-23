@@ -484,14 +484,28 @@ export async function moveCell(cellId: string, dimension: Dimension) {
   return { error: null };
 }
 
-/** An empty variation out of its round. One with takes stays — move it instead. */
+/**
+ * A variation out of its round while nothing is shot for it yet — written
+ * ahead, even sent to SHOOTING. One with takes stays: move it instead.
+ * Its SHOOTING message loses the button.
+ */
 export async function removeCell(cellId: string) {
   const supabase = await createClient();
   const cell = await staffCell(supabase, cellId);
   if (!cell) return { error: "Not allowed" };
-  if (cell.request_id || cell.winner || cell.finished_at) return { error: "It has takes — move it to another round instead" };
+  if (cell.winner || cell.finished_at) return { error: "It has takes — move it to another round instead" };
+  if (cell.request_id) {
+    const { count } = await supabase
+      .from("content_assets")
+      .select("id", { count: "exact", head: true })
+      .eq("request_id", cell.request_id)
+      .is("deleted_at", null);
+    if (count) return { error: "It has takes — move it to another round instead" };
+  }
   const { error } = await supabase.from("trial_cells").delete().eq("id", cellId);
   if (error) return { error: error.message };
+  // The job opened for its first take, still empty: no one's work any more.
+  if (cell.request_id) await supabase.from("content_requests").delete().eq("id", cell.request_id).eq("status", "requested");
   await compact(supabase, cell.trial_id, cell.dimension);
   touch(cell.trial_id);
   await shootListOf(cell.trial_id);
