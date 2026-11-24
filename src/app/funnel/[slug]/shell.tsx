@@ -68,7 +68,7 @@ export function FunnelShell({
       }}
     >
       <div style={{ width: "100%", maxWidth: 480, minHeight: fill, background: "#000", position: "relative" }}>
-        <div style={{ position: "relative", aspectRatio: "1 / 1", background: "#111" }}>
+        <div style={{ position: "relative", aspectRatio: "1 / 1", background: coverSrc ? "#000" : "#111" }}>
           {coverSrc && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={coverSrc} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
@@ -76,8 +76,10 @@ export function FunnelShell({
           <div
             style={{
               position: "absolute",
-              inset: "auto 0 0 0",
-              height: "55%",
+              // A few pixels past the picture's edge: on a phone the two can
+              // round apart and leave a hairline of the picture showing.
+              inset: "auto 0 -3px 0",
+              height: "calc(55% + 3px)",
               background: "linear-gradient(to top, #000 8%, rgba(0,0,0,.75) 45%, transparent)",
             }}
           />
