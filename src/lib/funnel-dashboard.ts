@@ -61,19 +61,52 @@ export async function funnelDashboard(
   const now = Date.now();
   const start = now - days * DAY;
   const prevStart = start - days * DAY;
-  const { data } = await supabase
-    .from("funnel_events")
-    .select("kind, bot, reason, country, referrer, in_app, platform, slug, created_at")
-    .eq("page_id", pageId)
-    .gte("created_at", new Date(prevStart).toISOString())
-    .order("created_at", { ascending: false })
-    .limit(50_000);
   const skip = new Set(ignored.map((c) => c.toUpperCase()));
-  const rows: Ev[] = (data ?? []).filter((e) => !e.country || !skip.has(e.country.toUpperCase()));
+  const startIso = new Date(start).toISOString();
+  // The API hands out at most 1000 rows a request, and a busy day alone has
+  // that many — so the period is read page by page, a few pages at a time.
+  const PAGE = 1000;
+  const pageOf = (n: number) =>
+    supabase
+      .from("funnel_events")
+      .select("kind, bot, reason, country, referrer, in_app, platform, slug, created_at")
+      .eq("page_id", pageId)
+      .gte("created_at", startIso)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(n * PAGE, n * PAGE + PAGE - 1);
+  const all: Ev[] = [];
+  for (let n = 0; n < 200; n += 6) {
+    const got = await Promise.all(Array.from({ length: 6 }, (_, i) => pageOf(n + i)));
+    let done = false;
+    for (const { data, error } of got) {
+      if (error) throw new Error(error.message);
+      all.push(...(data ?? []));
+      if ((data ?? []).length < PAGE) done = true;
+    }
+    if (done) break;
+  }
+  const rows = all.filter((e) => !e.country || !skip.has(e.country.toUpperCase()));
   const t = (e: Ev) => new Date(e.created_at).getTime();
-  const cur = rows.filter((e) => t(e) >= start);
-  const prev = rows.filter((e) => t(e) < start);
+  const cur = rows;
   const people = cur.filter((e) => !e.bot);
+  // The period before only feeds the comparison chips, so it is counted, not read.
+  const prevCount = async (kind: "gate" | "open" | "click") => {
+    let q = supabase
+      .from("funnel_events")
+      .select("id", { count: "exact", head: true })
+      .eq("page_id", pageId)
+      .eq("bot", false)
+      .gte("created_at", new Date(prevStart).toISOString())
+      .lt("created_at", startIso);
+    if (kind === "click") q = q.eq("kind", "click");
+    else if (kind === "open") q = q.eq("kind", "view").eq("reason", "open");
+    else q = q.eq("kind", "view").or("reason.is.null,reason.neq.open");
+    if (skip.size) q = q.or(`country.is.null,country.not.in.(${Array.from(skip).join(",")})`);
+    const { count } = await q;
+    return count ?? 0;
+  };
+  const [pv, pc, po] = await Promise.all([prevCount("gate"), prevCount("click"), prevCount("open")]);
   // A view is page 1 (reason "gate") or, before the gate existed, unmarked;
   // "open" is page 2, which the same fan reaches a moment later.
   const isGateView = (e: Ev) => e.kind === "view" && e.reason !== "open";
@@ -87,8 +120,6 @@ export async function funnelDashboard(
 
   const views = count(cur, "view");
   const clicks = count(cur, "click");
-  const pv = count(prev, "view");
-  const pc = count(prev, "click");
 
   // Daily, oldest first, every day present so the line has no gaps.
   const dayStart = (ms: number) => Math.floor(ms / DAY) * DAY;
@@ -156,7 +187,7 @@ export async function funnelDashboard(
     clicks,
     ctr: ctr(views, clicks, countOpened(cur)),
     inApp: people.filter((e) => isGateView(e) && e.in_app).length,
-    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc, countOpened(prev)), opened: countOpened(prev) },
+    prev: { views: pv, clicks: pc, ctr: ctr(pv, pc, po), opened: po },
     bots: cur.filter((e) => e.bot).length,
     canary: cur.filter((e) => e.kind === "canary").length,
     blockedCountry: cur.filter((e) => e.kind === "blocked" && !e.bot).length,
