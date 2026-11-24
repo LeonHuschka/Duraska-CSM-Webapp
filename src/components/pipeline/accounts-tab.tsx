@@ -19,6 +19,7 @@ import { AccountsActionsBar } from "@/components/pipeline/accounts-actions-bar";
 import { AccountBoard, type AccountTileData } from "@/components/pipeline/account-board";
 import type { Posting } from "@/components/pipeline/posting-calendar";
 import { berlinDay } from "@/lib/berlin-day";
+import { selectAll } from "@/lib/select-all";
 
 /**
  * Accounts tab: the whole operation summarised, then one tile per account
@@ -49,7 +50,9 @@ export async function AccountsTab({
 }) {
   const supabase = await createClient();
 
-  const [{ data: accounts }, { data: metrics }, { data: reels }, { data: slots }] = await Promise.all([
+  // Readings are read page by page: there are thousands, and one request
+  // returns a thousand at most, which cut the history off after a few days.
+  const [{ data: accounts }, metrics, reels, { data: slots }] = await Promise.all([
     supabase
       .from("accounts")
       .select(
@@ -58,18 +61,26 @@ export async function AccountsTab({
       .eq("persona_id", personaId)
       .order("platform")
       .order("handle"),
-    supabase
-      .from("account_metrics")
-      .select("account_id, captured_at, followers, needs_review, source")
-      .eq("persona_id", personaId)
-      .order("captured_at", { ascending: false }),
-    supabase
-      .from("reel_metrics")
-      .select(
-        "account_id, captured_at, position, request_id, asset_id, views, likes, comments, shares, caption, needs_review, shortcode, post_url, posted_at, source, tile_path, cover_path"
-      )
-      .eq("persona_id", personaId)
-      .order("captured_at", { ascending: false }),
+    selectAll((from, to) =>
+      supabase
+        .from("account_metrics")
+        .select("id, account_id, captured_at, followers, needs_review, source")
+        .eq("persona_id", personaId)
+        .order("captured_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    ),
+    selectAll((from, to) =>
+      supabase
+        .from("reel_metrics")
+        .select(
+          "id, account_id, captured_at, position, request_id, asset_id, views, likes, comments, shares, caption, needs_review, shortcode, post_url, posted_at, source, tile_path, cover_path"
+        )
+        .eq("persona_id", personaId)
+        .order("captured_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    ),
     supabase
       .from("schedule_slots")
       .select("account_id, request_id, posted_at, scheduled_for")
