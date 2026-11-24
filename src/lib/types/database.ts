@@ -1546,6 +1546,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      funnel_daily: {
+        Args: { p_page: string; p_since: string; p_skip?: string[] };
+        Returns: { day: string; gate_views: number; opened: number; clicks: number }[];
+      };
       get_user_id_by_email: {
         Args: { email_input: string };
         Returns: string;

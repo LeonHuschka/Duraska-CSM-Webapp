@@ -4,6 +4,10 @@ import { PipelineTiles, SpeedDials } from "@/components/pipeline/pipeline-glass"
 import { ThroughputBars } from "@/components/pipeline/throughput-bars";
 import { TeamTodos } from "@/components/pipeline/team-todos";
 import { stillDone, type RepeatKey } from "@/lib/checklist";
+import { selectAll } from "@/lib/select-all";
+import { managerData, weekOfWork } from "@/lib/manager-dashboard";
+import { ConversionRow, ExtrasRow, TotalsGrid } from "@/components/pipeline/manager-board";
+import { ConversionHistory } from "@/components/pipeline/conversion-history";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -34,7 +38,7 @@ export async function PipelineTab({
         .eq("persona_id", personaId),
       supabase
         .from("content_links")
-        .select("status, posted_at, request_id")
+        .select("id, status, posted_at, shot_at, request_id")
         .eq("persona_id", personaId),
       supabase
         .from("accounts")
@@ -55,21 +59,31 @@ export async function PipelineTab({
   // Assets carry no persona of their own — they belong to one through their
   // request, so they are fetched by the ids we just resolved.
   const requestIds = reqs.map((r) => r.id);
-  const [{ data: assets }, { data: slots }] = await Promise.all([
+  // Both tables are past the 1000 rows one request returns, so they are
+  // read page by page — a cut beyond the first thousand still counts.
+  const [assets, slots] = await Promise.all([
     requestIds.length
-      ? supabase
-          .from("content_assets")
-          .select("id, request_id, stage, uploaded_at")
-          .in("request_id", requestIds)
-          // The vault hides deleted files; a number that counts them cannot
-          // be checked against it.
-          .is("deleted_at", null)
-      : Promise.resolve({ data: [] }),
-    supabase
-      .from("schedule_slots")
-      .select("request_id, asset_id, status, posted_at, scheduled_for")
-      .eq("persona_id", personaId)
-      .eq("status", "posted"),
+      ? selectAll((a, b) =>
+          supabase
+            .from("content_assets")
+            .select("id, request_id, stage, uploaded_at")
+            .in("request_id", requestIds)
+            // The vault hides deleted files; a number that counts them cannot
+            // be checked against it.
+            .is("deleted_at", null)
+            .order("id")
+            .range(a, b)
+        )
+      : Promise.resolve([] as { id: string; request_id: string; stage: string; uploaded_at: string | null }[]),
+    selectAll((a, b) =>
+      supabase
+        .from("schedule_slots")
+        .select("id, request_id, asset_id, status, posted_at, scheduled_for")
+        .eq("persona_id", personaId)
+        .eq("status", "posted")
+        .order("id")
+        .range(a, b)
+    ),
   ]);
 
   // First raw take and first finished cut per request — the two events that
@@ -269,6 +283,45 @@ export async function PipelineTab({
     repeat: t.repeat as RepeatKey,
     done: stillDone(t.done, t.done_at, t.repeat),
   }));
+
+  // ── Those who run the persona get the whole picture ──
+  if (canEdit) {
+    const d = await managerData(supabase, personaId, {
+      reqs,
+      links: links ?? [],
+      firstRaw,
+      firstEdited,
+      firstPosted,
+      editedCuts,
+      postedTimes,
+      perDay: demand.perDay,
+    });
+    const week = weekOfWork(reqs, firstEdited, postedTimes);
+    return (
+      <div className="space-y-5">
+        <ConversionRow conversions={d.conversions} of={d.of} />
+        <TotalsGrid d={d} />
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0 space-y-5">
+            <ConversionHistory flow={d.flow} ofConnected={d.of.found} />
+            <ExtrasRow d={d} />
+            <div className="grid gap-5 xl:grid-cols-2">
+              <ThroughputBars
+                weeks={week}
+                title="This week's work"
+                subtitle="Shot and cut: jobs · posted: reels out"
+                height={120}
+                current="Today"
+                before="day before"
+              />
+              <SpeedDials legs={legs} endToEndDays={endToEndDays} endToEndCount={endToEndHours.length} editable compact />
+            </div>
+          </div>
+          <TeamTodos items={todos} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

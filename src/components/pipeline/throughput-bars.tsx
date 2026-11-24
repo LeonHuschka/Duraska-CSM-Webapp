@@ -34,24 +34,43 @@ const SERIES = [
   },
 ] as const;
 
-export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
+export function ThroughputBars({
+  weeks,
+  title = "Throughput",
+  subtitle = "Reels per week, last 8 weeks",
+  height = 230,
+  current = "This week",
+  before = "week before",
+  completeLast = false,
+}: {
+  weeks: WeekPoint[];
+  title?: string;
+  subtitle?: string;
+  height?: number;
+  /** The label under the last, still running bar. */
+  current?: string;
+  before?: string;
+  /** Compare the last bar itself, not the one before it. */
+  completeLast?: boolean;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...weeks.flatMap((w) => [w.shot, w.edited, w.posted]));
   const top = Math.max(4, Math.ceil(max / 4) * 4);
   // The running week is still filling, so the chip compares the last full
   // week's posts with the week before it.
-  const last = weeks[weeks.length - 2]?.posted ?? 0;
-  const before = weeks[weeks.length - 3]?.posted ?? 0;
-  const change = before > 0 ? (last - before) / before : null;
-  const H = 230;
+  const back = completeLast ? 1 : 2;
+  const last = weeks[weeks.length - back]?.posted ?? 0;
+  const prior = weeks[weeks.length - back - 1]?.posted ?? 0;
+  const change = prior > 0 ? (last - prior) / prior : null;
+  const H = height;
   const h = (v: number) => (v > 0 ? Math.max(10, (v / top) * H) : 0);
 
   return (
     <div className="rounded-3xl border border-border/50 bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold">Throughput</h2>
-          <p className="text-xs text-white/55">Reels per week, last 8 weeks</p>
+          <h2 className="text-base font-semibold">{title}</h2>
+          <p className="text-xs text-white/55">{subtitle}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-3 text-[11px] text-white/70">
@@ -65,7 +84,7 @@ export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
           {change != null && (
             <ChangeChip value={change}>
               Posted {change > 0 ? "+" : ""}
-              {Math.round(change * 100)}% vs week before
+              {Math.round(change * 100)}% vs {before}
             </ChangeChip>
           )}
         </div>
@@ -135,7 +154,7 @@ export function ThroughputBars({ weeks }: { weeks: WeekPoint[] }) {
           <div className="mt-2 flex justify-around gap-2 sm:gap-4">
             {weeks.map((w, i) => (
               <span key={w.label} className={cn("flex-1 text-center text-[10px]", i === weeks.length - 1 ? "font-semibold text-white" : "text-white/45")}>
-                {i === weeks.length - 1 ? "This week" : w.label}
+                {i === weeks.length - 1 ? current : w.label}
               </span>
             ))}
           </div>

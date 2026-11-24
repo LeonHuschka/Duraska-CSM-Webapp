@@ -110,7 +110,7 @@ const TONE = {
 };
 
 /** One dial: the arc fills with how much of its allowed time a leg uses. */
-function Dial({ leg, editable, worst }: { leg: Leg; editable: boolean; worst: boolean }) {
+function Dial({ leg, editable, worst, small = false }: { leg: Leg; editable: boolean; worst: boolean; small?: boolean }) {
   const ratio = leg.days === null ? null : Math.min(leg.days / leg.slowDays, 1);
   const tone = ratio === null ? TONE.none : ratio <= 0.34 ? TONE.good : ratio <= 0.67 ? TONE.mid : TONE.slow;
   const id = `dial-${leg.key}`;
@@ -120,11 +120,11 @@ function Dial({ leg, editable, worst }: { leg: Leg; editable: boolean; worst: bo
   const ky = 50 - 40 * Math.sin(a);
   return (
     <div
-      className={`relative rounded-2xl border px-4 pb-3 pt-4 text-center ${
+      className={`relative rounded-2xl border text-center ${small ? "px-2 pb-2 pt-3" : "px-4 pb-3 pt-4"} ${
         worst ? "border-rose-300/30 bg-rose-400/[0.06]" : "border-white/10 bg-white/[0.05]"
       }`}
     >
-      <div className="relative mx-auto w-full max-w-[170px]">
+      <div className={`relative mx-auto w-full ${small ? "max-w-[110px]" : "max-w-[170px]"}`}>
         <svg viewBox="0 0 100 56" className="w-full overflow-visible">
           <defs>
             <linearGradient id={id} x1="0" x2="1" y1="0" y2="0">
@@ -146,9 +146,9 @@ function Dial({ leg, editable, worst }: { leg: Leg; editable: boolean; worst: bo
           )}
           {ratio !== null && <circle cx={kx} cy={ky} r="4.5" fill="white" style={{ filter: "drop-shadow(0 0 4px rgba(255,255,255,0.8))" }} />}
         </svg>
-        <span className={`absolute inset-x-0 bottom-0 text-2xl font-bold tabular-nums ${tone.text}`}>{fmt(leg.days)}</span>
+        <span className={`absolute inset-x-0 bottom-0 ${small ? "text-lg" : "text-2xl"} font-bold tabular-nums ${tone.text}`}>{fmt(leg.days)}</span>
       </div>
-      <p className="mt-2 text-sm font-medium">{leg.label}</p>
+      <p className={`mt-2 font-medium ${small ? "text-xs" : "text-sm"}`}>{leg.label}</p>
       <p className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-white/45">
         of{" "}
         {editable ? <SlowBoundInput legKey={leg.key as "inspo" | "edit" | "post"} value={leg.slowDays} /> : <span>{leg.slowDays}d</span>}
@@ -163,11 +163,14 @@ export function SpeedDials({
   endToEndDays,
   endToEndCount,
   editable = false,
+  compact = false,
 }: {
   legs: Leg[];
   endToEndDays: number | null;
   endToEndCount: number;
   editable?: boolean;
+  /** Smaller dials and figure, for a column beside other cards. */
+  compact?: boolean;
 }) {
   const measured = legs.filter((l) => l.days !== null);
   const worst =
@@ -175,12 +178,12 @@ export function SpeedDials({
       ? measured.reduce((a, b) => ((b.days ?? 0) / b.slowDays > (a.days ?? 0) / a.slowDays ? b : a))
       : null;
   return (
-    <div className="rounded-3xl border border-border/50 bg-card p-5">
-      <div className="grid gap-4 md:grid-cols-[180px_1fr] md:items-center">
+    <div className={`rounded-3xl border border-border/50 bg-card ${compact ? "p-4" : "p-5"}`}>
+      <div className={`grid gap-4 md:items-center ${compact ? "md:grid-cols-[130px_1fr]" : "md:grid-cols-[180px_1fr]"}`}>
         <div>
           <h2 className="text-base font-semibold">Turnaround</h2>
           <p className="text-xs text-white/55">Median, last 30 days</p>
-          <p className="mt-4 text-[40px] font-bold leading-none tabular-nums">{fmt(endToEndDays)}</p>
+          <p className={`font-bold leading-none tabular-nums ${compact ? "mt-3 text-[30px]" : "mt-4 text-[40px]"}`}>{fmt(endToEndDays)}</p>
           <p className="mt-1 text-xs text-white/55">
             link to posted{endToEndDays !== null && ` · ${endToEndCount} reels`}
           </p>
@@ -190,9 +193,9 @@ export function SpeedDials({
             </p>
           )}
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={`grid sm:grid-cols-3 ${compact ? "gap-2" : "gap-3"}`}>
           {legs.map((l) => (
-            <Dial key={l.key} leg={l} editable={editable} worst={worst?.key === l.key} />
+            <Dial key={l.key} leg={l} editable={editable} worst={worst?.key === l.key} small={compact} />
           ))}
         </div>
       </div>
