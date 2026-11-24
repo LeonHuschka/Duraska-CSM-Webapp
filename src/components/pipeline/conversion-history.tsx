@@ -13,7 +13,6 @@ const SERIES: { key: Key; label: string; color: string; dot: string }[] = [
   { key: "fan", label: "OF visit → fan", color: "#f472b6", dot: "bg-pink-400" },
 ];
 
-const DAY = 86_400_000;
 
 /** What each rate divides, day by day. */
 const PARTS: Record<Key, (d: FlowDay) => [number | null, number | null]> = {
