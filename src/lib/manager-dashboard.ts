@@ -4,7 +4,7 @@ import type { Database } from "@/lib/types/database";
 import { computeAnalytics } from "@/lib/account-analytics";
 import { selectAll } from "@/lib/select-all";
 import { berlinDay } from "@/lib/berlin-day";
-import { ofDaily, ofPeriod, omConfigured, onlyFansAccount, type OfDay } from "@/lib/onlymonster";
+import { ofDaily, ofPeriod, omConfigured, onlyFansAccount } from "@/lib/onlymonster";
 
 /**
  * What a manager reads off the Pipeline tab, beyond the pipeline itself:
@@ -35,7 +35,6 @@ export type FlowDay = {
   clicks: number;
   /** New OnlyFans fans; null when OnlyFans is not connected or the day was not read. */
   newFans: number | null;
-  revenue: number | null;
 };
 
 export type ConversionKey = "visit" | "click" | "fan";
@@ -207,12 +206,17 @@ export async function managerData(
   const connected = omConfigured();
   const ofUser = page?.destination_url?.match(/onlyfans\.com\/([A-Za-z0-9_.-]+)/i)?.[1] ?? null;
   const ofAcc = connected ? await onlyFansAccount(ofUser) : null;
-  const [ofDays, ofYear] = ofAcc
+  // Five calls at most: the daily list, and three periods for money and spenders.
+  const ofId = ofAcc?.platform_account_id;
+  const [ofList, ofYear, ofWeek, ofPrevWeek] = ofId
     ? await Promise.all([
-        ofDaily(ofAcc.platform_account_id, HISTORY_DAYS),
-        ofPeriod(ofAcc.platform_account_id, today - 364 * DAY, today + DAY - 1),
+        ofDaily(ofId, HISTORY_DAYS),
+        ofPeriod(ofId, today - 364 * DAY, today + DAY - 1),
+        ofPeriod(ofId, today - 6 * DAY, today + DAY - 1),
+        ofPeriod(ofId, today - 13 * DAY, today - 6 * DAY - 1),
       ])
-    : [[] as OfDay[], null];
+    : [null, null, null, null];
+  const ofDays = ofList ?? [];
   const ofByDay = new Map(ofDays.map((d) => [d.day, d]));
 
   const flow: FlowDay[] = Array.from({ length: HISTORY_DAYS }, (_, i) => {
@@ -226,7 +230,6 @@ export async function managerData(
       opened: f?.opened ?? 0,
       clicks: f?.clicks ?? 0,
       newFans: o ? o.newFans : null,
-      revenue: o ? o.revenue : null,
     };
   });
 
@@ -303,12 +306,9 @@ export async function managerData(
   // ── The smaller figures ──
   const wkFrom = today - 6 * DAY;
   const prevFrom = today - 13 * DAY;
-  const revenue7 = sumOver(flow, wkFrom, today + DAY, (d) => d.revenue);
-  const revenuePrev7 = sumOver(flow, prevFrom, wkFrom, (d) => d.revenue);
-  const fans7 = sumOver(flow, wkFrom, today + DAY, (d) => d.newFans);
-  const newSpenders7 = ofDays.length
-    ? ofDays.filter((d) => d.day >= wkFrom).reduce((a, d) => a + d.newSpenders, 0)
-    : null;
+  const revenue7 = ofWeek?.revenue ?? null;
+  const revenuePrev7 = ofPrevWeek?.revenue ?? null;
+  const newSpenders7 = ofWeek?.newSpenders ?? null;
   const clicks7 = sumOver(flow, wkFrom, today + DAY, (d) => d.clicks) ?? 0;
   const views7 = sumOver(flow, wkFrom, today + DAY, (d) => d.igViews);
   const viewsPrev7 = sumOver(flow, prevFrom, wkFrom, (d) => d.igViews);
@@ -342,7 +342,7 @@ export async function managerData(
       revenue7,
       revenuePrev7,
       newSpenders7,
-      fanToSpender7: newSpenders7 != null && fans7 ? newSpenders7 / fans7 : null,
+      fanToSpender7: ofWeek && ofWeek.newFans > 0 ? ofWeek.newSpenders / ofWeek.newFans : null,
       viewsPerPost7: views7 != null && posts7 > 0 ? views7 / posts7 : null,
       viewsPerPostPrev7: viewsPrev7 != null && postsPrev7 > 0 ? viewsPrev7 / postsPrev7 : null,
       revenuePerClick7: revenue7 != null && clicks7 > 0 ? revenue7 / clicks7 : null,
