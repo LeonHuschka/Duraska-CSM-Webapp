@@ -388,6 +388,14 @@ export async function swapIntoShootList(
       .maybeSingle();
   let { data: cfg } = await read();
   if (!cfg?.chat_id || !cfg.shoot_thread_id) return { ok: false, text: "There is no SHOOTING topic yet." };
+  // The number is read off the list she has in front of her — the one in
+  // the topic now, even when that is yesterday's — so it is turned into
+  // the reel it names before a new list can renumber everything.
+  let dropId: string | null = null;
+  if (drop != null) {
+    dropId = (cfg.shoot_list_links ?? [])[drop - 1] ?? null;
+    if (!dropId) return { ok: false, text: `The list has no #${drop}.` };
+  }
   // Before the morning's list is out, it comes first — the swap is into today's.
   if (cfg.shoot_list_day !== berlinDay(new Date()) || !cfg.shoot_list_message_id) {
     await postShootList(db, personaId);
@@ -415,10 +423,10 @@ export async function swapIntoShootList(
     return !!r && r.status === "open";
   };
   let out: string | null = null;
-  if (drop != null) {
-    out = ids[drop - 1] ?? null;
-    if (!out) return { ok: false, text: `Today's list has no #${drop}.` };
-    if (!isOpen(out)) return { ok: false, text: `#${drop} is already shot — pick an open one.` };
+  if (dropId != null) {
+    if (!ids.includes(dropId)) return { ok: false, text: `#${drop} is no longer on today's list — nothing changed.` };
+    if (!isOpen(dropId)) return { ok: false, text: `#${drop} is already shot — pick an open one.` };
+    out = dropId;
   } else {
     out = [...ids].reverse().find(isOpen) ?? null;
   }
@@ -429,6 +437,6 @@ export async function swapIntoShootList(
   const gone = out ? byId.get(out) : null;
   return {
     ok: true,
-    text: `✅ On today's list as #1${gone ? ` — Inspo from ${dm(gone.posted_at)} (was #${ids.indexOf(out!) + 1}) is off it` : ""}.`,
+    text: `✅ On today's list as #1${gone ? ` — Inspo from ${dm(gone.posted_at)} (was #${drop ?? ids.indexOf(out!) + 1}) is off it` : ""}.`,
   };
 }
