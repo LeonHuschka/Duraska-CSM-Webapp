@@ -31,9 +31,9 @@ const rel = (now: number | null, prev: number | null) => (now != null && prev !=
 const sign = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}%`;
 
 const CONV: Record<Conversion["key"], { icon: LucideIcon; tone: Tone }> = {
-  visit: { icon: Eye, tone: "blue" },
-  click: { icon: MousePointerClick, tone: "green" },
-  fan: { icon: Heart, tone: "rose" },
+  visit: { icon: Eye, tone: "rose" },
+  click: { icon: MousePointerClick, tone: "amber" },
+  fan: { icon: Heart, tone: "sky" },
 };
 
 /** The chain from a reel's views to a fan, one card per step, last 7 days. */

@@ -7,10 +7,11 @@ import type { FlowDay } from "@/lib/manager-dashboard";
 
 type Key = "visit" | "click" | "fan";
 
-const SERIES: { key: Key; label: string; color: string; dot: string }[] = [
-  { key: "visit", label: "Views → landing page", color: "#60a5fa", dot: "bg-blue-400" },
-  { key: "click", label: "Landing page → click", color: "#34d399", dot: "bg-emerald-400" },
-  { key: "fan", label: "OF visit → fan", color: "#f472b6", dot: "bg-pink-400" },
+/** Each step in the colour of where it happens: Instagram, the link page, OnlyFans. */
+const SERIES: { key: Key; label: string; color: string; logo: string }[] = [
+  { key: "visit", label: "Views → landing page", color: "#f43f5e", logo: "/brand/instagram.svg" },
+  { key: "click", label: "Landing page → click", color: "#f59e0b", logo: "/brand/linkme.png" },
+  { key: "fan", label: "OF visit → fan", color: "#00aff0", logo: "/brand/onlyfans.svg" },
 ];
 
 
@@ -112,7 +113,8 @@ export function ConversionHistory({ flow, ofConnected }: { flow: FlowDay[]; ofCo
           <Chip on={only === null} onClick={() => setOnly(null)}>All</Chip>
           {SERIES.map((s) => (
             <Chip key={s.key} on={only === s.key} onClick={() => setOnly(only === s.key ? null : s.key)}>
-              <span className={cn("h-2 w-2 rounded-full", s.dot)} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={s.logo} alt="" className="h-3.5 w-3.5 rounded-[4px]" />
               {s.label}
             </Chip>
           ))}
@@ -186,7 +188,7 @@ export function ConversionHistory({ flow, ofConnected }: { flow: FlowDay[]; ofCo
               const v = lines[s.key][hover];
               return (
                 <div key={s.key} className="flex items-center gap-1.5 tabular-nums">
-                  <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.color }} />
                   <span className="text-white/60">{s.label}</span>
                   <span className="ml-auto pl-3 font-semibold">{v == null ? "—" : pct(v)}</span>
                 </div>
