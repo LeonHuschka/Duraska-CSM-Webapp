@@ -42,7 +42,7 @@ export const maxDuration = 60;
 // Only look at messages from this date onward, per the brief.
 const IGNORE_BEFORE = new Date("2026-05-30T00:00:00Z");
 
-type TgUser = { id: number; username?: string; first_name?: string };
+type TgUser = { id: number; username?: string; first_name?: string; is_bot?: boolean };
 type TgChat = { id: number; title?: string; type: string };
 type TgPhoto = { file_id: string; file_size?: number; width: number };
 type TgMessage = {
@@ -57,7 +57,12 @@ type TgMessage = {
   caption_entities?: TgEntity[];
   photo?: TgPhoto[];
   /** In a forum topic: the message that opened it, which carries its name. */
-  reply_to_message?: { message_id?: number; forum_topic_created?: { name?: string } };
+  reply_to_message?: {
+    message_id?: number;
+    from?: TgUser;
+    entities?: TgEntity[];
+    forum_topic_created?: { name?: string };
+  };
   forum_topic_created?: { name?: string };
 };
 type TgReactionUpdate = {
@@ -107,6 +112,10 @@ export async function POST(req: Request) {
   );
 
   try {
+    // An answer to the bot's note template is the note, not new content.
+    if (msg && (await handleNoteReply(msg))) {
+      return NextResponse.json({ ok: true });
+    }
     // A slash command is not content and must never be filed as a link.
     if (msg && (await handleCommand(req, msg))) {
       return NextResponse.json({ ok: true });
@@ -195,37 +204,118 @@ async function handleCommand(req: Request, msg: TgMessage): Promise<boolean> {
 /**
  * `/note new text` as a reply to an inspo — the bot's video or the original
  * link message — replaces its note, in the caption under the video and on
- * the link row. A bare `/note` clears it. Only as a
- * command, never any reply: "Noted here sir" must not become the note.
+ * the link row. `/note -` clears it. Only as a command, never any reply:
+ * "Noted here sir" must not become the note.
+ *
+ * A bare `/note` asks for one instead: the bot answers the inspo with the
+ * template (or the note there already) in a block that copies on a tap, and
+ * opens the reply field on it for whoever asked. Whatever comes back as an
+ * answer to that message is the note; the template and the answer are
+ * tidied away. Telegram gives a bot no way to put text into someone's
+ * input field, so a tap to copy is the nearest there is.
+ *
  * The command message is deleted again; a reply to anything else is left
  * standing, so whoever sent it sees nothing happened.
  */
+const NOTE_TEMPLATE = ["• SCENE: ", "• OUTFIT: ", "• CAMERA: ", "• HOOK: ", "• REWARD: "].join("\n");
+
+type NoteLink = { id: string; url: string; video_message_id: number | null; note: string | null };
+
 async function handleNote(msg: TgMessage, text: string): Promise<boolean> {
   const target = msg.reply_to_message?.message_id;
   if (!target) return true;
   const supabase = createAdminClient();
+  const fromTemplate = templateLinkId(msg);
+  const { data: link } = fromTemplate
+    ? await supabase.from("content_links").select("id, url, video_message_id, note").eq("id", fromTemplate).maybeSingle()
+    : await supabase
+        .from("content_links")
+        .select("id, url, video_message_id, note")
+        .eq("chat_id", msg.chat.id)
+        .or(`message_id.eq.${target},video_message_id.eq.${target}`)
+        .limit(1)
+        .maybeSingle();
+  if (!link) return true;
+  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+
+  const body = (msg.text ?? text).replace(/^\/note(@\w+)?/i, "").trim();
+  if (!body && !fromTemplate) {
+    await askForNote(msg, link, target);
+    return true;
+  }
+  const note = body === "-" ? null : tidyNote(entitiesToHtml(msg.text ?? text, msg.entities, ["bot_command"])) || null;
+  await saveNote(msg.chat.id, link, note);
+  if (fromTemplate) await deleteMessage({ chat_id: msg.chat.id, message_id: target });
+  return true;
+}
+
+/** A plain answer to the template: that text is the inspo's note. */
+async function handleNoteReply(msg: TgMessage): Promise<boolean> {
+  const text = msg.text?.trim();
+  if (!text || text.startsWith("/")) return false;
+  const id = templateLinkId(msg);
+  if (!id) return false;
+  const supabase = createAdminClient();
   const { data: link } = await supabase
     .from("content_links")
-    .select("id, url, video_message_id")
-    .eq("chat_id", msg.chat.id)
-    .or(`message_id.eq.${target},video_message_id.eq.${target}`)
-    .limit(1)
+    .select("id, url, video_message_id, note")
+    .eq("id", id)
     .maybeSingle();
-  if (!link) return true;
+  if (!link) return false;
+  await saveNote(msg.chat.id, link, tidyNote(entitiesToHtml(msg.text ?? "", msg.entities)) || null);
+  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
+  const template = msg.reply_to_message?.message_id;
+  if (template) await deleteMessage({ chat_id: msg.chat.id, message_id: template });
+  return true;
+}
 
-  // Her formatting kept; the command itself dropped.
-  const note = tidyNote(entitiesToHtml(msg.text ?? text, msg.entities, ["bot_command"])) || null;
+/** The inspo a template is for: the bot links "this inspo" to it with #note-<id>. */
+function templateLinkId(msg: TgMessage): string | null {
+  const r = msg.reply_to_message;
+  if (!r?.from?.is_bot) return null;
+  for (const e of r.entities ?? []) {
+    const m = e.type === "text_link" ? /#note-([0-9a-f-]{36})$/.exec(e.url ?? "") : null;
+    if (m) return m[1];
+  }
+  return null;
+}
+
+async function askForNote(msg: TgMessage, link: NoteLink, inspoMessageId: number) {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const plain = (link.note ?? "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .trim();
+  const who = msg.from
+    ? `<a href="tg://user?id=${msg.from.id}">${esc(msg.from.first_name ?? msg.from.username ?? "you")}</a>, `
+    : "";
+  const res = await sendMessage({
+    chat_id: msg.chat.id,
+    message_thread_id: msg.message_thread_id,
+    reply_to_message_id: inspoMessageId,
+    disable_notification: true,
+    text:
+      `${who}note for <a href="${esc(link.url)}#note-${link.id}">this inspo</a> — tap the block to copy it, ` +
+      `fill it in and send it as the answer to this message:\n<pre>${esc(plain || NOTE_TEMPLATE)}</pre>`,
+    forceReply: "Paste the template and fill it in",
+  });
+  if (!res.ok) console.warn("[telegram] /note template not sent:", res.error);
+}
+
+async function saveNote(chatId: number, link: NoteLink, note: string | null) {
+  const supabase = createAdminClient();
   await supabase.from("content_links").update({ note }).eq("id", link.id);
   if (link.video_message_id != null) {
     const res = await editMessageCaption({
-      chat_id: msg.chat.id,
+      chat_id: chatId,
       message_id: Number(link.video_message_id),
       caption: caption(link.url, note),
     });
     if (!res.ok) console.warn("[telegram] /note caption not edited:", res.error);
   }
-  await deleteMessage({ chat_id: msg.chat.id, message_id: msg.message_id });
-  return true;
 }
 
 /**

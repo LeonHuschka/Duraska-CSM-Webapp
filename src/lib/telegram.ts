@@ -195,6 +195,11 @@ export async function sendMessage(opts: {
   buttons?: { text: string; url: string }[];
   /** Several rows of link buttons; wins over `buttons`. */
   keyboard?: LinkButton[][];
+  /**
+   * Open the reply field on this message for the people it mentions, with
+   * this hint in it. Telegram allows no buttons beside it.
+   */
+  forceReply?: string;
 }) {
   const rows = opts.keyboard ?? (opts.buttons?.length ? [opts.buttons] : null);
   return call<{ message_id: number }>("sendMessage", {
@@ -207,7 +212,11 @@ export async function sendMessage(opts: {
     ...(opts.reply_to_message_id
       ? { reply_parameters: { message_id: opts.reply_to_message_id, allow_sending_without_reply: true } }
       : {}),
-    ...(rows?.length ? { reply_markup: { inline_keyboard: rows } } : {}),
+    ...(opts.forceReply != null
+      ? { reply_markup: { force_reply: true, selective: true, input_field_placeholder: opts.forceReply.slice(0, 64) } }
+      : rows?.length
+        ? { reply_markup: { inline_keyboard: rows } }
+        : {}),
   });
 }
 
