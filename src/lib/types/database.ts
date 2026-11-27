@@ -1054,6 +1054,7 @@ export type Database = {
           button_image_path: string | null;
           telegram_url: string | null;
           telegram_label: string;
+          telegram_button: boolean;
           open_cover_path: string | null;
           created_at: string;
           updated_at: string;
@@ -1084,6 +1085,7 @@ export type Database = {
           button_image_path?: string | null;
           telegram_url?: string | null;
           telegram_label?: string;
+          telegram_button?: boolean;
           open_cover_path?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -1114,6 +1116,7 @@ export type Database = {
           button_image_path?: string | null;
           telegram_url?: string | null;
           telegram_label?: string;
+          telegram_button?: boolean;
           open_cover_path?: string | null;
           created_at?: string;
           updated_at?: string;

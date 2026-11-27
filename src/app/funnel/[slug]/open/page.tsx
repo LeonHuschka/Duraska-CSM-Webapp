@@ -97,7 +97,7 @@ export default async function OpenPage({
         ageGate={page.age_gate}
         breakout={page.breakout}
         openUrl={`https://${host}/${page.link}/open${k ? `?k=${encodeURIComponent(k)}` : ""}`}
-        telegramUrl={page.telegram_url}
+        telegramUrl={page.telegram_button !== false ? page.telegram_url : null}
         telegramLabel={page.telegram_label}
       />
     </FunnelShell>

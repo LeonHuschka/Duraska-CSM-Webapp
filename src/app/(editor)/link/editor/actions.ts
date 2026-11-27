@@ -39,6 +39,7 @@ export type FunnelForm = {
   show_followers: boolean;
   telegram_url: string;
   telegram_label: string;
+  telegram_button: boolean;
 };
 
 export async function saveFunnelPage(id: string | null, f: FunnelForm) {
@@ -86,6 +87,7 @@ export async function saveFunnelPage(id: string | null, f: FunnelForm) {
     instagram_url: instagram || null,
     telegram_url: telegram || null,
     telegram_label: f.telegram_label.trim().slice(0, 60) || "dm me a 🫦",
+    telegram_button: f.telegram_button,
     show_followers: f.show_followers,
     updated_at: new Date().toISOString(),
   };

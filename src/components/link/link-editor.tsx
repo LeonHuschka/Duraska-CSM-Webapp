@@ -87,6 +87,7 @@ export function LinkEditor({
     show_followers: page?.show_followers ?? true,
     telegram_url: page?.telegram_url ?? "",
     telegram_label: page?.telegram_label ?? "dm me a 🫦",
+    telegram_button: page?.telegram_button ?? true,
   });
   const [saved, setSaved] = useState(f);
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
@@ -327,6 +328,9 @@ export function LinkEditor({
               <Field label="Telegram button text" value={f.telegram_label} onChange={(v) => set("telegram_label", v)} hint="The button over the card." />
             </div>
             <div className="mt-3">
+              <Toggle label="Telegram button over the card (the shortcut in the head stays)" checked={f.telegram_button} onChange={(v) => set("telegram_button", v)} />
+            </div>
+            <div className="mt-3">
               <Field
                 label="Destination"
                 value={f.destination_url}
@@ -439,7 +443,7 @@ export function LinkEditor({
                     ageGate={f.age_gate}
                     breakout={f.breakout}
                     openUrl={link ? `${link}/open` : "#"}
-                    telegramUrl={f.telegram_url ? "#" : null}
+                    telegramUrl={f.telegram_url && f.telegram_button ? "#" : null}
                     telegramLabel={f.telegram_label}
                     preview
                   />
