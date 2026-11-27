@@ -3,6 +3,7 @@
   "installCommand": "bun install",
   "buildCommand": "bun run build",
   "outputDirectory": ".next",
+  "regions": ["dub1"],
   "crons": [
     {
       "path": "/api/cron/content-check",

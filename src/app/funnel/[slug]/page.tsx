@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { waitUntil } from "@vercel/functions";
 import { notFound } from "next/navigation";
 import { findPage, logEvent, readVisitor } from "@/lib/funnel";
 import { pictureUrl } from "@/lib/funnel-pictures";
@@ -28,10 +29,9 @@ export default async function GatePage({ params }: { params: Promise<{ slug: str
   const lang = gateLang(h.get("accept-language"));
   const base = `/api/funnel/${page.id}`;
 
-  const [followers] = await Promise.all([
-    Promise.resolve(null),
-    logEvent(page, visitor, "view", "gate"),
-  ]);
+  // Counted after the answer, never before it: the page waits for nothing.
+  waitUntil(logEvent(page, visitor, "view", "gate"));
+  const followers = null;
 
   return (
     <FunnelShell

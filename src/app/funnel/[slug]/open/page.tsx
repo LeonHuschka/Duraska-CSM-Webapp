@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { waitUntil } from "@vercel/functions";
 import { notFound } from "next/navigation";
 import { checkKey, checkPass, findPage, logEvent, readCookie, readVisitor } from "@/lib/funnel";
 import { pictureUrl } from "@/lib/funnel-pictures";
@@ -41,10 +42,9 @@ export default async function OpenPage({
   const lang = gateLang(h.get("accept-language"));
   const admitted = !visitor.bot && (checkKey(req, k) || checkPass(req, page.id, readCookie(h.get("cookie"), "fp")));
 
-  const [followers] = await Promise.all([
-    Promise.resolve(null),
-    logEvent(page, visitor, "view", admitted ? "open" : "open-refused"),
-  ]);
+  // Counted after the answer, never before it: the page waits for nothing.
+  waitUntil(logEvent(page, visitor, "view", admitted ? "open" : "open-refused"));
+  const followers = null;
 
   if (!admitted) {
     return (

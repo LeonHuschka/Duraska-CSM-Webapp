@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   blockedByCountry,
@@ -51,7 +52,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     case "key": {
       // Nothing for a crawler — not even an empty answer worth reading.
       if (v.bot || (await tripped(page, v))) {
-        await logEvent(live, v, "blocked", `key: ${v.bot ?? "tripped the canary"}`);
+        waitUntil(logEvent(live, v, "blocked", `key: ${v.bot ?? "tripped the canary"}`));
         return new NextResponse(null, { status: 204, headers: noStore });
       }
       return NextResponse.json(
@@ -96,25 +97,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     case "go": {
       if (!page.destination_url) return new NextResponse("not set up yet", { status: 404 });
       if (v.bot) {
-        await logEvent(live, v, "blocked", v.bot);
+        waitUntil(logEvent(live, v, "blocked", v.bot));
         // The same page, so a bot following the link learns nothing.
         return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (!checkTicket(req, new URL(req.url).searchParams.get("t"))) {
         // A redirect address fetched from somewhere else, later, by
         // someone else. Nothing to see.
-        await logEvent(live, v, "blocked", "no ticket for this address");
+        waitUntil(logEvent(live, v, "blocked", "no ticket for this address"));
         return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (await tripped(page, v)) {
-        await logEvent(live, v, "blocked", "tripped the canary");
+        waitUntil(logEvent(live, v, "blocked", "tripped the canary"));
         return NextResponse.redirect(new URL(`/${link}`, req.url), 302);
       }
       if (blockedByCountry(page, v)) {
-        await logEvent(live, v, "blocked", `country ${v.country}`);
+        waitUntil(logEvent(live, v, "blocked", `country ${v.country}`));
         return new NextResponse("not available in your region", { status: 451 });
       }
-      await logEvent(live, v, "click");
+      waitUntil(logEvent(live, v, "click"));
       return NextResponse.redirect(page.destination_url, {
         status: 302,
         headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
@@ -122,7 +123,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
 
     case "c": {
-      await logEvent(live, v, "canary", "followed the hidden link");
+      waitUntil(logEvent(live, v, "canary", "followed the hidden link"));
       return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } });
     }
 
